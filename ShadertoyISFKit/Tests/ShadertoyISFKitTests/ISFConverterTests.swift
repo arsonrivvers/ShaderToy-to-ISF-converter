@@ -25,6 +25,16 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(warnings.isEmpty)
     }
 
+    func test_convert_tanhShader_includesGuardedPolyfill() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage( out vec4 O, vec2 I ){ O = tanh(vec4(1.0)); }",
+            name: "Tanh Test")
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.fileText.contains("#if __VERSION__ < 130"))
+        XCTAssertTrue(doc.fileText.contains("float tanh(float x)"))
+        XCTAssertTrue(warnings.contains { $0.message.contains("tanh") })
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText
