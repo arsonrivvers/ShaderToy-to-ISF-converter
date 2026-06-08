@@ -56,10 +56,16 @@ struct ContentView: View {
 
     private func saveOutput() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "converted.fs"
+        panel.title = "Save ISF Shader"
+        panel.nameFieldStringValue = model.suggestedFileName
+        panel.canCreateDirectories = true
         if let fsType = UTType(filenameExtension: "fs") { panel.allowedContentTypes = [fsType] }
-        if panel.runModal() == .OK, let url = panel.url {
-            try? model.isfOutput.write(to: url, atomically: true, encoding: .utf8)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.isfOutput.write(to: url, atomically: true, encoding: .utf8)
+            model.statusMessage = "Saved to \(url.path)"
+        } catch {
+            model.statusMessage = "Save failed: \(error.localizedDescription)"
         }
     }
 }
