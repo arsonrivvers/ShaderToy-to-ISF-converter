@@ -35,6 +35,14 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(warnings.contains { $0.message.contains("tanh") })
     }
 
+    func test_convert_xorGolfShader_warnsUninitializedOutput() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage( out vec4 O, vec2 I ){ for(O*=I.x; I.x<9.;) O += vec4(1.0); O = O; }",
+            name: "Golf")
+        let (_, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(warnings.contains { $0.message.contains("initial") })
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText
