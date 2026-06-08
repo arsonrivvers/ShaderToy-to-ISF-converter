@@ -10,7 +10,10 @@ targets:
   ShadertoyISF:
     type: application
     platform: macOS
-    sources: [ShadertoyISF]
+    sources:
+      - path: ShadertoyISF
+      - path: ShadertoyISF/Resources
+        buildPhase: resources
     dependencies:
       - package: ShadertoyISFKit
     settings:

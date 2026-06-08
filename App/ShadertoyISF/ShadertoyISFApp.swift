@@ -27,6 +27,63 @@ struct ShadertoyISFApp: App {
                 exit(0)
             }
         }
+
+        // Headless debug affordance: `SHADERTOY_DEBUG_PREVIEW=1` instantiates an
+        // ISFPreviewController, loads a known-good ISF and a known-bad ISF (tanh without
+        // polyfill), prints the compile results from the WKWebView harness, and exits.
+        // Used to verify the preview pipeline in the real entitled app — WebGL only works
+        // in the real binary, not in bare xctest.
+        if ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_PREVIEW"] == "1" {
+            Task { @MainActor in
+                // Build a known-good ISF using the converter
+                let goodShader = ShaderFactory.singlePass(
+                    imageCode: "void mainImage(out vec4 O, vec2 I){ O = vec4(I/iResolution.xy, 0.0, 1.0); }",
+                    name: "DebugGood"
+                )
+                let (goodDoc, _) = ISFConverter.convert(goodShader)
+                let goodISF = goodDoc.fileText
+
+                // Known-bad ISF: raw ISF with tanh and NO polyfill so GLSL ES will reject it
+                let badISF = """
+/*{
+  "ISFVSN": "2",
+  "DESCRIPTION": "debug bad shader",
+  "INPUTS": []
+}*/
+void main() {
+    vec4 v = tanh(vec4(0.5));
+    gl_FragColor = v;
+}
+"""
+
+                let controller = ISFPreviewController()
+
+                // Wait for harness to become ready (poll up to 5s)
+                var waited = 0
+                while waited < 50 {
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    waited += 1
+                    // Once ready, the controller will have processed the "ready" message
+                    // We detect readiness via a brief extra sleep after first check
+                    if waited == 5 { break }
+                }
+                // Give the harness a generous startup window
+                try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5s
+
+                print("=== DEBUG PREVIEW: loading good ISF ===")
+                controller.load(isf: goodISF)
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s to compile + report
+                print("GOOD ISF — compileValid=\(controller.compileValid) compileError=\(controller.compileError ?? "nil") inputs=\(controller.inputs.count)")
+
+                print("=== DEBUG PREVIEW: loading bad ISF (tanh, no polyfill) ===")
+                controller.load(isf: badISF)
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2s to compile + report
+                print("BAD ISF  — compileValid=\(controller.compileValid) compileError=\(controller.compileError ?? "nil")")
+
+                print("=== DEBUG PREVIEW END ===")
+                exit(0)
+            }
+        }
     }
 
     var body: some Scene {
