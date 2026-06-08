@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+  #c { width: 100vw; height: 100vh; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="isf.bundle.js"></script>
+<script>
+(function () {
+  var canvas = document.getElementById('c');
+  var gl = canvas.getContext('webgl', { preserveDrawingBuffer: false, antialias: true });
+  var renderer = null;
+  var raf = null;
+  var capturedGLError = null;
+
+  // ISF.js throws `new Error({message: glLog})` (which flattens to "[object Object]") but logs
+  // the real GL compile log via console.log('Error Compiling Shader ', log) first. Capture it.
+  (function hookConsole() {
+    var orig = console.log;
+    console.log = function () {
+      try {
+        var args = [].slice.call(arguments);
+        var joined = args.map(function (a) { return typeof a === 'string' ? a : ''; }).join(' ');
+        if (joined.indexOf('Error Compiling Shader') !== -1 || joined.indexOf('Error in program linking') !== -1) {
+          var logText = '';
+          for (var i = 0; i < args.length; i++) {
+            if (typeof args[i] === 'string' && args[i].indexOf('ERROR') !== -1) logText = args[i];
+          }
+          capturedGLError = logText || joined;
+        }
+      } catch (e) {}
+      orig.apply(console, arguments);
+    };
+  })();
+
+  function cleanError(s) {
+    // Strip non-printable chars (GL logs end with a NUL); keep printable ASCII + newline.
+    return String(s).replace(/[^\x20-\x7e\n]/g, '').trim();
+  }
+
+  function parseErrorLine(glLog) {
+    if (!glLog) return null;
+    var m = /ERROR:\s*\d+:(\d+):/.exec(glLog);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    var h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  }
+
+  function inputsFrom(r) {
+    try {
+      var ins = (r && r.model && r.model.inputs) ? r.model.inputs : [];
+      return ins.map(function (i) {
+        return { NAME: i.NAME, TYPE: i.TYPE, DEFAULT: i.DEFAULT, MIN: i.MIN, MAX: i.MAX,
+                 LABELS: i.LABELS, VALUES: i.VALUES };
+      });
+    } catch (e) { return []; }
+  }
+
+  function post(o) {
+    window.__lastResult = o;
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.isf) {
+      window.webkit.messageHandlers.isf.postMessage(o);
+    } else {
+      console.info('ISF_POST ' + JSON.stringify(o));
+    }
+  }
+
+  function startLoop() {
+    if (raf) return;
+    var tick = function () {
+      try { resize(); renderer.draw(canvas); }
+      catch (e) { post({ type: 'runtime', error: cleanError(e && e.message || e) }); stopLoop(); return; }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+  }
+  function stopLoop() { if (raf) { cancelAnimationFrame(raf); raf = null; } }
+
+  // Public API (called from Swift via evaluateJavaScript, or from tests)
+  window.loadISF = function (src) {
+    resize();
+    if (!gl) { post({ type: 'compile', valid: false, error: 'WebGL not available' }); return; }
+    if (!renderer) {
+      try { renderer = new ISFRenderer(gl); }
+      catch (e) { post({ type: 'compile', valid: false, error: cleanError(e && e.message || e) }); return; }
+    }
+    capturedGLError = null;
+    var threw = null;
+    try { renderer.loadSource(src); }
+    catch (e) { threw = e; }   // ISF.js LineMapper crashes after logging the real GL error
+    var ok = renderer.valid !== false && !renderer.error && !threw && !capturedGLError;
+    var result = { type: 'compile', valid: ok, inputs: inputsFrom(renderer) };
+    if (ok) {
+      result.error = null; result.errorLine = null;
+    } else {
+      var msg = capturedGLError
+        || (renderer.error && renderer.error.message !== '[object Object]' ? renderer.error.message : null)
+        || (threw && threw.message) || 'unknown compile error';
+      result.error = cleanError(msg) || 'compile error (no detail available)';
+      result.errorLine = parseErrorLine(capturedGLError);
+    }
+    post(result);
+    if (ok) startLoop(); else stopLoop();
+  };
+
+  window.setInput = function (name, value) {
+    try { if (renderer) renderer.setValue(name, value); } catch (e) {}
+  };
+
+  window.addEventListener('resize', resize);
+  post({ type: 'ready' });
+})();
+</script>
+</body>
+</html>
