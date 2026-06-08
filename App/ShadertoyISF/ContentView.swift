@@ -19,6 +19,20 @@ struct ContentView: View {
                 Text(model.statusMessage).font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            DisclosureGroup("Or paste shader code (Image tab) — works without fetching") {
+                VStack(spacing: 6) {
+                    TextEditor(text: $model.pastedCode)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 120)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary))
+                    HStack {
+                        Spacer()
+                        Button("Convert pasted code") { Task { await model.convertPastedCode() } }
+                            .disabled(model.pastedCode.isEmpty)
+                    }
+                }
+                .padding(.top, 4)
+            }
             HSplitView {
                 ImportedCodeView(code: model.importedCode)
                 ISFOutputView(text: $model.isfOutput)

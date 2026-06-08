@@ -10,6 +10,7 @@ final class AppModel: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
     @Published var apiKey: String = KeychainStore.load() ?? ""
+    @Published var pastedCode: String = ""
 
     private lazy var webFetcher = WebKitShaderFetcher()
 
@@ -45,11 +46,23 @@ final class AppModel: ObservableObject {
         } catch ShadertoyClientError.shaderNotAccessible {
             statusMessage = "API: the shader's author must enable 'public + API'. Remove your key in Settings to use the browser path instead."
         } catch WebFetchError.challengeTimeout {
-            statusMessage = "Couldn't get past Shadertoy's bot check — try again, or add an API key in Settings (Advanced)."
+            statusMessage = "Couldn't fetch automatically (Cloudflare bot check). Paste the shader's Image-tab code below and use 'Convert pasted code'."
         } catch is ShadertoyInternalParserError {
             statusMessage = "Shader not found, or it isn't public."
         } catch {
             statusMessage = "Fetch/convert failed: \(error.localizedDescription)"
         }
+    }
+
+    func convertPastedCode() async {
+        warnings = []; isfOutput = ""; importedCode = ""; statusMessage = ""
+        let code = pastedCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else { statusMessage = "Paste the shader's Image-tab GLSL first."; return }
+        let shader = ShaderFactory.singlePass(imageCode: code, name: "Pasted Shader")
+        importedCode = "// ===== Pasted Image code =====\n" + code
+        let (doc, w) = ISFConverter.convert(shader)
+        isfOutput = doc.fileText
+        warnings = w
+        statusMessage = w.isEmpty ? "Converted pasted code cleanly." : "Converted pasted code with \(w.count) warning(s)."
     }
 }
