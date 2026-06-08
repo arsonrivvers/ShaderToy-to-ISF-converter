@@ -1,0 +1,16 @@
+[
+  {
+    "ver": "0.1",
+    "info": { "id": "Ms2SD1", "name": "Seascape", "username": "TDM", "description": "array-shape fixture" },
+    "renderpass": [
+      {
+        "inputs": [],
+        "outputs": [ { "id": "out0", "channel": 0 } ],
+        "code": "void mainImage( out vec4 c, in vec2 f ){ c = vec4(f/iResolution.xy, 0.0, 1.0); }",
+        "name": "Image",
+        "description": "",
+        "type": "image"
+      }
+    ]
+  }
+]
