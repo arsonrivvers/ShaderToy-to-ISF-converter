@@ -8,3 +8,4 @@ App/ddata/
 /ShadertoyISF.app/
 vendor/isf/node_modules/
 vendor/isf/package-lock.json
+.playwright-mcp/
