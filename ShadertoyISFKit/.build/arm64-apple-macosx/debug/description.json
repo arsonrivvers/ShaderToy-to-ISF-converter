@@ -1,0 +1,674 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.xctest/Contents/MacOS/ShadertoyISFKitPackageTests",
+      "packagePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit",
+      "productName" : "ShadertoyISFKitPackageTests"
+    }
+  ],
+  "copyCommands" : {
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit_ShadertoyISFKitTests.bundle/Fixtures" : {
+      "inputs" : [
+        {
+          "kind" : "directory",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Tests/ShadertoyISFKitTests/Fixtures"
+        }
+      ],
+      "outputs" : [
+        {
+          "kind" : "directory",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit_ShadertoyISFKitTests.bundle/Fixtures"
+        }
+      ]
+    }
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.ShadertoyISFKit-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/sources",
+      "importPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyISFKit.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "ShadertoyISFKit",
+      "moduleOutputPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKit.swiftmodule",
+      "objects" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/ShadertoyISFKit.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j16",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/include/ShadertoyISFKit-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "shadertoyisfkit"
+      ],
+      "outputFileMapPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/ShadertoyISFKit.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKit.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyISFKit.swift"
+      ],
+      "tempsPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.ShadertoyISFKitPackageTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/sources",
+      "importPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKitTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "ShadertoyISFKitPackageTests",
+      "moduleOutputPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKitPackageTests.swiftmodule",
+      "objects" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx13.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j16",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/include/ShadertoyISFKitPackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "shadertoyisfkit"
+      ],
+      "outputFileMapPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKitPackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.ShadertoyISFKitTests-arm64-apple-macosx26.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/sources",
+      "importPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Tests/ShadertoyISFKitTests/SmokeTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/DerivedSources/resource_bundle_accessor.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<ShadertoyISFKitTests-arm64-apple-macosx26.0-debug.module-resources>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKit.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "ShadertoyISFKitTests",
+      "moduleOutputPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKitTests.swiftmodule",
+      "objects" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/SmokeTests.swift.o",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/resource_bundle_accessor.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j16",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_AVAILABLE",
+        "-module-cache-path",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "shadertoyisfkit"
+      ],
+      "outputFileMapPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/SmokeTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/resource_bundle_accessor.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules/ShadertoyISFKitTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Tests/ShadertoyISFKitTests/SmokeTests.swift",
+        "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/DerivedSources/resource_bundle_accessor.swift"
+      ],
+      "tempsPath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "ShadertoyISFKit" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "ShadertoyISFKit",
+      "-package-name",
+      "shadertoyisfkit",
+      "-c",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyISFKit.swift",
+      "-I",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j16",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/include/ShadertoyISFKit-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "shadertoyisfkit",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "ShadertoyISFKitPackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "ShadertoyISFKitPackageTests",
+      "-package-name",
+      "shadertoyisfkit",
+      "-c",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift",
+      "-I",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx13.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j16",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/include/ShadertoyISFKitPackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "shadertoyisfkit",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "ShadertoyISFKitTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "ShadertoyISFKitTests",
+      "-package-name",
+      "shadertoyisfkit",
+      "-c",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Tests/ShadertoyISFKitTests/SmokeTests.swift",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/DerivedSources/resource_bundle_accessor.swift",
+      "-I",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j16",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_AVAILABLE",
+      "-module-cache-path",
+      "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "shadertoyisfkit",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "ShadertoyISFKit" : [
+
+    ],
+    "ShadertoyISFKitPackageTests" : [
+      "ShadertoyISFKitTests",
+      "ShadertoyISFKit"
+    ],
+    "ShadertoyISFKitTests" : [
+      "ShadertoyISFKit"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyISFKit.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/sources"
+    },
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/sources"
+    },
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/ShadertoyISFKit.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/SmokeTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/resource_bundle_accessor.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitPackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/Tests/ShadertoyISFKitTests/SmokeTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/DerivedSources/resource_bundle_accessor.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKitTests.build/sources"
+    },
+    "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

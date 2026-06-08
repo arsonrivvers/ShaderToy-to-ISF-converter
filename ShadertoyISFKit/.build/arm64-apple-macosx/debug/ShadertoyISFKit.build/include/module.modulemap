@@ -1,0 +1,3 @@
+module ShadertoyISFKit {
+    header "/Users/arsonrivvers/Desktop/AV_Projects/ShaderToy-to-ISF-converter/ShadertoyISFKit/.build/arm64-apple-macosx/debug/ShadertoyISFKit.build/include/ShadertoyISFKit-Swift.h"
+}
