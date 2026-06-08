@@ -7,8 +7,8 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Shadertoy API Key").font(.headline)
-            Text("Create a free key at shadertoy.com → Profile → Apps.").font(.caption).foregroundStyle(.secondary)
+            Text("API Key (optional — Advanced)").font(.headline)
+            Text("Leave blank to fetch via the built-in browser (no account needed). An API key is only for Shadertoy Silver/Gold members.").font(.caption).foregroundStyle(.secondary)
             SecureField("API key", text: $draftKey)
             HStack {
                 Spacer()
