@@ -11,8 +11,18 @@ final class AppModel: ObservableObject {
     @Published var isBusy: Bool = false
     @Published var apiKey: String = KeychainStore.load() ?? ""
     @Published var pastedCode: String = ""
+    /// Default filename offered in the Save panel (derived from the shader name).
+    @Published var suggestedFileName: String = "converted.fs"
 
     private lazy var webFetcher = WebKitShaderFetcher()
+
+    /// Turns a shader name into a safe `.fs` filename.
+    static func safeFileName(_ name: String) -> String {
+        let illegal = CharacterSet(charactersIn: "/\\:?%*|\"<>").union(.newlines)
+        let cleaned = name.components(separatedBy: illegal).joined(separator: "-")
+            .trimmingCharacters(in: .whitespaces)
+        return (cleaned.isEmpty ? "shader" : cleaned) + ".fs"
+    }
 
     func saveKey(_ key: String) {
         apiKey = key
@@ -42,6 +52,7 @@ final class AppModel: ObservableObject {
             let (doc, w) = ISFConverter.convert(shader)
             isfOutput = doc.fileText
             warnings = w
+            suggestedFileName = Self.safeFileName(shader.info.name)
             statusMessage = w.isEmpty ? "Converted cleanly." : "Converted with \(w.count) warning(s)."
         } catch ShadertoyClientError.shaderNotAccessible {
             statusMessage = "API: the shader's author must enable 'public + API'. Remove your key in Settings to use the browser path instead."
@@ -63,6 +74,7 @@ final class AppModel: ObservableObject {
         let (doc, w) = ISFConverter.convert(shader)
         isfOutput = doc.fileText
         warnings = w
+        suggestedFileName = "pasted-shader.fs"
         statusMessage = w.isEmpty ? "Converted pasted code cleanly." : "Converted pasted code with \(w.count) warning(s)."
     }
 }
