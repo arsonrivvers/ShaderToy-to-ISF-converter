@@ -39,6 +39,9 @@ public enum ISFConverter {
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: plan.commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
+        let compat = GLSLCompat.apply(glsl.code)
+        warnings.append(contentsOf: compat.warnings)
+
         let bufferNames = plan.renderPasses.filter { $0.type == .buffer }.enumerated().map { i, _ in
             "buf\(["A","B","C","D"][min(i,3)])"
         }
@@ -50,6 +53,6 @@ public enum ISFConverter {
             includeMouse: includeMouse,
             bufferNames: bufferNames)
 
-        return (ISFDocument(headerJSON: header, glslBody: glsl.code), warnings)
+        return (ISFDocument(headerJSON: header, glslBody: compat.code), warnings)
     }
 }
