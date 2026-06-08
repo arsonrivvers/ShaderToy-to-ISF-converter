@@ -22,3 +22,26 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: "0.1.0"
         GENERATE_INFOPLIST_FILE: NO
+  ShadertoyISFTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - ShadertoyISFTests
+      - ShadertoyISF/FetchStrategy.swift
+      - ShadertoyISF/WebKitShaderFetcher.swift
+    dependencies:
+      - package: ShadertoyISFKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ShadertoyISFTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
+schemes:
+  ShadertoyISF:
+    build:
+      targets:
+        ShadertoyISF: all
+        ShadertoyISFTests: [test]
+    test:
+      targets: [ShadertoyISFTests]
