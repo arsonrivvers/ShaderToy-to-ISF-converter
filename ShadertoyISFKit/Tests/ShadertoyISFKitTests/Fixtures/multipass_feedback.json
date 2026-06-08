@@ -1,0 +1,24 @@
+{
+  "Shader": {
+    "ver": "0.1",
+    "info": { "id": "XdfGDS", "name": "Test Feedback", "username": "tester", "description": "buffer feedback test" },
+    "renderpass": [
+      {
+        "inputs": [ { "id": "bufAout", "ctype": "buffer", "channel": 0 } ],
+        "outputs": [ { "id": "bufAout", "channel": 0 } ],
+        "code": "void mainImage( out vec4 c, in vec2 f ) {\n    vec2 uv = f/iResolution.xy;\n    vec4 prev = texture(iChannel0, uv);\n    c = max(prev*0.95, vec4(step(0.99, sin(iTime+uv.x*40.0))));\n}",
+        "name": "Buffer A",
+        "description": "",
+        "type": "buffer"
+      },
+      {
+        "inputs": [ { "id": "bufAout", "ctype": "buffer", "channel": 0 } ],
+        "outputs": [ { "id": "imgout", "channel": 0 } ],
+        "code": "void mainImage( out vec4 c, in vec2 f ) {\n    c = texture(iChannel0, f/iResolution.xy);\n}",
+        "name": "Image",
+        "description": "",
+        "type": "image"
+      }
+    ]
+  }
+}
