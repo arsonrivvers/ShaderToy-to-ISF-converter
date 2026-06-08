@@ -41,6 +41,7 @@ public enum ISFConverter {
 
         let compat = GLSLCompat.apply(glsl.code)
         warnings.append(contentsOf: compat.warnings)
+        warnings.append(contentsOf: GLSLLint.check(glsl.code))
 
         let bufferNames = plan.renderPasses.filter { $0.type == .buffer }.enumerated().map { i, _ in
             "buf\(["A","B","C","D"][min(i,3)])"
