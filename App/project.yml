@@ -1,0 +1,24 @@
+name: ShadertoyISF
+options:
+  bundleIdPrefix: com.arsonrivvers
+  deploymentTarget:
+    macOS: "13.0"
+packages:
+  ShadertoyISFKit:
+    path: ../ShadertoyISFKit
+targets:
+  ShadertoyISF:
+    type: application
+    platform: macOS
+    sources: [ShadertoyISF]
+    dependencies:
+      - package: ShadertoyISFKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ShadertoyISF
+        INFOPLIST_FILE: ShadertoyISF/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ShadertoyISF/ShadertoyISF.entitlements
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "0.1.0"
+        GENERATE_INFOPLIST_FILE: NO
