@@ -1,0 +1,16 @@
+{
+  "Shader": {
+    "ver": "0.1",
+    "info": { "id": "Ms2SD1", "name": "Test Single", "username": "tester", "description": "a single pass test" },
+    "renderpass": [
+      {
+        "inputs": [],
+        "outputs": [ { "id": "out0", "channel": 0 } ],
+        "code": "void mainImage( out vec4 fragColor, in vec2 fragCoord ) {\n    vec2 uv = fragCoord/iResolution.xy;\n    fragColor = vec4(uv, 0.5+0.5*sin(iTime), 1.0);\n}",
+        "name": "Image",
+        "description": "",
+        "type": "image"
+      }
+    ]
+  }
+}
