@@ -1,0 +1,55 @@
+import Foundation
+
+public enum ISFConverter {
+    public static func convert(_ shader: Shader) -> (ISFDocument, [ConversionWarning]) {
+        var warnings: [ConversionWarning] = []
+        let plan = PassBuilder.build(passes: shader.renderpass)
+        warnings.append(contentsOf: plan.warnings)
+
+        var imageInputNames: Set<String> = []
+        var includeMouse = false
+        var passBodies: [String] = []
+
+        for pass in plan.renderPasses {
+            let resolved = ChannelBinding.resolve(inputs: pass.inputs,
+                                                  bufferOutputIDToName: plan.bufferOutputIDToName)
+            warnings.append(contentsOf: resolved.warnings.map {
+                ConversionWarning(severity: $0.severity, message: $0.message, context: pass.name)
+            })
+            for (_, b) in resolved.bindings where b.kind != .buffer {
+                imageInputNames.insert(b.glslName)
+            }
+
+            var code = pass.code
+            if code.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
+
+            code = UniformRewriter.rewrite(code)
+            if includeMouse {
+                // iMouse.xy is in pixels; ISF point2D `mouse` is normalized [0,1].
+                code = code.replacingOccurrences(of: "iMouse",
+                    with: "vec4(mouse * RENDERSIZE, 0.0, 0.0)")
+            }
+            let sampled = SamplerRewriter.rewrite(code, bindings: resolved.bindings)
+            warnings.append(contentsOf: sampled.warnings.map {
+                ConversionWarning(severity: $0.severity, message: $0.message, context: pass.name)
+            })
+            passBodies.append(sampled.code)
+        }
+
+        let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: plan.commonCode)
+        warnings.append(contentsOf: glsl.warnings)
+
+        let bufferNames = plan.renderPasses.filter { $0.type == .buffer }.enumerated().map { i, _ in
+            "buf\(["A","B","C","D"][min(i,3)])"
+        }
+
+        let header = HeaderBuilder.build(
+            description: shader.info.description ?? shader.info.name,
+            credit: "Converted from Shadertoy \(shader.info.id) by \(shader.info.username ?? "unknown")",
+            imageInputNames: imageInputNames.sorted(),
+            includeMouse: includeMouse,
+            bufferNames: bufferNames)
+
+        return (ISFDocument(headerJSON: header, glslBody: glsl.code), warnings)
+    }
+}
