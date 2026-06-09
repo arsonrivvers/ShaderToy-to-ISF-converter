@@ -29,6 +29,7 @@ final class EditorViewModel: ObservableObject {
 
     let preview = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
     let editor = CodeEditorController()
+    let diagnostics = DiagnosticsModel()
 
     private var debounceTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -87,6 +88,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = warnings
         statusMessage = "Imported \(suggestedName)"
         editor.setText(isf)
+        applyDiagnostics(error: preview.compileError, line: preview.compileErrorLine, valid: preview.compileValid)
         recompile(immediate: true)
     }
 
@@ -121,11 +123,8 @@ final class EditorViewModel: ObservableObject {
     }
 
     private func applyDiagnostics(error: String?, line: Int?, valid: Bool) {
-        if let error, !valid {
-            let firstLine = error.components(separatedBy: "\n").first ?? error
-            editor.setDiagnostics([EditorDiagnostic(line: line ?? 1, message: firstLine, severity: "error")])
-        } else {
-            editor.setDiagnostics([])
-        }
+        diagnostics.update(converterWarnings: conversionWarnings,
+                           compileError: valid ? nil : error, compileErrorLine: line)
+        editor.setDiagnostics(diagnostics.editorDiagnostics)
     }
 }

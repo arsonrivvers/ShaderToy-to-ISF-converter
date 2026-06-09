@@ -55,6 +55,8 @@ targets:
       - TrueISFEditor/MetalPreviewController.swift
       - TrueISFEditor/WebKitPreviewController.swift
       - TrueISFEditor/ISFMSLSafeBridge.mm
+      - TrueISFEditor/DiagnosticsModel.swift
+      - TrueISFEditor/CodeEditorView.swift
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
