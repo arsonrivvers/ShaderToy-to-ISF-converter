@@ -54,6 +54,7 @@ targets:
       - TrueISFEditor/ISFPreviewInput.swift
       - TrueISFEditor/MetalPreviewController.swift
       - TrueISFEditor/WebKitPreviewController.swift
+      - TrueISFEditor/ISFMSLSafeBridge.mm
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
@@ -76,6 +77,7 @@ targets:
         BUNDLE_LOADER: ""
         FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
+        SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
 schemes:
   TrueISFEditor:
     build:

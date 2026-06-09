@@ -56,32 +56,30 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         transpileQueue.async { [weak self] in
             guard let self else { return }
             do { try isf.write(to: url, atomically: true, encoding: .utf8) } catch { return }
-            guard let s = ISFMSLScene(device: device) else { return }
-            s.load(url)
-            let hadError = s.compilerError
-            // If error, capture detail off-main too (building the transpiler error can be slow).
-            var msg: String? = nil
-            if hadError {
-                let te = ISFMSLTranspilerError(url: url, device: device)
-                msg = te.fragGLSLErrString ?? te.fragSPIRVErrString ?? te.fragMSLErrString
-                    ?? te.vertGLSLErrString ?? te.generateStringForLogFile()
-            }
+            // Crash-safe: ISFMSLSafeCreateAndLoad wraps scene create/load/error-read in a C++
+            // try/catch, so a pathological shader (e.g. one that makes the transpiler throw an
+            // uncaught nlohmann::json exception) reports a failure instead of terminating the app.
+            var compileError: ObjCBool = false
+            var message: NSString?
+            let s = ISFMSLSafeCreateAndLoad(device, url, &compileError, &message)
+            let hadError = compileError.boolValue || (s == nil)
+            let msg = message as String?
             Task { @MainActor in self.applyCompile(scene: s, hadError: hadError, message: msg) }
         }
     }
 
-    private func applyCompile(scene s: ISFMSLScene, hadError: Bool, message: String?) {
-        if hadError {
-            scene = nil
-            compileValid = false
-            compileError = (message?.isEmpty == false ? message : "Shader failed to compile.")
-            compileErrorLine = Self.parseLine(from: message)
-        } else {
+    private func applyCompile(scene s: ISFMSLScene?, hadError: Bool, message: String?) {
+        if let s, !hadError {
             scene = s
             compileValid = true
             compileError = nil
             compileErrorLine = nil
             inputs = Self.mapInputs(s.inputs)
+        } else {
+            scene = nil
+            compileValid = false
+            compileError = (message?.isEmpty == false ? message : "Shader failed to compile.")
+            compileErrorLine = Self.parseLine(from: message)
         }
     }
 
