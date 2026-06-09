@@ -60,6 +60,7 @@ targets:
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
       - TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift
+      - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework

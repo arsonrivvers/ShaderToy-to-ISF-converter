@@ -2,6 +2,10 @@ import Foundation
 public enum ShaderAssistTask: Sendable { case diagnoseAndFix, suggestions }
 public struct AIEdit: Codable, Equatable, Sendable {
     public let fromLine: Int; public let toLine: Int; public let replacement: String; public let rationale: String
+    public init(fromLine: Int, toLine: Int, replacement: String, rationale: String) {
+        self.fromLine = fromLine; self.toLine = toLine
+        self.replacement = replacement; self.rationale = rationale
+    }
 }
 public struct AIFixResult: Codable, Equatable, Sendable {
     public let explanation: String; public let edits: [AIEdit]
