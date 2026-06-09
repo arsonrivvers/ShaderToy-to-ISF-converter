@@ -32,6 +32,8 @@ targets:
       - TrueISFEditorTests
       - TrueISFEditor/FetchStrategy.swift
       - TrueISFEditor/WebKitShaderFetcher.swift
+      - TrueISFEditor/Models/ISFFile.swift
+      - TrueISFEditor/Models/LibraryModel.swift
     dependencies:
       - package: ShadertoyISFKit
     settings:
