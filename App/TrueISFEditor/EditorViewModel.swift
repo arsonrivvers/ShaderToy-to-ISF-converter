@@ -49,6 +49,10 @@ final class EditorViewModel: ObservableObject {
     init(file: ISFFile? = nil) {
         self.file = file ?? .untitled(source: Self.blankTemplate)
         editor.onChange = { [weak self] text in self?.sourceEdited(text) }
+        // Nested ObservableObject: forward its changes so the diagnostics panel re-renders.
+        diagnostics.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
         // Preview compile result → inline editor diagnostics. (Inputs flow to the controls
         // panel automatically via preview.inputs / @ObservedObject.)
         preview.$compileError

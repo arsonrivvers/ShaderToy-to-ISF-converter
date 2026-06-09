@@ -17,9 +17,11 @@ struct EditorScreen: View {
                     CodeEditorView(controller: vm.editor)
                         .frame(minWidth: 360)
                     Divider()
-                    WarningsView(warnings: vm.conversionWarnings,
-                                 previewError: vm.preview.compileValid ? nil : vm.preview.compileError,
-                                 previewErrorLine: vm.preview.compileErrorLine)
+                    DiagnosticsPanel(
+                        diagnostics: vm.diagnostics.diagnostics,
+                        sourceLines: vm.file.source.components(separatedBy: "\n"),
+                        onJump: { vm.editor.revealLine($0) },
+                        onApply: { _ in })   // wired in a later task
                         .frame(height: 150)
                         .padding(6)
                 }
