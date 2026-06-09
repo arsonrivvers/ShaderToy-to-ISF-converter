@@ -4,7 +4,7 @@
 
 **Goal:** In-app **Diagnose & Fix** and **Suggestions** buttons that invoke headless Claude Code (`claude -p`) on the user's subscription, returning structured JSON that drives a per-edit diff-review (reusing P2's guarded `applyTextEdit`).
 
-**Architecture:** Pure, testable `CoPilotPrompt` + `CoPilotResponseParser` + result types in `ShadertoyISFKit`. App-side `ClaudeCodeRunner` spawns `claude -p --output-format json …` behind a `ProcessRunning` protocol (testable with a fake — no real CLI calls in tests). `CoPilotViewModel` drives run state; `DiffReviewPanel`/`SuggestionsPanel` present results.
+**Architecture:** Pure, testable `ShaderAssistPrompt` + `ShaderAssistResponseParser` + result types in `ShadertoyISFKit`. App-side `ClaudeCodeRunner` spawns `claude -p --output-format json …` behind a `ProcessRunning` protocol (testable with a fake — no real CLI calls in tests). `ShaderAssistViewModel` drives run state; `DiffReviewPanel`/`SuggestionsPanel` present results.
 
 **Tech Stack:** Swift / SwiftUI, Foundation `Process`, XCTest + `swift test`, the Claude Code CLI (`~/.local/bin/claude`, v2.1.170) as the inference backend.
 
@@ -28,14 +28,14 @@
 ## File Structure
 
 **New (ShadertoyISFKit — pure, swift-test-able)**
-- `Sources/ShadertoyISFKit/CoPilot/CoPilotTypes.swift` — `CoPilotTask`, `AIEdit`, `AIFixResult`, `AIIdea`, `AISuggestionsResult`, `CoPilotParseError`.
-- `Sources/ShadertoyISFKit/CoPilot/CoPilotResponseParser.swift`
-- `Sources/ShadertoyISFKit/CoPilot/CoPilotPrompt.swift`
-- `Tests/ShadertoyISFKitTests/CoPilotResponseParserTests.swift`, `CoPilotPromptTests.swift`
+- `Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistTypes.swift` — `ShaderAssistTask`, `AIEdit`, `AIFixResult`, `AIIdea`, `AISuggestionsResult`, `ShaderAssistParseError`.
+- `Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift`
+- `Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistPrompt.swift`
+- `Tests/ShadertoyISFKitTests/ShaderAssistResponseParserTests.swift`, `ShaderAssistPromptTests.swift`
 
 **New (app)**
-- `App/TrueISFEditor/CoPilot/ClaudeCodeRunner.swift` (+ `ProcessRunning` protocol + `ClaudeRunError`)
-- `App/TrueISFEditor/CoPilot/CoPilotViewModel.swift`
+- `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift` (+ `ProcessRunning` protocol + `ClaudeRunError`)
+- `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift`
 - `App/TrueISFEditor/Views/DiffReviewPanel.swift`, `Views/SuggestionsPanel.swift`
 - `App/TrueISFEditorTests/ClaudeCodeRunnerTests.swift`
 
@@ -48,18 +48,18 @@
 
 ## Phase A — Engine: types, parser, prompt (ShadertoyISFKit)
 
-### Task 1: CoPilot result types
+### Task 1: ShaderAssist result types
 
 **Files:**
-- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/CoPilot/CoPilotTypes.swift`
-- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/CoPilotTypesTests.swift`
+- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistTypes.swift`
+- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistTypesTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 ```swift
 import XCTest
 @testable import ShadertoyISFKit
 
-final class CoPilotTypesTests: XCTestCase {
+final class ShaderAssistTypesTests: XCTestCase {
     func testDecodeFixResult() throws {
         let json = #"{"explanation":"texture2D unavailable","edits":[{"fromLine":11,"toLine":11,"replacement":"IMG_PIXEL(a,b)","rationale":"use ISF sampler"}]}"#
         let r = try JSONDecoder().decode(AIFixResult.self, from: Data(json.utf8))
@@ -78,13 +78,13 @@ final class CoPilotTypesTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run (expect FAIL — types missing)** — `cd ShadertoyISFKit && swift test --filter CoPilotTypesTests 2>&1 | tail -8`
+- [ ] **Step 2: Run (expect FAIL — types missing)** — `cd ShadertoyISFKit && swift test --filter ShaderAssistTypesTests 2>&1 | tail -8`
 
-- [ ] **Step 3: Implement `CoPilotTypes.swift`**
+- [ ] **Step 3: Implement `ShaderAssistTypes.swift`**
 ```swift
 import Foundation
 
-public enum CoPilotTask: Sendable { case diagnoseAndFix, suggestions }
+public enum ShaderAssistTask: Sendable { case diagnoseAndFix, suggestions }
 
 public struct AIEdit: Codable, Equatable, Sendable {
     public let fromLine: Int
@@ -110,7 +110,7 @@ public struct AISuggestionsResult: Codable, Equatable, Sendable {
     public let ideas: [AIIdea]
 }
 
-public enum CoPilotParseError: Error, Equatable {
+public enum ShaderAssistParseError: Error, Equatable {
     case unparseable(raw: String)
 }
 ```
@@ -119,16 +119,16 @@ public enum CoPilotParseError: Error, Equatable {
 
 - [ ] **Step 5: Commit**
 ```bash
-cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): CoPilot result types (TDD)
+cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): ShaderAssist result types (TDD)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
 
-### Task 2: CoPilotResponseParser (envelope + inner-JSON extraction)
+### Task 2: ShaderAssistResponseParser (envelope + inner-JSON extraction)
 
 **Files:**
-- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/CoPilot/CoPilotResponseParser.swift`
-- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/CoPilotResponseParserTests.swift`
+- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift`
+- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistResponseParserTests.swift`
 
 Context: `claude -p --output-format json` prints an envelope object whose `result` field is the assistant's text. The parser reads `result`, then extracts our inner JSON from it (bare object, ```json fence, or object embedded in prose). If the envelope doesn't decode, it falls back to scanning the whole stdout.
 
@@ -137,33 +137,33 @@ Context: `claude -p --output-format json` prints an envelope object whose `resul
 import XCTest
 @testable import ShadertoyISFKit
 
-final class CoPilotResponseParserTests: XCTestCase {
+final class ShaderAssistResponseParserTests: XCTestCase {
     private let inner = #"{"explanation":"e","edits":[{"fromLine":1,"toLine":1,"replacement":"x","rationale":"r"}]}"#
 
     func testEnvelopeWithBareJSON() throws {
         let env = #"{"type":"result","subtype":"success","is_error":false,"result":"\#(escaped(inner))"}"#
-        let r = try CoPilotResponseParser.fixResult(fromClaudeStdout: env)
+        let r = try ShaderAssistResponseParser.fixResult(fromClaudeStdout: env)
         XCTAssertEqual(r.explanation, "e"); XCTAssertEqual(r.edits.count, 1)
     }
     func testEnvelopeWithFencedJSON() throws {
         let fenced = "Here is the fix:\n```json\n\(inner)\n```"
         let env = #"{"type":"result","is_error":false,"result":"\#(escaped(fenced))"}"#
-        let r = try CoPilotResponseParser.fixResult(fromClaudeStdout: env)
+        let r = try ShaderAssistResponseParser.fixResult(fromClaudeStdout: env)
         XCTAssertEqual(r.edits[0].replacement, "x")
     }
     func testRawInnerNoEnvelope() throws {   // fallback: stdout is the inner JSON directly
-        let r = try CoPilotResponseParser.fixResult(fromClaudeStdout: inner)
+        let r = try ShaderAssistResponseParser.fixResult(fromClaudeStdout: inner)
         XCTAssertEqual(r.explanation, "e")
     }
     func testMalformedThrowsUnparseable() {
-        XCTAssertThrowsError(try CoPilotResponseParser.fixResult(fromClaudeStdout: "no json here")) { err in
-            guard case CoPilotParseError.unparseable = err else { return XCTFail("wrong error") }
+        XCTAssertThrowsError(try ShaderAssistResponseParser.fixResult(fromClaudeStdout: "no json here")) { err in
+            guard case ShaderAssistParseError.unparseable = err else { return XCTFail("wrong error") }
         }
     }
     func testSuggestionsParse() throws {
         let s = #"{"ideas":[{"title":"t","detail":"d","kind":"design","lines":null}]}"#
         let env = #"{"is_error":false,"result":"\#(escaped(s))"}"#
-        let r = try CoPilotResponseParser.suggestions(fromClaudeStdout: env)
+        let r = try ShaderAssistResponseParser.suggestions(fromClaudeStdout: env)
         XCTAssertEqual(r.ideas[0].kind, "design")
     }
 
@@ -177,11 +177,11 @@ final class CoPilotResponseParserTests: XCTestCase {
 
 - [ ] **Step 2: Run (expect FAIL — parser missing).**
 
-- [ ] **Step 3: Implement `CoPilotResponseParser.swift`**
+- [ ] **Step 3: Implement `ShaderAssistResponseParser.swift`**
 ```swift
 import Foundation
 
-public enum CoPilotResponseParser {
+public enum ShaderAssistResponseParser {
     public static func fixResult(fromClaudeStdout s: String) throws -> AIFixResult {
         try decode(AIFixResult.self, from: candidateJSON(s))
     }
@@ -227,7 +227,7 @@ public enum CoPilotResponseParser {
     private static func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
         guard let data = json.data(using: .utf8), !json.isEmpty,
               let value = try? JSONDecoder().decode(T.self, from: data) else {
-            throw CoPilotParseError.unparseable(raw: json)
+            throw ShaderAssistParseError.unparseable(raw: json)
         }
         return value
     }
@@ -238,51 +238,51 @@ public enum CoPilotResponseParser {
 
 - [ ] **Step 5: Commit**
 ```bash
-cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): CoPilotResponseParser — envelope unwrap + JSON extraction (TDD)
+cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): ShaderAssistResponseParser — envelope unwrap + JSON extraction (TDD)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
 
-### Task 3: CoPilotPrompt
+### Task 3: ShaderAssistPrompt
 
 **Files:**
-- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/CoPilot/CoPilotPrompt.swift`
-- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/CoPilotPromptTests.swift`
+- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistPrompt.swift`
+- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistPromptTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 ```swift
 import XCTest
 @testable import ShadertoyISFKit
 
-final class CoPilotPromptTests: XCTestCase {
+final class ShaderAssistPromptTests: XCTestCase {
     func testUserPromptHasNumberedSourceAndDiagnostics() {
         let src = "void main(){\n  gl_FragColor = vec4(1.0);\n}"
         let diags = [Diagnostic.compiler(message: "ERROR: 2: bad", line: 2)]
-        let p = CoPilotPrompt.user(task: .diagnoseAndFix, source: src, diagnostics: diags)
+        let p = ShaderAssistPrompt.user(task: .diagnoseAndFix, source: src, diagnostics: diags)
         XCTAssertTrue(p.contains("1: void main(){"))   // 1-based numbering
         XCTAssertTrue(p.contains("ERROR: 2: bad"))
     }
     func testSystemNamesBothSkillsAndJSONOnly() {
-        let s = CoPilotPrompt.system(for: .diagnoseAndFix)
+        let s = ShaderAssistPrompt.system(for: .diagnoseAndFix)
         XCTAssertTrue(s.contains("isf-shader-development"))
         XCTAssertTrue(s.contains("shader-dev"))
         XCTAssertTrue(s.lowercased().contains("json"))
         XCTAssertTrue(s.contains("\"edits\""))         // fix schema present
     }
     func testSuggestionsSystemHasIdeasSchema() {
-        XCTAssertTrue(CoPilotPrompt.system(for: .suggestions).contains("\"ideas\""))
+        XCTAssertTrue(ShaderAssistPrompt.system(for: .suggestions).contains("\"ideas\""))
     }
 }
 ```
 
 - [ ] **Step 2: Run (expect FAIL).**
 
-- [ ] **Step 3: Implement `CoPilotPrompt.swift`**
+- [ ] **Step 3: Implement `ShaderAssistPrompt.swift`**
 ```swift
 import Foundation
 
-public enum CoPilotPrompt {
-    public static func system(for task: CoPilotTask) -> String {
+public enum ShaderAssistPrompt {
+    public static func system(for task: ShaderAssistTask) -> String {
         let common = """
         You are an ISF/GLSL shader co-pilot inside the TrueISFEditor app. The shader targets ISFMSLKit / \
         VDMX6 (Metal, GLSL ES 3.0 transpiled via SPIR-V). Use the `isf-shader-development` and `shader-dev` \
@@ -306,7 +306,7 @@ public enum CoPilotPrompt {
         }
     }
 
-    public static func user(task: CoPilotTask, source: String, diagnostics: [Diagnostic]) -> String {
+    public static func user(task: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) -> String {
         let numbered = source.components(separatedBy: "\n").enumerated()
             .map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
         let diagText = diagnostics.isEmpty ? "(none)" :
@@ -334,7 +334,7 @@ public enum CoPilotPrompt {
 
 - [ ] **Step 5: Commit**
 ```bash
-cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): CoPilotPrompt — system rules + numbered-source task prompt (TDD)
+cd ShadertoyISFKit && git add Sources Tests && git commit -m "feat(P3): ShaderAssistPrompt — system rules + numbered-source task prompt (TDD)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
@@ -346,7 +346,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ### Task 4: ClaudeCodeRunner (behind a testable ProcessRunning protocol)
 
 **Files:**
-- Create: `App/TrueISFEditor/CoPilot/ClaudeCodeRunner.swift`
+- Create: `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift`
 - Create: `App/TrueISFEditorTests/ClaudeCodeRunnerTests.swift`
 - Modify: `App/project.yml` (add both to `TrueISFEditorTests` sources)
 
@@ -387,7 +387,7 @@ final class ClaudeCodeRunnerTests: XCTestCase {
 ```
 > Note: the test reads `runner.lastArgsForTest` — expose a `private(set) var lastArgsForTest: [String] = []` on the runner set in `run`. The `process:` init param is a factory returning a `ProcessRunning` so the fake can be injected.
 
-- [ ] **Step 2: Add sources to test target + run (expect FAIL).** In `App/project.yml` under `TrueISFEditorTests` `sources` add `TrueISFEditor/CoPilot/ClaudeCodeRunner.swift`. `xcodegen generate` then run `-only-testing:TrueISFEditorTests/ClaudeCodeRunnerTests` → FAIL (no `ClaudeCodeRunner`).
+- [ ] **Step 2: Add sources to test target + run (expect FAIL).** In `App/project.yml` under `TrueISFEditorTests` `sources` add `TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift`. `xcodegen generate` then run `-only-testing:TrueISFEditorTests/ClaudeCodeRunnerTests` → FAIL (no `ClaudeCodeRunner`).
 
 - [ ] **Step 3: Implement `ClaudeCodeRunner.swift`**
 ```swift
@@ -474,7 +474,7 @@ struct RealProcess: ProcessRunning {
     }
 }
 ```
-> The `run` returns the raw stdout (the envelope); `CoPilotResponseParser` (Task 2) parses it. Keep `run` off the main thread in real use by calling it inside a `Task.detached` from the view model (Task 6) — the `@MainActor` annotation here is for `lastArgsForTest`/state; the `RealProcess` blocking happens on the detached task.
+> The `run` returns the raw stdout (the envelope); `ShaderAssistResponseParser` (Task 2) parses it. Keep `run` off the main thread in real use by calling it inside a `Task.detached` from the view model (Task 6) — the `@MainActor` annotation here is for `lastArgsForTest`/state; the `RealProcess` blocking happens on the detached task.
 
 - [ ] **Step 4: Run (expect PASS — 2 tests).**
 
@@ -507,13 +507,13 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Phase C — App: CoPilotViewModel + Diagnose & Fix + DiffReviewPanel
+## Phase C — App: ShaderAssistViewModel + Diagnose & Fix + DiffReviewPanel
 
-### Task 6: CoPilotViewModel (run state + AIEdit→TextEdit)
+### Task 6: ShaderAssistViewModel (run state + AIEdit→TextEdit)
 
 **Files:**
-- Create: `App/TrueISFEditor/CoPilot/CoPilotViewModel.swift`
-- Create: `App/TrueISFEditorTests/CoPilotViewModelTests.swift`
+- Create: `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift`
+- Create: `App/TrueISFEditorTests/ShaderAssistViewModelTests.swift`
 - Modify: `App/project.yml` (add both to test sources)
 
 - [ ] **Step 1: Write the failing test** (the pure mapping is the testable part):
@@ -522,11 +522,11 @@ import XCTest
 import ShadertoyISFKit
 
 @MainActor
-final class CoPilotViewModelTests: XCTestCase {
+final class ShaderAssistViewModelTests: XCTestCase {
     func testEditMappingDerivesExpectedContains() {
         let src = "line one\n  vec4 c = texture2D(a, b);\nline three"
         let edit = AIEdit(fromLine: 2, toLine: 2, replacement: "  vec4 c = IMG_PIXEL(a, b);", rationale: "r")
-        let te = CoPilotViewModel.textEdit(from: edit, source: src)
+        let te = ShaderAssistViewModel.textEdit(from: edit, source: src)
         XCTAssertEqual(te.fromLine, 2); XCTAssertEqual(te.toLine, 2)
         XCTAssertEqual(te.replacement, "  vec4 c = IMG_PIXEL(a, b);")
         // expectedContains = a stable substring of the current line 2 (so a stale apply no-ops)
@@ -537,16 +537,16 @@ final class CoPilotViewModelTests: XCTestCase {
 
 - [ ] **Step 2: Add sources to test target + run (expect FAIL).**
 
-- [ ] **Step 3: Implement `CoPilotViewModel.swift`**
+- [ ] **Step 3: Implement `ShaderAssistViewModel.swift`**
 ```swift
 import Foundation
 import ShadertoyISFKit
 
 @MainActor
-final class CoPilotViewModel: ObservableObject {
+final class ShaderAssistViewModel: ObservableObject {
     enum State: Equatable {
         case idle
-        case running(CoPilotTask)
+        case running(ShaderAssistTask)
         case fix(AIFixResult)
         case suggestions(AISuggestionsResult)
         case rawAnswer(String)          // parse failed — show verbatim
@@ -572,23 +572,23 @@ final class CoPilotViewModel: ObservableObject {
                         expectedContains: expect.isEmpty ? nil : String(expect.prefix(40)))
     }
 
-    func run(_ t: CoPilotTask, source: String, diagnostics: [Diagnostic]) {
+    func run(_ t: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) {
         task?.cancel(); handledEdits = []
         state = .running(t)
         let binary = ClaudeCodeRunner.locateBinary(override: binaryOverride())
         let runner = ClaudeCodeRunner(binary: binary)
-        let system = CoPilotPrompt.system(for: t)
-        let prompt = CoPilotPrompt.user(task: t, source: source, diagnostics: diagnostics)
+        let system = ShaderAssistPrompt.system(for: t)
+        let prompt = ShaderAssistPrompt.user(task: t, source: source, diagnostics: diagnostics)
         task = Task { [weak self] in
             do {
                 let stdout = try await Task.detached { try await runner.run(prompt: prompt, system: system, model: "claude-sonnet-4-6") }.value
                 if Task.isCancelled { return }
                 switch t {
                 case .diagnoseAndFix:
-                    if let r = try? CoPilotResponseParser.fixResult(fromClaudeStdout: stdout) { self?.state = .fix(r) }
+                    if let r = try? ShaderAssistResponseParser.fixResult(fromClaudeStdout: stdout) { self?.state = .fix(r) }
                     else { self?.state = .rawAnswer(stdout) }
                 case .suggestions:
-                    if let r = try? CoPilotResponseParser.suggestions(fromClaudeStdout: stdout) { self?.state = .suggestions(r) }
+                    if let r = try? ShaderAssistResponseParser.suggestions(fromClaudeStdout: stdout) { self?.state = .suggestions(r) }
                     else { self?.state = .rawAnswer(stdout) }
                 }
             } catch let e as ClaudeRunError {
@@ -616,7 +616,7 @@ final class CoPilotViewModel: ObservableObject {
 - [ ] **Step 5: Commit**
 ```bash
 cd App && git add -A
-git commit -m "feat(P3): CoPilotViewModel — run state + AIEdit→TextEdit mapping (TDD)
+git commit -m "feat(P3): ShaderAssistViewModel — run state + AIEdit→TextEdit mapping (TDD)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
@@ -686,13 +686,13 @@ struct DiffReviewPanel: View {
 }
 ```
 
-- [ ] **Step 2: Wire AI buttons + panel into `EditorScreen.swift`.** Add a `@StateObject var copilot = CoPilotViewModel(binaryOverride: { settingsModel.claudeBinaryPath })` (pass the settings model in, or read it where available — match how EditorScreen accesses models). Add a small "AI" control row with a **Diagnose & Fix** button:
+- [ ] **Step 2: Wire AI buttons + panel into `EditorScreen.swift`.** Add a `@StateObject var copilot = ShaderAssistViewModel(binaryOverride: { settingsModel.claudeBinaryPath })` (pass the settings model in, or read it where available — match how EditorScreen accesses models). Add a small "AI" control row with a **Diagnose & Fix** button:
 ```swift
 Button("Diagnose & Fix") {
     copilot.run(.diagnoseAndFix, source: vm.file.source, diagnostics: vm.diagnostics.diagnostics)
 }.disabled(isRunning)
 ```
-Render based on `copilot.state`: `.running` → ProgressView + Cancel (`copilot.cancel()`); `.fix(r)` → `DiffReviewPanel(result: r, sourceLines: vm.file.source.components(separatedBy: "\n"), handled: $copilot.handledEdits) { edit in vm.apply(CoPilotViewModel.textEdit(from: edit, source: vm.file.source)) }`; `.rawAnswer(s)` → a scrollable monospaced text view of `s`; `.error(m)` → the message in red. Place it near the diagnostics panel (a tab or a section).
+Render based on `copilot.state`: `.running` → ProgressView + Cancel (`copilot.cancel()`); `.fix(r)` → `DiffReviewPanel(result: r, sourceLines: vm.file.source.components(separatedBy: "\n"), handled: $copilot.handledEdits) { edit in vm.apply(ShaderAssistViewModel.textEdit(from: edit, source: vm.file.source)) }`; `.rawAnswer(s)` → a scrollable monospaced text view of `s`; `.error(m)` → the message in red. Place it near the diagnostics panel (a tab or a section).
 
 - [ ] **Step 3: Add a one-line cost note** near the AI buttons: `Text("Uses your Claude subscription").font(.caption2).foregroundStyle(.secondary)`.
 
@@ -774,14 +774,14 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 - [ ] **Step 1: Full gates.** `cd ShadertoyISFKit && swift test` (engine green; paste count); app build + app tests green (paste count).
 - [ ] **Step 2: On-device end-to-end (user's hands).** Diagnose & Fix applies real fixes; Suggestions renders; binary-not-found / not-authenticated states show correct guidance (temporarily blank the Settings path / rename the binary to test). `.debug.dylib` freshness grep before any "relaunch".
-- [ ] **Step 3: Manual inline Mechanic review** (native Swift/SwiftUI): the `Task.detached` + `@MainActor` hop in `CoPilotViewModel.run` (no data races; state mutations on main), `RealProcess` timeout/termination + pipe draining (no deadlock on large output — read pipes before waitUntilExit if needed), retain cycles in the `copilot` task closure (`[weak self]` present), and that `claudeBinaryPath` is read fresh each run.
+- [ ] **Step 3: Manual inline Mechanic review** (native Swift/SwiftUI): the `Task.detached` + `@MainActor` hop in `ShaderAssistViewModel.run` (no data races; state mutations on main), `RealProcess` timeout/termination + pipe draining (no deadlock on large output — read pipes before waitUntilExit if needed), retain cycles in the `copilot` task closure (`[weak self]` present), and that `claudeBinaryPath` is read fresh each run.
 - [ ] **Step 4: Refresh the repo-root `TrueISFEditor.app`** from the build for the user's test.
 
 ---
 
 ## Self-Review (spec coverage)
 
-- Spec §2 architecture (CoPilotPrompt/Parser/types in kit; Runner/VM/panels in app) → Tasks 1–8. ✔
+- Spec §2 architecture (ShaderAssistPrompt/Parser/types in kit; Runner/VM/panels in app) → Tasks 1–8. ✔
 - §3 ClaudeCodeRunner (binary resolution, argv, auth detection, ProcessRunning fake) → Task 4. ✔
 - §4 prompt + schema → Task 3. §5 parser (envelope + extraction + raw fallback) → Task 2. ✔
 - §6 UI (AI buttons, DiffReviewPanel per-edit apply, SuggestionsPanel, cost note, Settings path, failure states) → Tasks 5,7,8. ✔
@@ -790,6 +790,6 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - §10 build sequence honored (engine → runner/settings → fix → suggestions → final). ✔
 - §11 open questions: model flag honored (verify on-device Task 9); skills explicitly named (Task 3 system prompt). ✔
 
-**Type consistency:** `AIFixResult/AIEdit/AISuggestionsResult/AIIdea/CoPilotParseError` (Task 1) used identically in Tasks 2,6,7,8. `CoPilotResponseParser.fixResult/suggestions(fromClaudeStdout:)` (Task 2) used in Task 6. `CoPilotPrompt.system(for:)/user(task:source:diagnostics:)` (Task 3) used in Task 6. `ProcessRunning`/`ProcessOutput`/`ClaudeRunError`/`ClaudeCodeRunner(binary:process:)`/`locateBinary(override:)`/`run(prompt:system:model:)` (Task 4) used in Task 6. `CoPilotViewModel.textEdit(from:source:)`/`run(_:source:diagnostics:)`/`state`/`handledEdits` (Task 6) used in Tasks 7,8. `TextEdit`/`EditorViewModel.apply` are P2's. ✔
+**Type consistency:** `AIFixResult/AIEdit/AISuggestionsResult/AIIdea/ShaderAssistParseError` (Task 1) used identically in Tasks 2,6,7,8. `ShaderAssistResponseParser.fixResult/suggestions(fromClaudeStdout:)` (Task 2) used in Task 6. `ShaderAssistPrompt.system(for:)/user(task:source:diagnostics:)` (Task 3) used in Task 6. `ProcessRunning`/`ProcessOutput`/`ClaudeRunError`/`ClaudeCodeRunner(binary:process:)`/`locateBinary(override:)`/`run(prompt:system:model:)` (Task 4) used in Task 6. `ShaderAssistViewModel.textEdit(from:source:)`/`run(_:source:diagnostics:)`/`state`/`handledEdits` (Task 6) used in Tasks 7,8. `TextEdit`/`EditorViewModel.apply` are P2's. ✔
 
-**Standalone test-bundle note:** every app source under test (`ClaudeCodeRunner.swift`, `CoPilotViewModel.swift`) is added to `TrueISFEditorTests` `sources` in `project.yml`; tests use plain `import XCTest` + `import ShadertoyISFKit`. Engine tests use `@testable import ShadertoyISFKit`.
+**Standalone test-bundle note:** every app source under test (`ClaudeCodeRunner.swift`, `ShaderAssistViewModel.swift`) is added to `TrueISFEditorTests` `sources` in `project.yml`; tests use plain `import XCTest` + `import ShadertoyISFKit`. Engine tests use `@testable import ShadertoyISFKit`.

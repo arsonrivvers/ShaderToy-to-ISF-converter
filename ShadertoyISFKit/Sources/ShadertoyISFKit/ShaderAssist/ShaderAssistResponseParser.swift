@@ -1,5 +1,5 @@
 import Foundation
-public enum CoPilotResponseParser {
+public enum ShaderAssistResponseParser {
     public static func fixResult(fromClaudeStdout s: String) throws -> AIFixResult { try decode(AIFixResult.self, from: candidateJSON(s)) }
     public static func suggestions(fromClaudeStdout s: String) throws -> AISuggestionsResult { try decode(AISuggestionsResult.self, from: candidateJSON(s)) }
     private struct Envelope: Decodable { let result: String?; let is_error: Bool? }
@@ -28,7 +28,7 @@ public enum CoPilotResponseParser {
     }
     private static func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
         guard let data = json.data(using: .utf8), !json.isEmpty, let value = try? JSONDecoder().decode(T.self, from: data) else {
-            throw CoPilotParseError.unparseable(raw: json)
+            throw ShaderAssistParseError.unparseable(raw: json)
         }
         return value
     }

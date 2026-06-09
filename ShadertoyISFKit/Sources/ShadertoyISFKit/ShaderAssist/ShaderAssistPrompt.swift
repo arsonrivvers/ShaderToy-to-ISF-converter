@@ -1,6 +1,6 @@
 import Foundation
-public enum CoPilotPrompt {
-    public static func system(for task: CoPilotTask) -> String {
+public enum ShaderAssistPrompt {
+    public static func system(for task: ShaderAssistTask) -> String {
         let common = """
         You are an ISF/GLSL shader co-pilot inside the TrueISFEditor app. The shader targets ISFMSLKit / \
         VDMX6 (Metal, GLSL ES 3.0 transpiled via SPIR-V). Use the `isf-shader-development` and `shader-dev` \
@@ -23,7 +23,7 @@ public enum CoPilotPrompt {
             """
         }
     }
-    public static func user(task: CoPilotTask, source: String, diagnostics: [Diagnostic]) -> String {
+    public static func user(task: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) -> String {
         let numbered = source.components(separatedBy: "\n").enumerated()
             .map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
         let diagText = diagnostics.isEmpty ? "(none)" :

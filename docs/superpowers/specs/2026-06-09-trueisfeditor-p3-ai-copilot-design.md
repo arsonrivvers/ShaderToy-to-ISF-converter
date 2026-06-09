@@ -34,13 +34,13 @@ land via a **per-edit diff-review** (Apply/Skip), reusing P2's guarded `applyTex
 ## 2. Architecture
 
 ```
-CoPilotViewModel (app)  ── builds task ──▶ CoPilotPrompt (ShadertoyISFKit, pure)
+ShaderAssistViewModel (app)  ── builds task ──▶ ShaderAssistPrompt (ShadertoyISFKit, pure)
         │                                          │ system rules + numbered source + diagnostics
         ▼                                          ▼
 ClaudeCodeRunner (app) ── Process: claude -p --output-format json --model … --append-system-prompt … <prompt>
         │ stdout (JSON envelope)
         ▼
-CoPilotResponseParser (ShadertoyISFKit, pure, TESTABLE)
+ShaderAssistResponseParser (ShadertoyISFKit, pure, TESTABLE)
         │  unwrap claude envelope {result:"…"} → extract inner JSON → AIFixResult | AISuggestionsResult
         ▼
    ┌─ AIFixResult ─▶ DiffReviewPanel (per-edit before→after + rationale + Apply/Skip)
@@ -49,9 +49,9 @@ CoPilotResponseParser (ShadertoyISFKit, pure, TESTABLE)
 ```
 
 ### Where things live
-- **Pure + testable → `ShadertoyISFKit`:** `CoPilotPrompt` (prompt construction), the result types
-  (`AIFixResult`, `AIEdit`, `AISuggestionsResult`, `AIIdea`), and `CoPilotResponseParser`.
-- **App target:** `ClaudeCodeRunner` (subprocess), `CoPilotViewModel`, `DiffReviewPanel`,
+- **Pure + testable → `ShadertoyISFKit`:** `ShaderAssistPrompt` (prompt construction), the result types
+  (`AIFixResult`, `AIEdit`, `AISuggestionsResult`, `AIIdea`), and `ShaderAssistResponseParser`.
+- **App target:** `ClaudeCodeRunner` (subprocess), `ShaderAssistViewModel`, `DiffReviewPanel`,
   `SuggestionsPanel`, Settings field for the binary path, the AI buttons.
 
 ---
@@ -90,13 +90,13 @@ final class ClaudeCodeRunner {
 ## 4. Prompt + structured contract (ShadertoyISFKit, pure)
 
 ```swift
-public enum CoPilotTask { case diagnoseAndFix, suggestions }
+public enum ShaderAssistTask { case diagnoseAndFix, suggestions }
 
-public enum CoPilotPrompt {
+public enum ShaderAssistPrompt {
     /// System rules passed via --append-system-prompt.
-    public static func system(for task: CoPilotTask) -> String
+    public static func system(for task: ShaderAssistTask) -> String
     /// Task prompt: numbered source + current diagnostics (+ task framing).
-    public static func user(task: CoPilotTask, source: String, diagnostics: [Diagnostic]) -> String
+    public static func user(task: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) -> String
 }
 ```
 
@@ -126,10 +126,10 @@ prose, no markdown fences." Then the task-specific schema.
 
 ---
 
-## 5. CoPilotResponseParser (ShadertoyISFKit, pure — the reliability surface)
+## 5. ShaderAssistResponseParser (ShadertoyISFKit, pure — the reliability surface)
 
 ```swift
-public enum CoPilotResponseParser {
+public enum ShaderAssistResponseParser {
     public static func fixResult(fromClaudeStdout: String) throws -> AIFixResult
     public static func suggestions(fromClaudeStdout: String) throws -> AISuggestionsResult
 }
@@ -137,7 +137,7 @@ public enum CoPilotResponseParser {
 - Two-stage: (1) parse the `claude -p --output-format json` **envelope** and read its `result` string field;
   (2) extract our inner JSON from that string — tolerant of a bare object, a ```json fenced block, or an
   object embedded in prose (scan for the outermost balanced `{…}`). Decode with `JSONDecoder`.
-- On failure → throw `CoPilotParseError.unparseable(raw:)` carrying the raw text so the UI can show Claude's
+- On failure → throw `ShaderAssistParseError.unparseable(raw:)` carrying the raw text so the UI can show Claude's
   answer verbatim instead of losing it.
 
 ---
@@ -170,9 +170,9 @@ public enum CoPilotResponseParser {
 ---
 
 ## 8. Testing
-- **`CoPilotResponseParserTests`** (swift test): bare JSON, fenced JSON, JSON-in-prose, the real
+- **`ShaderAssistResponseParserTests`** (swift test): bare JSON, fenced JSON, JSON-in-prose, the real
   `claude -p --output-format json` envelope shape, and malformed → throws `unparseable`. Primary coverage.
-- **`CoPilotPromptTests`**: numbered source + diagnostics present; schema text present; both tasks.
+- **`ShaderAssistPromptTests`**: numbered source + diagnostics present; schema text present; both tasks.
 - **`ClaudeCodeRunnerTests`**: inject a fake `ProcessRunning` → assert exact argv
   (`-p`, `--output-format json`, `--model`, `--append-system-prompt`, prompt) and that a non-zero/auth exit
   maps to `.notAuthenticated`; binary-resolution order tested with injected candidate existence.
@@ -187,14 +187,14 @@ public enum CoPilotResponseParser {
 ## 9. Files Touched (anticipated)
 
 **New (ShadertoyISFKit — pure, testable)**
-- `Sources/.../CoPilot/CoPilotTypes.swift` (AIFixResult/AIEdit/AISuggestionsResult/AIIdea/CoPilotTask/errors)
-- `Sources/.../CoPilot/CoPilotPrompt.swift`
-- `Sources/.../CoPilot/CoPilotResponseParser.swift`
-- `Tests/.../CoPilotResponseParserTests.swift`, `CoPilotPromptTests.swift`
+- `Sources/.../ShaderAssist/ShaderAssistTypes.swift` (AIFixResult/AIEdit/AISuggestionsResult/AIIdea/ShaderAssistTask/errors)
+- `Sources/.../ShaderAssist/ShaderAssistPrompt.swift`
+- `Sources/.../ShaderAssist/ShaderAssistResponseParser.swift`
+- `Tests/.../ShaderAssistResponseParserTests.swift`, `ShaderAssistPromptTests.swift`
 
 **New (app)**
-- `App/TrueISFEditor/CoPilot/ClaudeCodeRunner.swift` (+ `ProcessRunning` protocol)
-- `App/TrueISFEditor/CoPilot/CoPilotViewModel.swift`
+- `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift` (+ `ProcessRunning` protocol)
+- `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift`
 - `App/TrueISFEditor/Views/DiffReviewPanel.swift`, `Views/SuggestionsPanel.swift`
 - `App/TrueISFEditorTests/ClaudeCodeRunnerTests.swift`
 
@@ -207,9 +207,9 @@ public enum CoPilotResponseParser {
 ---
 
 ## 10. Build sequence
-1. Engine: types + `CoPilotPrompt` + `CoPilotResponseParser` (TDD).
+1. Engine: types + `ShaderAssistPrompt` + `ShaderAssistResponseParser` (TDD).
 2. App: `ClaudeCodeRunner` (TDD with fake process) + binary resolution + Settings path field.
-3. App: `CoPilotViewModel` + **Diagnose & Fix** button + `DiffReviewPanel` (proves the pipeline end-to-end).
+3. App: `ShaderAssistViewModel` + **Diagnose & Fix** button + `DiffReviewPanel` (proves the pipeline end-to-end).
 4. App: **Suggestions** button + `SuggestionsPanel` (reuses the runner).
 5. Final: on-device smoke (user), manual Mechanic review.
 

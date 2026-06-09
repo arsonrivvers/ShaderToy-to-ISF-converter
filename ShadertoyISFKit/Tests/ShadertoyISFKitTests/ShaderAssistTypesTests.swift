@@ -1,6 +1,6 @@
 import XCTest
 @testable import ShadertoyISFKit
-final class CoPilotTypesTests: XCTestCase {
+final class ShaderAssistTypesTests: XCTestCase {
     func testDecodeFixResult() throws {
         let json = #"{"explanation":"texture2D unavailable","edits":[{"fromLine":11,"toLine":11,"replacement":"IMG_PIXEL(a,b)","rationale":"use ISF sampler"}]}"#
         let r = try JSONDecoder().decode(AIFixResult.self, from: Data(json.utf8))
