@@ -5,6 +5,8 @@ struct EditorScreen: View {
     @ObservedObject var library: LibraryModel
     @ObservedObject var vm: EditorViewModel
     @StateObject private var output = OutputWindowManager()
+    @StateObject private var shaderAssist = ShaderAssistViewModel(
+        binaryOverride: { UserDefaults.standard.string(forKey: "claudeBinaryPath") })
 
     var body: some View {
         NavigationSplitView {
@@ -23,6 +25,9 @@ struct EditorScreen: View {
                         onJump: { vm.editor.revealLine($0) },
                         onApply: { vm.apply($0) })
                         .frame(height: 150)
+                        .padding(6)
+                    Divider()
+                    shaderAssistSection
                         .padding(6)
                 }
                 // Right: preview + input controls.
@@ -72,6 +77,52 @@ struct EditorScreen: View {
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
             }
         }
+    }
+
+    /// AI assistant controls + result panel, below the diagnostics list in the center column.
+    private var shaderAssistSection: some View {
+        let running: Bool = { if case .running = shaderAssist.state { return true } else { return false } }()
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button("Diagnose & Fix") {
+                    shaderAssist.run(.diagnoseAndFix, source: vm.file.source,
+                                     diagnostics: vm.diagnostics.diagnostics)
+                }.disabled(running)
+                Button("Suggestions") {
+                    shaderAssist.run(.suggestions, source: vm.file.source,
+                                     diagnostics: vm.diagnostics.diagnostics)
+                }.disabled(running)
+                if running {
+                    ProgressView().controlSize(.small)
+                    Button("Cancel") { shaderAssist.cancel() }
+                }
+            }
+            Text("Uses your Claude subscription").font(.caption2).foregroundStyle(.secondary)
+
+            switch shaderAssist.state {
+            case .idle, .running:
+                EmptyView()
+            case .fix(let r):
+                DiffReviewPanel(result: r,
+                                sourceLines: vm.file.source.components(separatedBy: "\n"),
+                                handled: $shaderAssist.handledEdits) { edit in
+                    vm.apply(ShaderAssistViewModel.textEdit(from: edit, source: vm.file.source))
+                }
+                .frame(maxHeight: 280)
+            case .suggestions(let r):
+                SuggestionsPanel(result: r) { vm.editor.revealLine($0) }
+                    .frame(maxHeight: 280)
+            case .rawAnswer(let s):
+                ScrollView {
+                    Text(s).font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 280)
+            case .error(let m):
+                Text(m).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var renderControlsBar: some View {
