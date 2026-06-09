@@ -17,7 +17,7 @@ Ran `CorpusRenderTests` over every `AR_*.fs` in `/Library/Graphics/ISF` through 
 | `texture2D()` legacy GL function | 67 | Legitimate — ISFMSLKit/VDMX reject it too (needs `texture()`/`IMG_PIXEL`). Matches VDMX. |
 | Reserved-word collisions (`active`, …) | 17 | Legitimate — MSL reserved words; VDMX rejects identically. |
 | Other GLSL errors (undeclared ident, fn redeclaration, line-continuation, …) | 33 | Mostly genuine shader-side errors; a couple may be ISF-builtin naming worth a later look. |
-| Genuinely slow/hang (>20s) | 3 | `day12_v12`, `day12_v13`, `day14_v01` — transpiler is genuinely slow or hangs on these. In the live app they'd sit "compiling" a while; user can switch to WebKit or wait for the PINCache. Worth a deeper look but 0.3% of corpus. |
+| Slow first-transpile (>20s in the 20s run) | 3 | **All 3 actually PASS** (probed at 120s): `day12_v12` (1132 lines, 17 loops) completes in **70s** first-transpile then PINCaches; `day12_v13` (4s) and `day14_v01` (0s) were just cascade victims queued behind it. **No hangs, no genuine failures.** So the true effective pass count is **779/896**. |
 
 The 5s→20s harness change (wait for GENUINE per-shader completion) resolved 13 of the original 16
 "timeouts": they were cold-transpile latency cascading through the serial transpile queue, not real
@@ -29,10 +29,11 @@ matches VDMX *including its rejections*, which is the fidelity goal.
 2. ✅ Wrapped `createAndRender` in a C++ try/catch (`ISFMSLSafeRender`) for render-time crash safety.
 3. ✅ Added a blit pixel-format adaptive guard in `draw(in:)`.
 
-## Remaining follow-ups (not P1.5 blockers)
-- Investigate the 3 genuinely-slow shaders (`day12_v12/v13`, `day14_v01`) — likely a heavy multipass/loop
-  the transpiler struggles with.
-- Spot-check a few "other" errors (`uvAspect`, `_current_imgRect`) for ISF-builtin naming gaps.
+## Remaining follow-ups (resolved / non-blocking)
+- ✅ The 3 "slow" shaders all PASS (none hang); `day12_v12` takes ~70s on first transpile only. Future nicety:
+  a "compiling…" progress affordance / cache pre-warm for very large (>1000-line) shaders.
+- ✅ Spot-checked "other" errors: `uvAspect` is genuinely undeclared in the shader body (real shader bug),
+  not an ISFMSLKit integration gap. The "other" bucket is genuine shader-side errors, consistent with VDMX.
 
 ## How to re-run
 `echo "" > /tmp/trueisf-corpus.run` then run `-only-testing:TrueISFEditorTests/CorpusRenderTests`
