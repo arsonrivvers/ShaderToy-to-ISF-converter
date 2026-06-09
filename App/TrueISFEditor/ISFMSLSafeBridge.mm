@@ -45,3 +45,23 @@ ISFMSLScene * _Nullable ISFMSLSafeCreateAndLoad(id<MTLDevice> device,
         return nil;
     }
 }
+
+id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
+                                          NSSize size,
+                                          id<MTLCommandBuffer> commandBuffer,
+                                          NSString * _Nullable * _Nullable errorOut)
+{
+    if (errorOut) { *errorOut = nil; }
+    try {
+        id<VVMTLTextureImage> img = [scene createAndRenderToTextureSized:size inCommandBuffer:commandBuffer];
+        return img.texture;
+    }
+    catch (const std::exception &e) {
+        if (errorOut) { *errorOut = [NSString stringWithFormat:@"Render exception: %s", e.what()]; }
+        return nil;
+    }
+    catch (...) {
+        if (errorOut) { *errorOut = @"Unknown render exception."; }
+        return nil;
+    }
+}

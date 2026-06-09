@@ -34,7 +34,10 @@ final class CorpusRenderTests: XCTestCase {
                 failures.append((f.lastPathComponent, "unreadable")); continue
             }
             controller.load(isf: src)  // load() resets compile state synchronously
-            let ok = await pollCompile(controller, timeout: 5)
+            // Wait for GENUINE completion: the transpile queue is serial, so a too-short wait makes
+            // the *next* shaders queue behind a slow one and falsely time out (cascade). 20s is the
+            // safety cap for a single pathological transpile; almost all finish in well under 1s.
+            let ok = await pollCompile(controller, timeout: 20)
             if ok { pass += 1 }
             else { failures.append((f.lastPathComponent, controller.compileError ?? "no-compile (timeout/unknown)")) }
             if i % 100 == 0 { print("CORPUS progress: \(i)/\(files.count) — pass \(pass), fail \(failures.count)") }

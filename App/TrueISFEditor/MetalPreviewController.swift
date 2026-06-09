@@ -194,10 +194,10 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     func renderOnce() -> MTLTexture? {
         guard let scene = scene, let cb = renderQueue.makeCommandBuffer() else { return nil }
         let size = targetSize()
-        let img = scene.createAndRender(
-            toTextureSized: NSSize(width: size.width, height: size.height), in: cb)
+        var err: NSString?
+        let tex = ISFMSLSafeRender(scene, NSSize(width: size.width, height: size.height), cb, &err)
         cb.commit()
-        return img.texture
+        return tex
     }
 }
 
@@ -223,11 +223,25 @@ extension MetalPreviewController: MTKViewDelegate {
         // Single command buffer: scene render -> blit into drawable -> present -> commit.
         guard let cb = renderQueue.makeCommandBuffer() else { return }
         let size = targetSize()
-        let img = scene.createAndRender(
-            toTextureSized: NSSize(width: size.width, height: size.height), in: cb)
-        let srcTex = img.texture
+        var renderErr: NSString?
+        guard let srcTex = ISFMSLSafeRender(
+            scene, NSSize(width: size.width, height: size.height), cb, &renderErr) else {
+            // Render-time C++ exception (a compiled-but-pathological shader threw mid-render).
+            // Invalidate the scene so we stop retrying and surface the error; do NOT commit the
+            // possibly-partially-encoded command buffer. Next frame hits the clear-on-fail path.
+            self.scene = nil
+            self.compileValid = false
+            self.compileError = (renderErr as String?) ?? "Render error."
+            return
+        }
 
         let dstTex = drawable.texture
+        // Adapt the view's pixel format to the engine's output if they differ — a cross-format blit
+        // would mis-copy or assert. Takes effect next frame when the drawable is reallocated.
+        if srcTex.pixelFormat != dstTex.pixelFormat {
+            view.colorPixelFormat = srcTex.pixelFormat
+            return
+        }
         // 1:1 blit of the overlapping region (clamp to the min extent of both textures).
         let w = min(srcTex.width, dstTex.width)
         let h = min(srcTex.height, dstTex.height)

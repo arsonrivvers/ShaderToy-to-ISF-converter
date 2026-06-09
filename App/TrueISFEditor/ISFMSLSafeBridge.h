@@ -25,6 +25,15 @@ ISFMSLScene * _Nullable ISFMSLSafeCreateAndLoad(id<MTLDevice> device,
                                                 BOOL *compileError,
                                                 NSString * _Nullable * _Nullable message);
 
+/// Renders `scene` to a texture of `size` on `commandBuffer`, catching any C++ exception thrown by
+/// the transpiler/engine at render time (a compiled-but-pathological shader can still throw mid-render
+/// during a live set). Returns the rendered MTLTexture, or nil if an exception was thrown (then
+/// *errorOut is set). The returned texture's pixel format is whatever the engine produced.
+id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
+                                          NSSize size,
+                                          id<MTLCommandBuffer> commandBuffer,
+                                          NSString * _Nullable * _Nullable errorOut);
+
 #ifdef __cplusplus
 }
 #endif
