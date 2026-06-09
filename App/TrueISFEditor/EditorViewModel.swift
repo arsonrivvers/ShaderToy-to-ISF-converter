@@ -27,7 +27,7 @@ final class EditorViewModel: ObservableObject {
         fitToWindow = false
     }
 
-    let preview = ISFPreviewController()
+    let preview = WebKitPreviewController()
     let editor = CodeEditorController()
 
     private var debounceTask: Task<Void, Never>?

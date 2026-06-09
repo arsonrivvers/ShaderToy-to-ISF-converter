@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import WebKit
 import Combine
 
@@ -15,11 +16,14 @@ struct ISFPreviewInput: Identifiable, Equatable {
 }
 
 @MainActor
-final class ISFPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
+final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate, PreviewEngine {
     @Published var compileValid = false
     @Published var compileError: String?
     @Published var compileErrorLine: Int?
     @Published var inputs: [ISFPreviewInput] = []
+
+    var nsView: NSView { webView }
+    var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
 
     let webView: WKWebView
     private var ready = false

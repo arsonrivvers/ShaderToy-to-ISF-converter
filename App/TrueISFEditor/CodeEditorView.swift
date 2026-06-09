@@ -9,7 +9,7 @@ struct EditorDiagnostic: Codable, Equatable {
 }
 
 /// Owns the WKWebView hosting CodeMirror 6 and bridges text + diagnostics to/from Swift.
-/// Mirrors `ISFPreviewController`'s ready-gating + message-handler pattern.
+/// Mirrors `WebKitPreviewController`'s ready-gating + message-handler pattern.
 @MainActor
 final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
     let webView: WKWebView

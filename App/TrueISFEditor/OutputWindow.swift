@@ -6,7 +6,7 @@ import AppKit
 @MainActor
 final class OutputWindowManager: ObservableObject {
     private var window: NSWindow?
-    let controller = ISFPreviewController()
+    let controller = WebKitPreviewController()
 
     /// Open (or focus) the output window and render the given source.
     func show(source: String) {
@@ -44,7 +44,7 @@ final class OutputWindowManager: ObservableObject {
 }
 
 private struct OutputWindowView: View {
-    let controller: ISFPreviewController
+    let controller: WebKitPreviewController
     var body: some View {
         ISFPreviewView(webView: controller.webView)
             .frame(minWidth: 320, minHeight: 240)

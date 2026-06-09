@@ -40,7 +40,7 @@ struct TrueISFEditorApp: App {
         }
 
         // Headless debug affordance: `SHADERTOY_DEBUG_PREVIEW=1` instantiates an
-        // ISFPreviewController, loads a known-good ISF and a known-bad ISF (tanh without
+        // WebKitPreviewController, loads a known-good ISF and a known-bad ISF (tanh without
         // polyfill), prints the compile results from the WKWebView harness, and exits.
         // Used to verify the preview pipeline in the real entitled app — WebGL only works
         // in the real binary, not in bare xctest.
@@ -67,7 +67,7 @@ void main() {
 }
 """
 
-                let controller = ISFPreviewController()
+                let controller = WebKitPreviewController()
 
                 // Wait for harness to become ready (poll up to 5s)
                 var waited = 0

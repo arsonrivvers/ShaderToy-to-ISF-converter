@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 struct PreviewControlsView: View {
-    @ObservedObject var controller: ISFPreviewController
+    @ObservedObject var controller: WebKitPreviewController
     @State private var floats: [String: Double] = [:]
     @State private var bools: [String: Bool] = [:]
     @State private var points: [String: [Double]] = [:]
