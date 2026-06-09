@@ -38,10 +38,10 @@ struct EditorScreen: View {
                     renderControlsBar
                         .padding(.horizontal, 6)
                         .padding(.bottom, 4)
-                    ISFPreviewView(webView: vm.preview.webView)
+                    ISFPreviewView(coordinator: vm.preview)
                         .frame(minHeight: 220)
                     Divider()
-                    PreviewControlsView(controller: vm.preview)
+                    PreviewControlsView(coordinator: vm.preview)
                         .frame(height: 170)
                 }
                 .frame(minWidth: 320)

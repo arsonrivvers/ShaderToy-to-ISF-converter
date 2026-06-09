@@ -6,13 +6,13 @@ import AppKit
 @MainActor
 final class OutputWindowManager: ObservableObject {
     private var window: NSWindow?
-    let controller = WebKitPreviewController()
+    let coordinator = PreviewCoordinator(metal: WebKitPreviewController(), webkit: WebKitPreviewController())
 
     /// Open (or focus) the output window and render the given source.
     func show(source: String) {
-        controller.load(isf: source)
+        coordinator.load(isf: source)
         if window == nil {
-            let host = NSHostingView(rootView: OutputWindowView(controller: controller))
+            let host = NSHostingView(rootView: OutputWindowView(coordinator: coordinator))
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -29,12 +29,12 @@ final class OutputWindowManager: ObservableObject {
     /// Push a new source if the window is open; no-op otherwise.
     func update(source: String) {
         guard window?.isVisible == true else { return }
-        controller.load(isf: source)
+        coordinator.load(isf: source)
     }
 
     /// Apply output dimensions to the render buffer and size the window to match (1:1) when fixed.
     func setRenderSize(width: Int?, height: Int?) {
-        controller.setRenderSize(width: width, height: height)
+        coordinator.setRenderSize(width: width, height: height)
         if let w = width, let h = height, w > 0, h > 0 {
             window?.setContentSize(NSSize(width: w, height: h))
         }
@@ -44,9 +44,9 @@ final class OutputWindowManager: ObservableObject {
 }
 
 private struct OutputWindowView: View {
-    let controller: WebKitPreviewController
+    @ObservedObject var coordinator: PreviewCoordinator
     var body: some View {
-        ISFPreviewView(webView: controller.webView)
+        ISFPreviewView(coordinator: coordinator)
             .frame(minWidth: 320, minHeight: 240)
     }
 }

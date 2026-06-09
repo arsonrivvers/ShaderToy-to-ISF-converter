@@ -49,6 +49,9 @@ targets:
       - TrueISFEditor/WebKitShaderFetcher.swift
       - TrueISFEditor/Models/ISFFile.swift
       - TrueISFEditor/Models/LibraryModel.swift
+      - TrueISFEditor/PreviewEngine.swift
+      - TrueISFEditor/PreviewCoordinator.swift
+      - TrueISFEditor/ISFPreviewInput.swift
     dependencies:
       - package: ShadertoyISFKit
     settings:

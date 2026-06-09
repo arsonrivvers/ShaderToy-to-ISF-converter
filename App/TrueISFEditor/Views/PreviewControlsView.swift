@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 struct PreviewControlsView: View {
-    @ObservedObject var controller: WebKitPreviewController
+    @ObservedObject var coordinator: PreviewCoordinator
     @State private var floats: [String: Double] = [:]
     @State private var bools: [String: Bool] = [:]
     @State private var points: [String: [Double]] = [:]
@@ -12,10 +12,10 @@ struct PreviewControlsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if controller.inputs.isEmpty {
+                if coordinator.inputs.isEmpty {
                     Text("No adjustable inputs").font(.caption).foregroundStyle(.secondary)
                 }
-                ForEach(controller.inputs) { input in
+                ForEach(coordinator.inputs) { input in
                     switch input.type {
                     case "float":  floatControl(input)
                     case "bool":   boolControl(input)
@@ -36,7 +36,7 @@ struct PreviewControlsView: View {
         let lo = (input.min as? Double) ?? 0, hi = (input.max as? Double) ?? 1
         let binding = Binding<Double>(
             get: { floats[input.name] ?? (input.defaultValue as? Double) ?? lo },
-            set: { floats[input.name] = $0; controller.setInput(input.name, "\($0)") })
+            set: { floats[input.name] = $0; coordinator.setInput(input.name, "\($0)") })
         VStack(alignment: .leading, spacing: 2) {
             Text(input.name).font(.caption)
             Slider(value: binding, in: lo...hi)
@@ -46,7 +46,7 @@ struct PreviewControlsView: View {
     @ViewBuilder private func boolControl(_ input: ISFPreviewInput) -> some View {
         let binding = Binding<Bool>(
             get: { bools[input.name] ?? (input.defaultValue as? Bool ?? false) },
-            set: { bools[input.name] = $0; controller.setInput(input.name, $0 ? "true" : "false") })
+            set: { bools[input.name] = $0; coordinator.setInput(input.name, $0 ? "true" : "false") })
         Toggle(input.name, isOn: binding).font(.caption)
     }
 
@@ -65,7 +65,7 @@ struct PreviewControlsView: View {
                         var p = points[input.name] ?? def
                         p[axis] = v
                         points[input.name] = p
-                        controller.setInput(input.name, "[\(p[0]), \(p[1])]")
+                        coordinator.setInput(input.name, "[\(p[0]), \(p[1])]")
                     })
                 HStack(spacing: 4) {
                     Text(axis == 0 ? "x" : "y").font(.caption2).foregroundStyle(.secondary)
@@ -87,7 +87,7 @@ struct PreviewControlsView: View {
             set: { newColor in
                 let rgba = rgbaComponents(newColor)
                 colors[input.name] = rgba
-                controller.setInput(input.name, "[\(rgba[0]), \(rgba[1]), \(rgba[2]), \(rgba[3])]")
+                coordinator.setInput(input.name, "[\(rgba[0]), \(rgba[1]), \(rgba[2]), \(rgba[3])]")
             })
         ColorPicker(input.name, selection: binding, supportsOpacity: true).font(.caption)
     }
@@ -102,7 +102,7 @@ struct PreviewControlsView: View {
             // Enum: a Picker over the named options, sending the underlying value.
             let binding = Binding<Double>(
                 get: { longs[input.name] ?? def },
-                set: { longs[input.name] = $0; controller.setInput(input.name, "\(Int($0))") })
+                set: { longs[input.name] = $0; coordinator.setInput(input.name, "\(Int($0))") })
             VStack(alignment: .leading, spacing: 2) {
                 Text(input.name).font(.caption)
                 Picker("", selection: binding) {
@@ -117,7 +117,7 @@ struct PreviewControlsView: View {
             let hi = Int((input.max as? Double) ?? 10)
             let binding = Binding<Int>(
                 get: { Int(longs[input.name] ?? def) },
-                set: { longs[input.name] = Double($0); controller.setInput(input.name, "\($0)") })
+                set: { longs[input.name] = Double($0); coordinator.setInput(input.name, "\($0)") })
             Stepper(value: binding, in: lo...max(hi, lo)) {
                 Text("\(input.name): \(Int(current))").font(.caption)
             }
