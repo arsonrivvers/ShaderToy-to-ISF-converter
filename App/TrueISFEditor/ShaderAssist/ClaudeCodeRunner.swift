@@ -1,8 +1,8 @@
 import Foundation
 
-struct ProcessOutput { let stdout: String; let stderr: String; let exitCode: Int32 }
+struct ProcessOutput: Sendable { let stdout: String; let stderr: String; let exitCode: Int32 }
 
-protocol ProcessRunning {
+protocol ProcessRunning: Sendable {
     func run(executable: URL, args: [String], timeout: TimeInterval) throws -> ProcessOutput
 }
 
@@ -48,8 +48,14 @@ final class ClaudeCodeRunner {
         lastArgsForTest = args
         let proc = makeProcess()
         let out: ProcessOutput
-        do { out = try proc.run(executable: binary, args: args, timeout: timeout) }
-        catch { throw ClaudeRunError.timedOut }
+        do {
+            // Run the blocking subprocess OFF the main actor so the UI stays responsive.
+            out = try await Task.detached(priority: .userInitiated) {
+                try proc.run(executable: binary, args: args, timeout: timeout)
+            }.value
+        }
+        catch let e as ClaudeRunError { throw e }
+        catch { throw ClaudeRunError.processFailed("\(error)") }
         if out.exitCode != 0 {
             let lower = (out.stderr + out.stdout).lowercased()
             if lower.contains("login") || lower.contains("api key") || lower.contains("auth") {

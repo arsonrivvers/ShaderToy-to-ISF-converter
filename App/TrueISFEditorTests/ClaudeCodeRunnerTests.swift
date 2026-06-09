@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class ClaudeCodeRunnerTests: XCTestCase {
-    final class FakeProcess: ProcessRunning {
+    final class FakeProcess: ProcessRunning, @unchecked Sendable {
         var stdout: String; var exitCode: Int32; var stderr: String
         init(stdout: String, exitCode: Int32, stderr: String) { self.stdout = stdout; self.exitCode = exitCode; self.stderr = stderr }
         func run(executable: URL, args: [String], timeout: TimeInterval) throws -> ProcessOutput {
