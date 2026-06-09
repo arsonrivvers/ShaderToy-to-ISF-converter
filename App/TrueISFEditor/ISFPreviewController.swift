@@ -24,6 +24,7 @@ final class ISFPreviewController: NSObject, ObservableObject, WKScriptMessageHan
     let webView: WKWebView
     private var ready = false
     private var pendingISF: String?
+    private var pendingRenderSize: String?
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -48,6 +49,15 @@ final class ISFPreviewController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("setInput(\(nameLit), \(jsonValue));", completionHandler: nil)
     }
 
+    /// Set explicit output dimensions (drives RENDERSIZE + the canvas buffer). Pass nil/nil to fit.
+    func setRenderSize(width: Int?, height: Int?) {
+        let js: String
+        if let w = width, let h = height, w > 0, h > 0 { js = "setRenderSize(\(w), \(h));" }
+        else { js = "setRenderSize(0, 0);" }
+        guard ready else { pendingRenderSize = js; return }
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     private func jsStringLiteral(_ s: String) -> String? {
         // JSONEncoder turns a String into a valid, fully-escaped JS string literal.
         guard let data = try? JSONEncoder().encode(s) else { return nil }
@@ -60,6 +70,7 @@ final class ISFPreviewController: NSObject, ObservableObject, WKScriptMessageHan
         switch type {
         case "ready":
             ready = true
+            if let s = pendingRenderSize { pendingRenderSize = nil; webView.evaluateJavaScript(s, completionHandler: nil) }
             if let p = pendingISF { pendingISF = nil; load(isf: p) }
         case "compile":
             compileValid = (dict["valid"] as? Bool) ?? false

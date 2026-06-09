@@ -29,12 +29,15 @@ struct EditorScreen: View {
                         Text(vm.file.displayName).font(.headline)
                         if vm.file.isDirty { Text("•").foregroundStyle(.secondary) }
                         Spacer()
-                        Button { output.show(source: vm.file.source) } label: {
+                        Button { output.show(source: vm.file.source); applyResolution() } label: {
                             Image(systemName: "rectangle.portrait.and.arrow.forward")
                         }
                         .help("Pop out the output into its own window")
                     }
                     .padding(6)
+                    renderControlsBar
+                        .padding(.horizontal, 6)
+                        .padding(.bottom, 4)
                     ISFPreviewView(webView: vm.preview.webView)
                         .frame(minHeight: 220)
                     Divider()
@@ -54,13 +57,43 @@ struct EditorScreen: View {
             }
         }
         .frame(minWidth: 1120, minHeight: 700)
-        .onAppear { if library.sources.isEmpty { library.loadStandardLibraries() } }
+        .onAppear {
+            if library.sources.isEmpty { library.loadStandardLibraries() }
+            applyResolution()
+        }
         .onChange(of: vm.file.source) { src in output.update(source: src) }
+        .onChange(of: vm.fitToWindow) { _ in applyResolution() }
+        .onChange(of: vm.renderWidth) { _ in applyResolution() }
+        .onChange(of: vm.renderHeight) { _ in applyResolution() }
         .sheet(isPresented: $vm.requestImport) {
             ShadertoyImportSheet { isf, warnings, name in
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
             }
         }
+    }
+
+    private var renderControlsBar: some View {
+        HStack(spacing: 6) {
+            Toggle("Fit", isOn: $vm.fitToWindow).toggleStyle(.checkbox)
+            TextField("W", value: $vm.renderWidth, format: .number)
+                .frame(width: 52).disabled(vm.fitToWindow)
+            Text("×").foregroundStyle(.secondary)
+            TextField("H", value: $vm.renderHeight, format: .number)
+                .frame(width: 52).disabled(vm.fitToWindow)
+            Button("÷2") { vm.halveRenderSize() }
+            Button("×2") { vm.doubleRenderSize() }
+            Spacer()
+        }
+        .font(.caption)
+        .textFieldStyle(.roundedBorder)
+    }
+
+    /// Push the current output dimensions to both the inline preview and the pop-out window.
+    private func applyResolution() {
+        let w: Int? = vm.fitToWindow ? nil : vm.renderWidth
+        let h: Int? = vm.fitToWindow ? nil : vm.renderHeight
+        vm.preview.setRenderSize(width: w, height: h)
+        output.setRenderSize(width: w, height: h)
     }
 
     private func addFolder() {

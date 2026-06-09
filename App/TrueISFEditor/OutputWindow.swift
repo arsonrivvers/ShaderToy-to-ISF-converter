@@ -32,6 +32,14 @@ final class OutputWindowManager: ObservableObject {
         controller.load(isf: source)
     }
 
+    /// Apply output dimensions to the render buffer and size the window to match (1:1) when fixed.
+    func setRenderSize(width: Int?, height: Int?) {
+        controller.setRenderSize(width: width, height: height)
+        if let w = width, let h = height, w > 0, h > 0 {
+            window?.setContentSize(NSSize(width: w, height: h))
+        }
+    }
+
     var isOpen: Bool { window?.isVisible == true }
 }
 

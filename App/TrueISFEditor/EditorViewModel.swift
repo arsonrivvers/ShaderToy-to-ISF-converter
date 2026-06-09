@@ -12,6 +12,21 @@ final class EditorViewModel: ObservableObject {
     /// Set by the "New from Shadertoy…" command; the editor screen presents the sheet.
     @Published var requestImport = false
 
+    // Output dimensions. `fitToWindow` = render at the preview pane size (default);
+    // otherwise render at renderWidth × renderHeight (becomes RENDERSIZE).
+    @Published var fitToWindow = true
+    @Published var renderWidth = 640
+    @Published var renderHeight = 480
+
+    func halveRenderSize() {
+        renderWidth = max(1, renderWidth / 2); renderHeight = max(1, renderHeight / 2)
+        fitToWindow = false
+    }
+    func doubleRenderSize() {
+        renderWidth *= 2; renderHeight *= 2
+        fitToWindow = false
+    }
+
     let preview = ISFPreviewController()
     let editor = CodeEditorController()
 
