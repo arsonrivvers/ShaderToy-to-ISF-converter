@@ -16,6 +16,18 @@ targets:
         buildPhase: resources
     dependencies:
       - package: ShadertoyISFKit
+      - framework: ../vendor/prebuilt/ISFMSLKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/VVMetalKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINCache.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINOperation.framework
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditor
@@ -25,6 +37,9 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: "0.1.0"
         GENERATE_INFOPLIST_FILE: NO
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/../Frameworks
+        SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
   TrueISFEditorTests:
     type: bundle.unit-test
     platform: macOS
