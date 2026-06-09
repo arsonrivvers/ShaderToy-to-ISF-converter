@@ -72,7 +72,61 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             compileValid = true
             compileError = nil
             compileErrorLine = nil
-            // inputs parsed in the next task
+            inputs = Self.mapInputs(s.inputs)
+        }
+    }
+
+    static func mapInputs(_ attribs: [any ISFMSLSceneAttrib]) -> [ISFPreviewInput] {
+        attribs.compactMap { attrib in
+            let typeStr: String
+            switch attrib.type {
+            case .event:   typeStr = "event"
+            case .bool:    typeStr = "bool"
+            case .long:    typeStr = "long"
+            case .float:   typeStr = "float"
+            case .point2D: typeStr = "point2D"
+            case .color:   typeStr = "color"
+            default:       return nil   // image/audio/cube: unsupported in P1.5 controls
+            }
+
+            // Read default/min/max via doubleValue — works for all scalar types.
+            // For point2D and color, store as [Double] so controls can read them.
+            let defaultValue: Any?
+            let minVal: Any?
+            let maxVal: Any?
+
+            switch attrib.type {
+            case .color:
+                let d = attrib.defaultVal
+                defaultValue = [d.colorValue(by: 0), d.colorValue(by: 1),
+                                d.colorValue(by: 2), d.colorValue(by: 3)]
+                minVal = nil; maxVal = nil
+            case .point2D:
+                let d = attrib.defaultVal
+                defaultValue = [d.pointValue(by: 0), d.pointValue(by: 1)]
+                let mn = attrib.minVal
+                minVal = [mn.pointValue(by: 0), mn.pointValue(by: 1)]
+                let mx = attrib.maxVal
+                maxVal = [mx.pointValue(by: 0), mx.pointValue(by: 1)]
+            case .bool:
+                defaultValue = attrib.defaultVal.boolValue
+                minVal = nil; maxVal = nil
+            case .event:
+                defaultValue = nil; minVal = nil; maxVal = nil
+            default:
+                defaultValue = attrib.defaultVal.doubleValue
+                minVal = attrib.minVal.doubleValue
+                maxVal = attrib.maxVal.doubleValue
+            }
+
+            let labels: [String]? = attrib.labelArray.isEmpty ? nil : attrib.labelArray
+            let values: [Double]? = attrib.valArray.isEmpty ? nil
+                : attrib.valArray.map { $0.doubleValue }
+
+            return ISFPreviewInput(name: attrib.name, type: typeStr,
+                                   defaultValue: defaultValue,
+                                   min: minVal, max: maxVal,
+                                   labels: labels, values: values)
         }
     }
 
@@ -86,7 +140,33 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         return nil
     }
 
-    // Stubs (filled by later tasks) so this conforms + compiles now:
-    func setInput(_ name: String, _ jsonValue: String) { /* Task 6 */ }
+    func setInput(_ name: String, _ jsonValue: String) {
+        guard let scene else { return }
+        // Parse the JSON fragment (bool/number/array).
+        guard let data = jsonValue.data(using: .utf8),
+              let raw = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) else { return }
+        var val: ISFMSLSceneVal? = nil
+        if let b = raw as? Bool {
+            val = ISFMSLSceneVal.create(with: b) as? ISFMSLSceneVal
+        } else if let arr = raw as? [Any] {
+            let doubles = arr.compactMap { ($0 as? NSNumber)?.doubleValue }
+            if doubles.count == 2 {
+                val = ISFMSLSceneVal.create(withPoint2D: NSPoint(x: doubles[0], y: doubles[1])) as? ISFMSLSceneVal
+            } else if doubles.count >= 4 {
+                val = ISFMSLSceneVal.create(with: NSColor(red: doubles[0], green: doubles[1],
+                                                          blue: doubles[2], alpha: doubles[3])) as? ISFMSLSceneVal
+            }
+        } else if let n = raw as? NSNumber {
+            // Distinguish integer vs floating-point NSNumber.
+            if CFNumberIsFloatType(n as CFNumber) {
+                val = ISFMSLSceneVal.create(withFloat: n.doubleValue) as? ISFMSLSceneVal
+            } else {
+                val = ISFMSLSceneVal.create(withLong: n.int32Value) as? ISFMSLSceneVal
+            }
+        }
+        if let val {
+            scene.setValue(val, forInputNamed: name)
+        }
+    }
     func setRenderSize(width: Int?, height: Int?) { /* Task 7 */ }
 }

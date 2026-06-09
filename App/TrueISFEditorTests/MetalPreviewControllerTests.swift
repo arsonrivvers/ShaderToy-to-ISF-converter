@@ -35,6 +35,22 @@ final class MetalPreviewControllerTests: XCTestCase {
         XCTAssertNotNil(c.compileError)
     }
 
+    func testParsesInputs() async throws {
+        let isf = """
+        /*{ "ISFVSN":"2", "INPUTS":[
+          {"NAME":"level","TYPE":"float","DEFAULT":0.5,"MIN":0.0,"MAX":1.0},
+          {"NAME":"on","TYPE":"bool","DEFAULT":true},
+          {"NAME":"tint","TYPE":"color","DEFAULT":[1,0,0,1]}
+        ]}*/
+        void main(){ gl_FragColor = tint * level * (on?1.0:0.0); }
+        """
+        let c = MetalPreviewController()
+        c.load(isf: isf)
+        try await waitUntil { c.inputs.count == 3 }
+        XCTAssertEqual(Set(c.inputs.map { $0.name }), ["level","on","tint"])
+        XCTAssertEqual(c.inputs.first { $0.name == "level" }?.type, "float")
+    }
+
     private func waitUntil(timeout: TimeInterval = 10, _ cond: @escaping () -> Bool) async throws {
         let start = Date()
         while !cond() {
