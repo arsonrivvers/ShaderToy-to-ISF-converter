@@ -51,6 +51,16 @@ final class MetalPreviewControllerTests: XCTestCase {
         XCTAssertEqual(c.inputs.first { $0.name == "level" }?.type, "float")
     }
 
+    func testRendersTextureForGoodShader() async throws {
+        let c = MetalPreviewController()
+        c.setRenderSize(width: 64, height: 64)
+        c.load(isf: goodISF)
+        try await waitUntil { c.compileValid }
+        let tex = c.renderOnce()
+        XCTAssertNotNil(tex)
+        XCTAssertEqual(tex?.width, 64)
+    }
+
     private func waitUntil(timeout: TimeInterval = 10, _ cond: @escaping () -> Bool) async throws {
         let start = Date()
         while !cond() {

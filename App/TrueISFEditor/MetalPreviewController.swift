@@ -17,13 +17,16 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
 
     private let device: MTLDevice
+    private let renderQueue: MTLCommandQueue
     private var scene: ISFMSLScene?
+    private var renderSize: MTLSize?
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
 
     override init() {
         let props = RenderProperties.global()
         self.device = props.device
+        self.renderQueue = props.renderQueue
         // Global singletons ISFMSLKit needs BEFORE any scene work:
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: props.device) }
         if ISFMSLCache.primary == nil {
@@ -39,6 +42,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         mtkView.isPaused = false
         mtkView.enableSetNeedsDisplay = false
         mtkView.framebufferOnly = false
+        mtkView.delegate = self
     }
 
     func load(isf: String) {
@@ -168,5 +172,74 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             scene.setValue(val, forInputNamed: name)
         }
     }
-    func setRenderSize(width: Int?, height: Int?) { /* Task 7 */ }
+    func setRenderSize(width: Int?, height: Int?) {
+        if let w = width, let h = height, w > 0, h > 0 {
+            renderSize = MTLSize(width: w, height: h, depth: 1)
+        } else {
+            renderSize = nil
+        }
+    }
+
+    private func targetSize() -> MTLSize {
+        if let r = renderSize { return r }
+        let s = mtkView.drawableSize
+        return MTLSize(width: max(Int(s.width), 1), height: max(Int(s.height), 1), depth: 1)
+    }
+
+    /// Test hook: render one frame into an offscreen texture and return it. No drawable involved.
+    @discardableResult
+    func renderOnce() -> MTLTexture? {
+        guard let scene = scene, let cb = renderQueue.makeCommandBuffer() else { return nil }
+        let size = targetSize()
+        let img = scene.createAndRender(
+            toTextureSized: NSSize(width: size.width, height: size.height), in: cb)
+        cb.commit()
+        return img.texture
+    }
+}
+
+extension MetalPreviewController: MTKViewDelegate {
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+    func draw(in view: MTKView) {
+        guard let drawable = view.currentDrawable else { return }
+
+        // Compile-failure path: clear the drawable to opaque black and present.
+        guard let scene = scene else {
+            guard let rpd = view.currentRenderPassDescriptor,
+                  let cb = renderQueue.makeCommandBuffer() else { return }
+            rpd.colorAttachments[0].loadAction = .clear
+            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+            let enc = cb.makeRenderCommandEncoder(descriptor: rpd)
+            enc?.endEncoding()
+            cb.present(drawable)
+            cb.commit()
+            return
+        }
+
+        // Single command buffer: scene render -> blit into drawable -> present -> commit.
+        guard let cb = renderQueue.makeCommandBuffer() else { return }
+        let size = targetSize()
+        let img = scene.createAndRender(
+            toTextureSized: NSSize(width: size.width, height: size.height), in: cb)
+        let srcTex = img.texture
+
+        let dstTex = drawable.texture
+        // 1:1 blit of the overlapping region (clamp to the min extent of both textures).
+        let w = min(srcTex.width, dstTex.width)
+        let h = min(srcTex.height, dstTex.height)
+        if let blit = cb.makeBlitCommandEncoder() {
+            blit.copy(
+                from: srcTex,
+                sourceSlice: 0, sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: w, height: h, depth: 1),
+                to: dstTex,
+                destinationSlice: 0, destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+            blit.endEncoding()
+        }
+        cb.present(drawable)
+        cb.commit()
+    }
 }
