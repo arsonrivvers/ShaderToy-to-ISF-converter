@@ -54,12 +54,26 @@ targets:
       - TrueISFEditor/ISFPreviewInput.swift
     dependencies:
       - package: ShadertoyISFKit
+      - framework: ../vendor/prebuilt/ISFMSLKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/VVMetalKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINCache.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINOperation.framework
+        embed: true
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditorTests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: ""
         BUNDLE_LOADER: ""
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
 schemes:
   TrueISFEditor:
     build:
