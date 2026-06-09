@@ -1,0 +1,9 @@
+framework module VVMetalKit {
+  umbrella header "VVMetalKit.h"
+  
+  header "VVMTLScene_priv.h"
+  header "VVMTLTextureImageShaderFuncs.h"
+
+  export *
+  module * { export * }
+}

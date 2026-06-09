@@ -11,3 +11,6 @@ vendor/isf/package-lock.json
 vendor/codemirror/node_modules/
 vendor/codemirror/package-lock.json
 .playwright-mcp/
+vendor/_isfmslkit-build/
+vendor/_build.log
+App/ddata-build/

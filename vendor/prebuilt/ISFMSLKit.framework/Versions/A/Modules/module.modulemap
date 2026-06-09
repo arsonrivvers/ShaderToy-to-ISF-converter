@@ -1,0 +1,6 @@
+framework module ISFMSLKit {
+  umbrella header "ISFMSLKit.h"
+  export *
+
+  module * { export * }
+}
