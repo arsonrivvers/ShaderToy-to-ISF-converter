@@ -46,6 +46,11 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     }
 
     func load(isf: String) {
+        // Invalidate prior compile state synchronously: a new source is transpiling, so the
+        // previous shader's validity no longer applies (also clears stale state between loads).
+        compileValid = false
+        compileError = nil
+        compileErrorLine = nil
         let url = tempURL
         let device = self.device
         transpileQueue.async { [weak self] in
