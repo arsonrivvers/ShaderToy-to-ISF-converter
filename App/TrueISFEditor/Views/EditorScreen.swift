@@ -83,6 +83,13 @@ struct EditorScreen: View {
             Button("÷2") { vm.halveRenderSize() }
             Button("×2") { vm.doubleRenderSize() }
             Spacer()
+            Picker("Renderer", selection: Binding(get: { vm.preview.active }, set: { vm.preview.active = $0 })) {
+                Text("Metal").tag(PreviewCoordinator.Engine.metal)
+                Text("WebKit").tag(PreviewCoordinator.Engine.webkit)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 160)
+            .help("Metal = VDMX-fidelity (ES3). WebKit = legacy WebGL1 fallback.")
         }
         .font(.caption)
         .textFieldStyle(.roundedBorder)

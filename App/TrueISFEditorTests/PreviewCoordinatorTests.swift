@@ -24,4 +24,12 @@ final class PreviewCoordinatorTests: XCTestCase {
         coord.active = .webkit
         XCTAssertEqual(webkit.loadedISF, "SRC")
     }
+
+    func testRealEnginesToggleWithoutCrash() async throws {
+        let coord = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
+        coord.load(isf: "/*{ \"ISFVSN\":\"2\" }*/ void main(){ gl_FragColor=vec4(1.0); }")
+        coord.active = .webkit
+        coord.active = .metal
+        XCTAssertEqual(coord.active, .metal)
+    }
 }

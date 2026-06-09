@@ -6,7 +6,7 @@ import AppKit
 @MainActor
 final class OutputWindowManager: ObservableObject {
     private var window: NSWindow?
-    let coordinator = PreviewCoordinator(metal: WebKitPreviewController(), webkit: WebKitPreviewController())
+    let coordinator = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
 
     /// Open (or focus) the output window and render the given source.
     func show(source: String) {

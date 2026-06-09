@@ -53,6 +53,7 @@ targets:
       - TrueISFEditor/PreviewCoordinator.swift
       - TrueISFEditor/ISFPreviewInput.swift
       - TrueISFEditor/MetalPreviewController.swift
+      - TrueISFEditor/WebKitPreviewController.swift
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework

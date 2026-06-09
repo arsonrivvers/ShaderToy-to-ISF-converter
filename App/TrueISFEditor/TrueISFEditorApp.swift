@@ -9,12 +9,6 @@ struct TrueISFEditorApp: App {
     @StateObject private var settingsModel = AppModel()
 
     init() {
-        // P1.5 link smoke: prove ISFMSLKit links + loads. Remove after Task 5.
-        // Gated so it doesn't run on a normal launch.
-        if ProcessInfo.processInfo.environment["ISFMSL_SMOKE"] == "1" {
-            print("ISFMSLKit device: \(String(describing: RenderProperties.global().device))")
-        }
-
         // Headless debug affordance: `SHADERTOY_DEBUG_FETCH=<id>` fetches + converts that
         // shader, prints the .fs to stdout, and exits — no UI. Used to verify the WKWebView
         // fetch path in the real (entitled, sandboxed) app context. No effect in normal use.
