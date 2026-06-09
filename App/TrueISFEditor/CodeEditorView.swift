@@ -46,6 +46,12 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("setDiagnostics(\(json));")
     }
 
+    /// Move the editor cursor to a 1-based line and scroll it into view (click-to-jump).
+    func revealLine(_ line: Int) {
+        guard ready, initialized else { return }
+        webView.evaluateJavaScript("revealLine(\(line));")
+    }
+
     private func jsStringLiteral(_ s: String) -> String? {
         guard let data = try? JSONEncoder().encode(s) else { return nil }
         return String(data: data, encoding: .utf8)

@@ -51,6 +51,15 @@
     view.dispatch(window.__cmSetDiagnostics(view.state, mapped));
   };
 
+  // Move the cursor to a 1-based line and scroll it into view (click-to-jump from a diagnostic).
+  window.revealLine = function (line) {
+    if (!view) return;
+    var lineNo = Math.max(1, Math.min(line, view.state.doc.lines));
+    var info = view.state.doc.line(lineNo);
+    view.dispatch({ selection: { anchor: info.from }, scrollIntoView: true });
+    view.focus();
+  };
+
   post({ type: "ready" });
 })();
 </script>
