@@ -45,6 +45,8 @@ targets:
     platform: macOS
     sources:
       - TrueISFEditorTests
+      - path: TrueISFEditor/Resources/symbols.json
+        buildPhase: resources
       - TrueISFEditor/FetchStrategy.swift
       - TrueISFEditor/WebKitShaderFetcher.swift
       - TrueISFEditor/Models/ISFFile.swift
