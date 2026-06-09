@@ -1,0 +1,82 @@
+import SwiftUI
+import WebKit
+
+/// One inline editor diagnostic (1-based line). Encoded straight to the harness's setDiagnostics.
+struct EditorDiagnostic: Codable, Equatable {
+    let line: Int
+    let message: String
+    let severity: String   // "error" | "warning" | "info"
+}
+
+/// Owns the WKWebView hosting CodeMirror 6 and bridges text + diagnostics to/from Swift.
+/// Mirrors `ISFPreviewController`'s ready-gating + message-handler pattern.
+@MainActor
+final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
+    let webView: WKWebView
+    /// Called when the user edits in the editor (not when text is pushed programmatically).
+    var onChange: ((String) -> Void)?
+
+    private var ready = false
+    private var initialized = false
+    private var lastText = ""                       // text currently believed to be in the editor
+    private var pendingDiagnostics: [EditorDiagnostic]?
+
+    override init() {
+        let config = WKWebViewConfiguration()
+        webView = WKWebView(frame: .zero, configuration: config)
+        super.init()
+        webView.configuration.userContentController.add(self, name: "editor")
+        webView.navigationDelegate = self
+        if let url = Bundle.main.url(forResource: "code-editor", withExtension: "html") {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        }
+    }
+
+    /// Replace the editor's document. No-op echo: the harness suppresses the resulting change post.
+    func setText(_ text: String) {
+        lastText = text
+        guard ready, initialized, let lit = jsStringLiteral(text) else { return }
+        webView.evaluateJavaScript("setText(\(lit));")
+    }
+
+    func setDiagnostics(_ diags: [EditorDiagnostic]) {
+        guard ready, initialized else { pendingDiagnostics = diags; return }
+        guard let data = try? JSONEncoder().encode(diags),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("setDiagnostics(\(json));")
+    }
+
+    private func jsStringLiteral(_ s: String) -> String? {
+        guard let data = try? JSONEncoder().encode(s) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    // MARK: WKScriptMessageHandler
+    func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let dict = message.body as? [String: Any], let type = dict["type"] as? String else { return }
+        switch type {
+        case "ready":
+            ready = true
+            // Create the editor once, seeded with whatever text we have so far.
+            if let lit = jsStringLiteral(lastText) {
+                webView.evaluateJavaScript("initEditor(\(lit));") { [weak self] _, _ in
+                    self?.initialized = true
+                    if let p = self?.pendingDiagnostics { self?.pendingDiagnostics = nil; self?.setDiagnostics(p) }
+                }
+            }
+        case "change":
+            if let text = dict["text"] as? String {
+                lastText = text
+                onChange?(text)
+            }
+        default: break
+        }
+    }
+}
+
+/// Hosts the editor's WKWebView. Content is driven entirely through the controller.
+struct CodeEditorView: NSViewRepresentable {
+    let controller: CodeEditorController
+    func makeNSView(context: Context) -> WKWebView { controller.webView }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}

@@ -1,8 +1,13 @@
 import SwiftUI
 import ShadertoyISFKit
+import UniformTypeIdentifiers
 
 @main
 struct TrueISFEditorApp: App {
+    @StateObject private var library = LibraryModel()
+    @StateObject private var vm = EditorViewModel()
+    @StateObject private var settingsModel = AppModel()
+
     init() {
         // Headless debug affordance: `SHADERTOY_DEBUG_FETCH=<id>` fetches + converts that
         // shader, prints the .fs to stdout, and exits — no UI. Used to verify the WKWebView
@@ -87,6 +92,48 @@ void main() {
     }
 
     var body: some Scene {
-        WindowGroup { ContentView() }
+        WindowGroup {
+            EditorScreen(library: library, vm: vm)
+        }
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New") { vm.newUntitled() }
+                    .keyboardShortcut("n")
+                Button("New from Shadertoy…") { vm.requestImport = true }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                Divider()
+                Button("Add Folder to Library…") { addFolderToLibrary() }
+                    .keyboardShortcut("o")
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Save") { saveCurrent() }
+                    .keyboardShortcut("s")
+                Button("Save As…") { saveAs() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
+        }
+        Settings { SettingsView(model: settingsModel) }
+    }
+
+    @MainActor private func saveCurrent() {
+        if vm.needsSaveAs { saveAs() } else { vm.saveInPlace() }
+    }
+
+    @MainActor private func saveAs() {
+        let panel = NSSavePanel()
+        panel.title = "Save ISF Shader"
+        panel.nameFieldStringValue = vm.file.displayName
+        panel.canCreateDirectories = true
+        if let fsType = UTType(filenameExtension: "fs") { panel.allowedContentTypes = [fsType] }
+        if panel.runModal() == .OK, let url = panel.url { vm.saveAs(url) }
+    }
+
+    @MainActor private func addFolderToLibrary() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add Folder"
+        if panel.runModal() == .OK, let url = panel.url { library.addFolder(url) }
     }
 }
