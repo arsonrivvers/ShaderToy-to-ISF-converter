@@ -10,7 +10,6 @@ final class AppModel: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
     @Published var apiKey: String = KeychainStore.load() ?? ""
-    @Published var anthropicKey: String = KeychainStore.load(account: KeychainStore.anthropicAccount) ?? ""
     @Published var pastedCode: String = ""
     /// Default filename offered in the Save panel (derived from the shader name).
     @Published var suggestedFileName: String = "converted.fs"
@@ -28,11 +27,6 @@ final class AppModel: ObservableObject {
     func saveKey(_ key: String) {
         apiKey = key
         KeychainStore.save(key)
-    }
-
-    func saveAnthropicKey(_ key: String) {
-        anthropicKey = key
-        KeychainStore.save(key, account: KeychainStore.anthropicAccount)
     }
 
     func convert() async {

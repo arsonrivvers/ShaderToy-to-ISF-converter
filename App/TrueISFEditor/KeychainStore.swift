@@ -3,14 +3,9 @@ import Security
 
 enum KeychainStore {
     private static let service = "com.arsonrivvers.TrueISFEditor"
+    private static let account = "shadertoy-api-key"
 
-    // MARK: - Account constants
-    static let shadertoyAccount  = "shadertoy-api-key"
-    static let anthropicAccount  = "anthropic-api-key"
-
-    // MARK: - Account-parameterized API
-
-    static func save(_ key: String, account: String) {
+    static func save(_ key: String) {
         let data = Data(key.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -23,7 +18,7 @@ enum KeychainStore {
         SecItemAdd(add as CFDictionary, nil)
     }
 
-    static func load(account: String) -> String? {
+    static func load() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -36,18 +31,4 @@ enum KeychainStore {
               let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
-
-    static func clear(account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-
-    // MARK: - Legacy API (delegates to shadertoy account — existing call sites unchanged)
-
-    static func save(_ key: String) { save(key, account: shadertoyAccount) }
-    static func load() -> String? { load(account: shadertoyAccount) }
 }
