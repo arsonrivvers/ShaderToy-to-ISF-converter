@@ -69,12 +69,25 @@ final class AppModel: ObservableObject {
         warnings = []; isfOutput = ""; importedCode = ""; statusMessage = ""
         let code = pastedCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !code.isEmpty else { statusMessage = "Paste the shader's Image-tab GLSL first."; return }
-        let shader = ShaderFactory.singlePass(imageCode: code, name: "Pasted Shader")
-        importedCode = "// ===== Pasted Image code =====\n" + code
-        let (doc, w) = ISFConverter.convert(shader)
+
+        let isMultipass = ShaderFactory.pasteContainsBuffers(code)
+        let shader = ShaderFactory.fromPaste(
+            code, name: isMultipass ? "Pasted Multipass Shader" : "Pasted Shader")
+        importedCode = shader.renderpass
+            .map { "// ===== \($0.name) (\($0.type.rawValue)) =====\n\($0.code)" }
+            .joined(separator: "\n\n")
+
+        let (doc, baseWarnings) = ISFConverter.convert(shader)
+        var w = baseWarnings
+        if isMultipass {
+            // Paste carries no channel-routing metadata; tell the user what we assumed.
+            w.insert(ConversionWarning(severity: .warning,
+                message: "Channel routing was assumed (iChannelN → Buffer N). Pasted code has no routing metadata — verify against the original shader's channel setup.",
+                context: "multipass paste"), at: 0)
+        }
         isfOutput = doc.fileText
         warnings = w
-        suggestedFileName = "pasted-shader.fs"
+        suggestedFileName = isMultipass ? "pasted-multipass.fs" : "pasted-shader.fs"
         statusMessage = w.isEmpty ? "Converted pasted code cleanly." : "Converted pasted code with \(w.count) warning(s)."
     }
 }

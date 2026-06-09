@@ -44,8 +44,10 @@ struct ContentView: View {
                     .cornerRadius(4)
             }
 
-            DisclosureGroup("Or paste shader code (Image tab) — works without fetching") {
-                VStack(spacing: 6) {
+            DisclosureGroup("Or paste shader code — works without fetching") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Paste the Image tab directly for a single-pass shader. For multipass, paste each tab under a marker line: `// [Common]`, `// [Buffer A]`…`// [Buffer D]`, `// [Image]`.")
+                        .font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $model.pastedCode)
                         .font(.system(.body, design: .monospaced))
                         .frame(height: 120)
@@ -73,7 +75,10 @@ struct ContentView: View {
                 }
                 .padding(4)
             }
-            WarningsView(warnings: model.warnings).frame(height: 140)
+            WarningsView(warnings: model.warnings,
+                         previewError: (preview.compileValid ? nil : preview.compileError),
+                         previewErrorLine: preview.compileErrorLine)
+                .frame(height: 140)
             HStack {
                 Spacer()
                 Button("Copy") { copyOutput() }.disabled(model.isfOutput.isEmpty)

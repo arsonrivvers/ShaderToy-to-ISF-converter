@@ -8,6 +8,8 @@ struct ISFPreviewInput: Identifiable, Equatable {
     let defaultValue: Any?
     let min: Any?
     let max: Any?
+    let labels: [String]?     // long enum display names
+    let values: [Double]?     // long enum underlying values
     var id: String { name }
     static func == (l: ISFPreviewInput, r: ISFPreviewInput) -> Bool { l.name == r.name && l.type == r.type }
 }
@@ -66,7 +68,9 @@ final class ISFPreviewController: NSObject, ObservableObject, WKScriptMessageHan
             inputs = (dict["inputs"] as? [[String: Any]])?.map {
                 ISFPreviewInput(name: $0["NAME"] as? String ?? "",
                                 type: $0["TYPE"] as? String ?? "",
-                                defaultValue: $0["DEFAULT"], min: $0["MIN"], max: $0["MAX"])
+                                defaultValue: $0["DEFAULT"], min: $0["MIN"], max: $0["MAX"],
+                                labels: $0["LABELS"] as? [String],
+                                values: ($0["VALUES"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue })
             } ?? []
         case "runtime":
             compileError = dict["error"] as? String
