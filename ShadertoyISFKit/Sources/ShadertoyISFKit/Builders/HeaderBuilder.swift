@@ -12,8 +12,10 @@ public enum HeaderBuilder {
         }
         if includeMouse {
             inputs.append([
+                // Centered default keeps iMouse.z > 0 at rest, so mouse-gated shaders are
+                // engaged immediately rather than sitting in their "button up" branch.
                 "NAME": "mouse", "TYPE": "point2D",
-                "DEFAULT": [0.0, 0.0], "MIN": [0.0, 0.0], "MAX": [1.0, 1.0]
+                "DEFAULT": [0.5, 0.5], "MIN": [0.0, 0.0], "MAX": [1.0, 1.0]
             ])
         }
 

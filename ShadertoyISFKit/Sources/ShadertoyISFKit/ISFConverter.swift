@@ -26,8 +26,11 @@ public enum ISFConverter {
             code = UniformRewriter.rewrite(code)
             if includeMouse {
                 // iMouse.xy is in pixels; ISF point2D `mouse` is normalized [0,1].
+                // iMouse.zw is the click position with sign signalling button-down on Shadertoy;
+                // many shaders gate interaction on it (`if (iMouse.z < 0.01) ...`). Mirror xy into
+                // zw (non-zero, "pressed") so the mouse slider actually drives those shaders.
                 code = code.replacingOccurrences(of: "iMouse",
-                    with: "vec4(mouse * RENDERSIZE, 0.0, 0.0)")
+                    with: "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)")
             }
             let sampled = SamplerRewriter.rewrite(code, bindings: resolved.bindings)
             warnings.append(contentsOf: sampled.warnings.map {

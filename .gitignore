@@ -3,9 +3,9 @@ build/
 .DS_Store
 *.xcuserstate
 xcuserdata/
-App/ShadertoyISF.xcodeproj/
+App/TrueISFEditor.xcodeproj/
 App/ddata/
-/ShadertoyISF.app/
+/TrueISFEditor.app/
 vendor/isf/node_modules/
 vendor/isf/package-lock.json
 .playwright-mcp/

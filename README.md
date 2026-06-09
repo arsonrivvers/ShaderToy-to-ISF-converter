@@ -1,7 +1,9 @@
-# Shadertoy → ISF Converter
+# TrueISFEditor
 
-Native macOS app that converts Shadertoy shaders to ISF (`.fs`) for VDMX / CoGe / ISF Editor.
-Replaces the defunct "Import from Shadertoy" feature of the ISF Editor.
+Native macOS ISF editor — a working replacement for the defunct ISF Editor app. Shadertoy → ISF
+(`.fs`) conversion is the first feature; an ISF file library, live editable preview, full input UI,
+and pass inspection are planned (see `docs/superpowers/specs/`). Output targets VDMX / CoGe and any
+ISF host.
 
 ## Build
 
@@ -14,17 +16,17 @@ cd ShadertoyISFKit && swift test
 
 **App:**
 ```
-cd App && xcodegen generate && open ShadertoyISF.xcodeproj
+cd App && xcodegen generate && open TrueISFEditor.xcodeproj
 ```
 or build from the command line:
 ```
 cd App && xcodegen generate
-xcodebuild -project ShadertoyISF.xcodeproj -scheme ShadertoyISF -derivedDataPath ./ddata build
-open ddata/Build/Products/Debug/ShadertoyISF.app
+xcodebuild -project TrueISFEditor.xcodeproj -scheme TrueISFEditor -derivedDataPath ./ddata build
+open ddata/Build/Products/Debug/TrueISFEditor.app
 ```
 
 > Build note (Xcode 26): the app uses debuggable-dylib mode, so compiled code/strings live in
-> `ShadertoyISF.app/Contents/MacOS/ShadertoyISF.debug.dylib`, not the main stub binary. Grep the
+> `TrueISFEditor.app/Contents/MacOS/TrueISFEditor.debug.dylib`, not the main stub binary. Grep the
 > `.debug.dylib` when verifying a build is fresh.
 
 ## Use

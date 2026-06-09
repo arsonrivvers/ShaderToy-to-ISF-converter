@@ -1,4 +1,4 @@
-name: ShadertoyISF
+name: TrueISFEditor
 options:
   bundleIdPrefix: com.arsonrivvers
   deploymentTarget:
@@ -7,44 +7,44 @@ packages:
   ShadertoyISFKit:
     path: ../ShadertoyISFKit
 targets:
-  ShadertoyISF:
+  TrueISFEditor:
     type: application
     platform: macOS
     sources:
-      - path: ShadertoyISF
-      - path: ShadertoyISF/Resources
+      - path: TrueISFEditor
+      - path: TrueISFEditor/Resources
         buildPhase: resources
     dependencies:
       - package: ShadertoyISFKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ShadertoyISF
-        INFOPLIST_FILE: ShadertoyISF/Info.plist
-        CODE_SIGN_ENTITLEMENTS: ShadertoyISF/ShadertoyISF.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditor
+        INFOPLIST_FILE: TrueISFEditor/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TrueISFEditor/TrueISFEditor.entitlements
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: "0.1.0"
         GENERATE_INFOPLIST_FILE: NO
-  ShadertoyISFTests:
+  TrueISFEditorTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - ShadertoyISFTests
-      - ShadertoyISF/FetchStrategy.swift
-      - ShadertoyISF/WebKitShaderFetcher.swift
+      - TrueISFEditorTests
+      - TrueISFEditor/FetchStrategy.swift
+      - TrueISFEditor/WebKitShaderFetcher.swift
     dependencies:
       - package: ShadertoyISFKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ShadertoyISFTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditorTests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: ""
         BUNDLE_LOADER: ""
 schemes:
-  ShadertoyISF:
+  TrueISFEditor:
     build:
       targets:
-        ShadertoyISF: all
-        ShadertoyISFTests: [test]
+        TrueISFEditor: all
+        TrueISFEditorTests: [test]
     test:
-      targets: [ShadertoyISFTests]
+      targets: [TrueISFEditorTests]

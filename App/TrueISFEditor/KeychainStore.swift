@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "com.arsonrivvers.ShadertoyISF"
+    private static let service = "com.arsonrivvers.TrueISFEditor"
     private static let account = "shadertoy-api-key"
 
     static func save(_ key: String) {

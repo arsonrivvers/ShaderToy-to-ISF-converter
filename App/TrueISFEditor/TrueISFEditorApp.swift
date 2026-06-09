@@ -2,7 +2,7 @@ import SwiftUI
 import ShadertoyISFKit
 
 @main
-struct ShadertoyISFApp: App {
+struct TrueISFEditorApp: App {
     init() {
         // Headless debug affordance: `SHADERTOY_DEBUG_FETCH=<id>` fetches + converts that
         // shader, prints the .fs to stdout, and exits — no UI. Used to verify the WKWebView

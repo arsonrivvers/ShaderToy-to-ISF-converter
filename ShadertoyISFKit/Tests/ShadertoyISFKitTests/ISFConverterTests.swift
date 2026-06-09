@@ -43,6 +43,18 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(warnings.contains { $0.message.contains("initial") })
     }
 
+    func test_iMouse_mappedToEngagedState_notZeroed() {
+        // A shader that gates on iMouse.z must respond to the mouse point2D slider, so the
+        // rewrite must give iMouse.zw a non-zero ("pressed") value, not 0.
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage(out vec4 O, vec2 I){ O = vec4(iMouse.z < 0.01 ? 0.0 : 1.0); }",
+            name: "MouseGate")
+        let (doc, _) = ISFConverter.convert(shader)
+        let text = doc.fileText
+        XCTAssertTrue(text.contains("vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)"))
+        XCTAssertFalse(text.contains("vec4(mouse * RENDERSIZE, 0.0, 0.0)"))
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText
