@@ -59,6 +59,14 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("applyTextEdit(\(fromLine), \(toLine), \(lit));")
     }
 
+    /// Load the bundled symbol DB into the editor for inline hover lookups.
+    private func pushSymbols() {
+        guard let url = Bundle.main.url(forResource: "symbols", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("setSymbols(\(json));")
+    }
+
     private func jsStringLiteral(_ s: String) -> String? {
         guard let data = try? JSONEncoder().encode(s) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -74,6 +82,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
             if let lit = jsStringLiteral(lastText) {
                 webView.evaluateJavaScript("initEditor(\(lit));") { [weak self] _, _ in
                     self?.initialized = true
+                    self?.pushSymbols()
                     if let p = self?.pendingDiagnostics { self?.pendingDiagnostics = nil; self?.setDiagnostics(p) }
                 }
             }

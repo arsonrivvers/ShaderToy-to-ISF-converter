@@ -24615,6 +24615,38 @@
   var oneDark = [oneDarkTheme, /* @__PURE__ */ syntaxHighlighting(oneDarkHighlightStyle)];
 
   // cm-entry.js
+  var symbolHover = hoverTooltip((view, pos) => {
+    const { from, to, text } = view.state.doc.lineAt(pos);
+    const word = /[A-Za-z_][A-Za-z0-9_]*/;
+    let start = pos, end = pos;
+    while (start > from && word.test(text[start - from - 1])) start--;
+    while (end < to && word.test(text[end - from])) end++;
+    if (start === end) return null;
+    const name2 = text.slice(start - from, end - from);
+    const sym = (window.__symbols || {})[name2];
+    if (!sym) return null;
+    return {
+      pos: start,
+      end,
+      above: true,
+      create() {
+        const dom = document.createElement("div");
+        dom.className = "cm-symbol-tooltip";
+        dom.style.padding = "4px 8px";
+        dom.style.maxWidth = "320px";
+        const sig = document.createElement("div");
+        sig.style.fontWeight = "600";
+        sig.textContent = sym.signature;
+        const sum = document.createElement("div");
+        sum.style.opacity = "0.8";
+        sum.style.marginTop = "2px";
+        sum.textContent = sym.summary;
+        dom.appendChild(sig);
+        dom.appendChild(sum);
+        return { dom };
+      }
+    };
+  });
   window.__createEditor = function(parent, initialDoc, onChange) {
     return new EditorView({
       parent,
@@ -24624,6 +24656,7 @@
           basicSetup,
           cpp(),
           oneDark,
+          symbolHover,
           EditorView.lineWrapping,
           EditorView.updateListener.of((u2) => {
             if (u2.docChanged) onChange(u2.state.doc.toString());

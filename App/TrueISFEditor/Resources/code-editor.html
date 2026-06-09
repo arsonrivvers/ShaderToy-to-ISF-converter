@@ -70,6 +70,13 @@
     view.dispatch({ changes: { from: from, to: to, insert: replacement } });
   };
 
+  // Populate the symbol DB used by the hover tooltip (pushed from Swift after init).
+  window.setSymbols = function (arr) {
+    var map = {};
+    (arr || []).forEach(function (s) { map[s.name] = s; });
+    window.__symbols = map;
+  };
+
   post({ type: "ready" });
 })();
 </script>
