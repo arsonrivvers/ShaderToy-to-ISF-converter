@@ -10,6 +10,8 @@ final class AppModel: ObservableObject {
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
     @Published var apiKey: String = KeychainStore.load() ?? ""
+    /// Optional explicit path to the `claude` CLI for the ShaderAssist AI feature (blank = auto-detect).
+    @Published var claudeBinaryPath: String = UserDefaults.standard.string(forKey: "claudeBinaryPath") ?? ""
     @Published var pastedCode: String = ""
     /// Default filename offered in the Save panel (derived from the shader name).
     @Published var suggestedFileName: String = "converted.fs"
@@ -27,6 +29,11 @@ final class AppModel: ObservableObject {
     func saveKey(_ key: String) {
         apiKey = key
         KeychainStore.save(key)
+    }
+
+    func saveClaudeBinaryPath(_ p: String) {
+        claudeBinaryPath = p
+        UserDefaults.standard.set(p, forKey: "claudeBinaryPath")
     }
 
     func convert() async {
