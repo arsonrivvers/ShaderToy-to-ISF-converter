@@ -1,0 +1,15 @@
+{
+  "name": "trueisf-codemirror",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CodeMirror 6 bundle for TrueISFEditor (esbuild → App/TrueISFEditor/Resources/cm.bundle.js)",
+  "dependencies": {
+    "codemirror": "^6.0.1",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.26.0",
+    "@codemirror/lang-cpp": "^6.0.2",
+    "@codemirror/lint": "^6.5.0",
+    "@codemirror/language": "^6.10.1",
+    "@codemirror/theme-one-dark": "^6.1.2"
+  }
+}

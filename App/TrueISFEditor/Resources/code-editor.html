@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body, #root { margin: 0; height: 100%; background: #282c34; }
+  .cm-editor { height: 100%; font-size: 13px; }
+  .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="cm.bundle.js"></script>
+<script>
+(function () {
+  var view = null;
+  // Echo guard: when Swift pushes text via setText, suppress the resulting change post.
+  var suppressNextChange = false;
+
+  function post(o) {
+    if (window.webkit && webkit.messageHandlers && webkit.messageHandlers.editor) {
+      webkit.messageHandlers.editor.postMessage(o);
+    } else {
+      console.info("CM_POST " + JSON.stringify(o));
+    }
+  }
+
+  window.initEditor = function (doc) {
+    view = window.__createEditor(document.getElementById("root"), doc || "", function (text) {
+      if (suppressNextChange) { suppressNextChange = false; return; }
+      post({ type: "change", text: text });
+    });
+  };
+
+  // Replace the whole document (used when opening a file / external update).
+  window.setText = function (text) {
+    if (!view) return;
+    if (text === view.state.doc.toString()) return;
+    suppressNextChange = true;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+  };
+
+  // diags: [{ line, message, severity }] — 1-based line numbers.
+  window.setDiagnostics = function (diags) {
+    if (!view) return;
+    var mapped = (diags || []).map(function (d) {
+      var lineNo = Math.max(1, Math.min(d.line || 1, view.state.doc.lines));
+      var ln = view.state.doc.line(lineNo);
+      return { from: ln.from, to: ln.to, severity: d.severity || "error", message: d.message || "" };
+    });
+    view.dispatch(window.__cmSetDiagnostics(view.state, mapped));
+  };
+
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

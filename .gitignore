@@ -8,4 +8,6 @@ App/ddata/
 /TrueISFEditor.app/
 vendor/isf/node_modules/
 vendor/isf/package-lock.json
+vendor/codemirror/node_modules/
+vendor/codemirror/package-lock.json
 .playwright-mcp/
