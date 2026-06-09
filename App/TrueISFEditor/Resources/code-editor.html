@@ -60,6 +60,16 @@
     view.focus();
   };
 
+  // Replace 1-based lines [fromLine..toLine] with `replacement`. The normal change handler
+  // fires -> Swift onChange -> recompile. CodeMirror history makes it undoable.
+  window.applyTextEdit = function (fromLine, toLine, replacement) {
+    if (!view) return;
+    var doc = view.state.doc;
+    var from = doc.line(Math.max(1, Math.min(fromLine, doc.lines))).from;
+    var to = doc.line(Math.max(1, Math.min(toLine, doc.lines))).to;
+    view.dispatch({ changes: { from: from, to: to, insert: replacement } });
+  };
+
   post({ type: "ready" });
 })();
 </script>

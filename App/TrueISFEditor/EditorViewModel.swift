@@ -108,6 +108,22 @@ final class EditorViewModel: ObservableObject {
         catch { statusMessage = "Save failed: \(error.localizedDescription)" }
     }
 
+    // MARK: fix apply
+
+    /// Apply a fix-suggestion's edit through the editor, guarded so a stale edit can't corrupt the file.
+    func apply(_ edit: TextEdit) {
+        let lines = file.source.components(separatedBy: "\n")
+        if let expect = edit.expectedContains {
+            let idx = edit.fromLine - 1
+            guard idx >= 0, idx < lines.count, lines[idx].contains(expect) else {
+                statusMessage = "Couldn't apply automatically — the shader changed. Apply the fix manually."
+                return
+            }
+        }
+        editor.applyTextEdit(fromLine: edit.fromLine, toLine: edit.toLine, edit.replacement)
+        statusMessage = "Applied fix"
+    }
+
     // MARK: recompile loop
 
     private func sourceEdited(_ text: String) {

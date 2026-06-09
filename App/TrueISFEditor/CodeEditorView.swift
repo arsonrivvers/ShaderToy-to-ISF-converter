@@ -52,6 +52,13 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("revealLine(\(line));")
     }
 
+    /// Replace 1-based lines [fromLine...toLine] with `replacement` (one-click fix apply).
+    /// Goes through CodeMirror so undo works and onChange fires → recompile.
+    func applyTextEdit(fromLine: Int, toLine: Int, _ replacement: String) {
+        guard ready, initialized, let lit = jsStringLiteral(replacement) else { return }
+        webView.evaluateJavaScript("applyTextEdit(\(fromLine), \(toLine), \(lit));")
+    }
+
     private func jsStringLiteral(_ s: String) -> String? {
         guard let data = try? JSONEncoder().encode(s) else { return nil }
         return String(data: data, encoding: .utf8)

@@ -21,7 +21,7 @@ struct EditorScreen: View {
                         diagnostics: vm.diagnostics.diagnostics,
                         sourceLines: vm.file.source.components(separatedBy: "\n"),
                         onJump: { vm.editor.revealLine($0) },
-                        onApply: { _ in })   // wired in a later task
+                        onApply: { vm.apply($0) })
                         .frame(height: 150)
                         .padding(6)
                 }
