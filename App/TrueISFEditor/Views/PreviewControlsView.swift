@@ -3,7 +3,6 @@ import AppKit
 
 struct PreviewControlsView: View {
     @ObservedObject var coordinator: PreviewCoordinator
-    @ObservedObject var library: LibraryModel
     @State private var floats: [String: Double] = [:]
     @State private var bools: [String: Bool] = [:]
     @State private var points: [String: [Double]] = [:]
@@ -23,7 +22,7 @@ struct PreviewControlsView: View {
                     case "point2D": point2DControl(input)
                     case "color":  colorControl(input)
                     case "long":   longControl(input)
-                    case "image":  SourceInputControl(router: coordinator.imageSources, inputName: input.name, library: library)
+                    case "image":  EmptyView()  // image inputs are routed from the preview toolbar
                     default:
                         Text("\(input.name) (\(input.type))").font(.caption).foregroundStyle(.secondary)
                     }

@@ -1,30 +1,36 @@
 import SwiftUI
 import ShadertoyISFKit
 
-/// Per-image-input source picker. Slice 1 offers None + Test Pattern; Slice 2 adds Library.
-struct SourceInputControl: View {
+/// Per-image-input source picker for the preview toolbar. Renders one compact menu per image input
+/// on the current filter (nothing for generators). Test Pattern + Library now; Camera in Slice 3.
+struct SourceToolbarControl: View {
     @ObservedObject var router: SourceRouter
-    let inputName: String
     @ObservedObject var library: LibraryModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("\(inputName) (image)").font(.caption)
+        ForEach(router.imageInputNames, id: \.self) { name in
             Menu {
-                Button("None") { router.setSelection(.none, for: inputName) }
+                Button("None") { router.setSelection(.none, for: name) }
                 Menu("Test Pattern") {
                     ForEach(TestPatternCatalog.all) { p in
-                        Button(p.name) { router.setSelection(.testPattern(id: p.id), for: inputName) }
+                        Button(p.name) { router.setSelection(.testPattern(id: p.id), for: name) }
                     }
                 }
                 Menu("Shader") {
                     ForEach(library.filtered(query: "")) { entry in
-                        Button(entry.name) { router.setSelection(.library(url: entry.url), for: inputName) }
+                        Button(entry.name) { router.setSelection(.library(url: entry.url), for: name) }
                     }
                 }
             } label: {
-                Text(router.source(for: inputName).displayName)
+                Label(labelText(for: name), systemImage: "photo.on.rectangle")
             }
+            .fixedSize()
+            .help("Input source for “\(name)”")
         }
+    }
+
+    private func labelText(for name: String) -> String {
+        let source = router.source(for: name).displayName
+        return router.imageInputNames.count > 1 ? "\(name): \(source)" : source
     }
 }

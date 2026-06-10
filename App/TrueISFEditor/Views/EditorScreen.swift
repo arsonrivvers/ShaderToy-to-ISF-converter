@@ -48,7 +48,7 @@ struct EditorScreen: View {
                     ISFPreviewView(coordinator: vm.preview)
                         .frame(minHeight: 220)
                     Divider()
-                    PreviewControlsView(coordinator: vm.preview, library: library)
+                    PreviewControlsView(coordinator: vm.preview)
                         .frame(height: 170)
                 }
                 .frame(minWidth: 320)
@@ -136,6 +136,7 @@ struct EditorScreen: View {
             Button("÷2") { vm.halveRenderSize() }
             Button("×2") { vm.doubleRenderSize() }
             Spacer()
+            SourceToolbarControl(router: vm.preview.imageSources, library: library)
             Picker("Renderer", selection: Binding(get: { vm.preview.active }, set: { vm.preview.active = $0 })) {
                 Text("Metal").tag(PreviewCoordinator.Engine.metal)
                 Text("WebKit").tag(PreviewCoordinator.Engine.webkit)
