@@ -467,21 +467,28 @@ final class SourceRouter: ObservableObject {
     private func makeSource(_ sel: SourceSelection) -> ImageSource {
         switch sel {
         case .none:
-            return NoneSource()
+            return NoneSource()   // user explicitly chose nothing — correct to leave unbound
         case .testPattern(let id):
             guard let p = TestPatternCatalog.pattern(id: id),
                   let s = ISFSceneSource(displayName: p.name, sourceText: p.sourceText, device: device, queue: queue)
-            else { return NoneSource() }
+            else { return defaultPatternSource() }
             return s
         case .library(let url):
-            // Slice 2 wires this; falls back to the default test pattern until then.
+            // Slice 2 wires the picker; a bad pick falls back to the default test pattern (never black).
             guard let text = try? String(contentsOf: url, encoding: .utf8),
                   let s = ISFSceneSource(displayName: url.lastPathComponent, sourceText: text, device: device, queue: queue)
-            else { return NoneSource() }
+            else { return defaultPatternSource() }
             return s
         case .camera:
-            return NoneSource()   // Slice 3 replaces this with the shared CameraSource.
+            return defaultPatternSource()   // Slice 3 replaces this with the shared CameraSource.
         }
+    }
+
+    /// Fallback source — never black-screen. The default SMPTE test pattern, or NoneSource only if
+    /// even that fails to build (should never happen; catalog tests guard the bundled patterns).
+    private func defaultPatternSource() -> ImageSource {
+        let p = TestPatternCatalog.default
+        return ISFSceneSource(displayName: p.name, sourceText: p.sourceText, device: device, queue: queue) ?? NoneSource()
     }
 }
 ```
@@ -948,7 +955,7 @@ In `SourceRouter`, make the camera a shared lazily-created instance (so all inpu
 and in `makeSource`, replace the `.camera` case body:
 ```swift
         case .camera:
-            return sharedCamera ?? NoneSource()
+            return sharedCamera ?? defaultPatternSource()   // camera unavailable ⇒ default pattern, never black
 ```
 In `SourceInputControl`, add to the `Menu`:
 ```swift
