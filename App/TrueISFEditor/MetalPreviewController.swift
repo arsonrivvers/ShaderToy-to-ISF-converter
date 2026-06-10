@@ -275,7 +275,18 @@ extension MetalPreviewController: MTKViewDelegate {
         // Adapt the view's pixel format to the engine's output if they differ — a cross-format blit
         // would mis-copy or assert. Takes effect next frame when the drawable is reallocated.
         if srcTex.pixelFormat != dstTex.pixelFormat {
-            view.colorPixelFormat = srcTex.pixelFormat
+            // Some ISF outputs (e.g. 32-bit float) are not valid CAMetalLayer drawable formats;
+            // setting one throws an NSException that would abort the app. Guard it and, on rejection,
+            // surface the reason instead of crashing (the shader can't be previewed in this format).
+            if !ISFMSLSafeSetColorPixelFormat(view, srcTex.pixelFormat) {
+                self.scene = nil
+                self.compileValid = false
+                let msg = "Preview unsupported: shader output pixel format "
+                    + "(\(srcTex.pixelFormat.rawValue)) is not a displayable drawable format."
+                self.compileError = msg
+                CrashLog.shared.record(CrashEvent(kind: .render, message: msg,
+                    context: Self.shaderName(from: lastLoadedSource)))
+            }
             return
         }
         // 1:1 blit of the overlapping region (clamp to the min extent of both textures).

@@ -1,6 +1,7 @@
 //  ISFMSLSafeBridge.mm
 #import "ISFMSLSafeBridge.h"
 #import <ISFMSLKit/ISFMSLKit.h>
+#import <MetalKit/MetalKit.h>
 #include <exception>
 
 ISFMSLScene * _Nullable ISFMSLSafeCreateAndLoad(id<MTLDevice> device,
@@ -63,5 +64,17 @@ id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
     catch (...) {
         if (errorOut) { *errorOut = @"Unknown render exception."; }
         return nil;
+    }
+}
+
+BOOL ISFMSLSafeSetColorPixelFormat(MTKView *view, MTLPixelFormat format)
+{
+    @try {
+        view.colorPixelFormat = format;
+        return YES;
+    }
+    @catch (NSException *exception) {
+        // CAMetalLayer rejects formats that aren't valid drawable formats (e.g. rgba32Float).
+        return NO;
     }
 }
