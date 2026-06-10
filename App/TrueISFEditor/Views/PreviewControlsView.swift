@@ -22,6 +22,7 @@ struct PreviewControlsView: View {
                     case "point2D": point2DControl(input)
                     case "color":  colorControl(input)
                     case "long":   longControl(input)
+                    case "image":  SourceInputControl(router: coordinator.imageSources, inputName: input.name)
                     default:
                         Text("\(input.name) (\(input.type))").font(.caption).foregroundStyle(.secondary)
                     }

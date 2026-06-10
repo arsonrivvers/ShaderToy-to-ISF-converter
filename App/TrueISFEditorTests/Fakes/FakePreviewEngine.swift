@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Metal
 
 @MainActor
 final class FakePreviewEngine: PreviewEngine, ObservableObject {
@@ -10,6 +11,10 @@ final class FakePreviewEngine: PreviewEngine, ObservableObject {
     let view = NSView()
     var nsView: NSView { view }
     var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
+    let imageSources: SourceRouter = {
+        let device = MTLCreateSystemDefaultDevice()!
+        return SourceRouter(device: device, queue: device.makeCommandQueue()!)
+    }()
 
     private(set) var loadedISF: String?
     private(set) var lastInput: (String, String)?
