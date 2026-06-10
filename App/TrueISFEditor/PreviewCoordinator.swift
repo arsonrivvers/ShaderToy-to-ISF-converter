@@ -24,6 +24,7 @@ final class PreviewCoordinator: ObservableObject {
 
     var activeEngine: PreviewEngine { active == .metal ? metal : webkit }
     var nsView: NSView { activeEngine.nsView }
+    var imageSources: SourceRouter { activeEngine.imageSources }
 
     func load(isf: String) { currentSource = isf; activeEngine.load(isf: isf) }
     func setInput(_ name: String, _ jsonValue: String) { activeEngine.setInput(name, jsonValue) }

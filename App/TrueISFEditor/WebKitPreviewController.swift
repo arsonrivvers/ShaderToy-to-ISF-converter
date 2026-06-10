@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import WebKit
 import Combine
+import VVMetalKit
 
 @MainActor
 final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate, PreviewEngine {
@@ -12,6 +13,13 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
 
     var nsView: NSView { webView }
     var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
+
+    /// Inert here — WebKit cannot bind image textures. Present only to satisfy PreviewEngine; never
+    /// receives `updateInputs`/`setSelection`, so it stays empty.
+    let imageSources: SourceRouter = {
+        let p = RenderProperties.global()
+        return SourceRouter(device: p.device, queue: p.renderQueue)
+    }()
 
     let webView: WKWebView
     private var ready = false
