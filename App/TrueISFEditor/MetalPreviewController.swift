@@ -231,6 +231,15 @@ extension MetalPreviewController: MTKViewDelegate {
         // Single command buffer: scene render -> blit into drawable -> present -> commit.
         guard let cb = renderQueue.makeCommandBuffer() else { return }
         let size = targetSize()
+        // Bind each image input's routed source (rendered into the same command buffer, so the
+        // source render is encoded before the filter that reads it).
+        for input in inputs where input.type == "image" {
+            let src = imageSources.source(for: input.name)
+            if let tex = src.texture(size: size, in: cb),
+               let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {
+                scene.setValue(val, forInputNamed: input.name)
+            }
+        }
         var renderErr: NSString?
         guard let srcTex = ISFMSLSafeRender(
             scene, NSSize(width: size.width, height: size.height), cb, &renderErr) else {
