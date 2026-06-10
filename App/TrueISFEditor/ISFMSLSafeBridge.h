@@ -6,7 +6,6 @@
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
 
 @class ISFMSLScene;
 
@@ -34,11 +33,6 @@ id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
                                           NSSize size,
                                           id<MTLCommandBuffer> commandBuffer,
                                           NSString * _Nullable * _Nullable errorOut);
-
-/// Sets `view.colorPixelFormat`, catching the Obj-C `NSException` that `CAMetalLayer` throws for a
-/// pixel format that is not a valid drawable format (e.g. a 32-bit-float ISF output). Swift cannot
-/// catch NSExceptions, so an unguarded assignment aborts the app. Returns YES if set, NO if rejected.
-BOOL ISFMSLSafeSetColorPixelFormat(MTKView *view, MTLPixelFormat format);
 
 #ifdef __cplusplus
 }

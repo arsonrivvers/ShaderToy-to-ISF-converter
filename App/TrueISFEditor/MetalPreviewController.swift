@@ -25,6 +25,9 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
     private var lastLoadedSource: String?
+    /// Passthrough pipeline that displays the engine's output texture (any pixel format) by sampling
+    /// it into the drawable. Built lazily on first frame.
+    private var blitPipeline: MTLRenderPipelineState?
 
     override init() {
         let props = RenderProperties.global()
@@ -213,6 +216,34 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         return MTLSize(width: max(Int(s.width), 1), height: max(Int(s.height), 1), depth: 1)
     }
 
+    /// Builds the passthrough display pipeline: a fullscreen triangle whose fragment shader samples
+    /// the engine output. Sampling converts ANY source pixel format (float16/float32/unorm/sRGB) to
+    /// the drawable format and scales to fit, so every shader displays without format juggling.
+    private func makeBlitPipeline(colorFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
+        let src = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct VOut { float4 pos [[position]]; float2 uv; };
+        vertex VOut tisf_blit_v(uint vid [[vertex_id]]) {
+            float2 p = float2(float((vid << 1) & 2), float(vid & 2));
+            VOut o;
+            o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0);
+            o.uv = float2(p.x, 1.0 - p.y);
+            return o;
+        }
+        fragment float4 tisf_blit_f(VOut v [[stage_in]], texture2d<float> tex [[texture(0)]]) {
+            constexpr sampler s(filter::linear, address::clamp_to_edge);
+            return tex.sample(s, v.uv);
+        }
+        """
+        guard let lib = try? device.makeLibrary(source: src, options: nil) else { return nil }
+        let desc = MTLRenderPipelineDescriptor()
+        desc.vertexFunction = lib.makeFunction(name: "tisf_blit_v")
+        desc.fragmentFunction = lib.makeFunction(name: "tisf_blit_f")
+        desc.colorAttachments[0].pixelFormat = colorFormat
+        return try? device.makeRenderPipelineState(descriptor: desc)
+    }
+
     /// Test hook: render one frame into an offscreen texture and return it. No drawable involved.
     @discardableResult
     func renderOnce() -> MTLTexture? {
@@ -271,37 +302,20 @@ extension MetalPreviewController: MTKViewDelegate {
             return
         }
 
-        let dstTex = drawable.texture
-        // Adapt the view's pixel format to the engine's output if they differ — a cross-format blit
-        // would mis-copy or assert. Takes effect next frame when the drawable is reallocated.
-        if srcTex.pixelFormat != dstTex.pixelFormat {
-            // Some ISF outputs (e.g. 32-bit float) are not valid CAMetalLayer drawable formats;
-            // setting one throws an NSException that would abort the app. Guard it and, on rejection,
-            // surface the reason instead of crashing (the shader can't be previewed in this format).
-            if !ISFMSLSafeSetColorPixelFormat(view, srcTex.pixelFormat) {
-                self.scene = nil
-                self.compileValid = false
-                let msg = "Preview unsupported: shader output pixel format "
-                    + "(\(srcTex.pixelFormat.rawValue)) is not a displayable drawable format."
-                self.compileError = msg
-                CrashLog.shared.record(CrashEvent(kind: .render, message: msg,
-                    context: Self.shaderName(from: lastLoadedSource)))
-            }
-            return
-        }
-        // 1:1 blit of the overlapping region (clamp to the min extent of both textures).
-        let w = min(srcTex.width, dstTex.width)
-        let h = min(srcTex.height, dstTex.height)
-        if let blit = cb.makeBlitCommandEncoder() {
-            blit.copy(
-                from: srcTex,
-                sourceSlice: 0, sourceLevel: 0,
-                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                sourceSize: MTLSize(width: w, height: h, depth: 1),
-                to: dstTex,
-                destinationSlice: 0, destinationLevel: 0,
-                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
-            blit.endEncoding()
+        // Display: sample the engine's output texture into the drawable via a passthrough pass.
+        // This converts ANY source pixel format (incl. 32-bit float, which CAMetalLayer can't accept
+        // as a drawable) and scales to fit — no colorPixelFormat juggling, no cross-format-blit
+        // assert, no NSException abort.
+        if blitPipeline == nil { blitPipeline = makeBlitPipeline(colorFormat: view.colorPixelFormat) }
+        guard let pipeline = blitPipeline,
+              let rpd = view.currentRenderPassDescriptor else { cb.commit(); return }
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        if let enc = cb.makeRenderCommandEncoder(descriptor: rpd) {
+            enc.setRenderPipelineState(pipeline)
+            enc.setFragmentTexture(srcTex, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.endEncoding()
         }
         cb.present(drawable)
         cb.commit()
