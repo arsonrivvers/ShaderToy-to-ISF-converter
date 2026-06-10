@@ -65,6 +65,7 @@ targets:
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/ISFSceneSource.swift
+      - TrueISFEditor/CameraSource.swift
       - TrueISFEditor/SourceRouter.swift
     dependencies:
       - package: ShadertoyISFKit

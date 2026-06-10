@@ -17,6 +17,7 @@ enum SourceSelection: Equatable {
 final class SourceRouter: ObservableObject {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
+    private lazy var sharedCamera: ImageSource? = CameraSource(device: device)
 
     /// Image-input names on the current shader, in declaration order (drives the UI).
     @Published private(set) var imageInputNames: [String] = []
@@ -68,7 +69,7 @@ final class SourceRouter: ObservableObject {
             else { return defaultPatternSource() }
             return s
         case .camera:
-            return defaultPatternSource()   // Slice 3 replaces this with the shared CameraSource.
+            return sharedCamera ?? defaultPatternSource()   // camera unavailable ⇒ default pattern, never black
         }
     }
 

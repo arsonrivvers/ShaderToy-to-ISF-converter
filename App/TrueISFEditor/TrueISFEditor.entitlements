@@ -6,5 +6,7 @@
        the user's disk (System/User ISF dirs + arbitrary folders), like the original ISF Editor.
        Sandboxing blocked saving to non-user-selected locations. -->
   <key>com.apple.security.app-sandbox</key><false/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
 </dict>
 </plist>

@@ -21,6 +21,7 @@ struct SourceToolbarControl: View {
                         Button(entry.name) { router.setSelection(.library(url: entry.url), for: name) }
                     }
                 }
+                Button("Camera") { router.setSelection(.camera, for: name) }
             } label: {
                 Label(labelText(for: name), systemImage: "photo.on.rectangle")
             }
