@@ -16,6 +16,8 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     var nsView: NSView { mtkView }
     var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
 
+    let imageSources: SourceRouter
+
     private let device: MTLDevice
     private let renderQueue: MTLCommandQueue
     private var scene: ISFMSLScene?
@@ -27,6 +29,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         let props = RenderProperties.global()
         self.device = props.device
         self.renderQueue = props.renderQueue
+        self.imageSources = SourceRouter(device: props.device, queue: props.renderQueue)
         // Global singletons ISFMSLKit needs BEFORE any scene work:
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: props.device) }
         if ISFMSLCache.primary == nil {
@@ -75,11 +78,13 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             compileError = nil
             compileErrorLine = nil
             inputs = Self.mapInputs(s.inputs)
+            imageSources.updateInputs(inputs)
         } else {
             scene = nil
             compileValid = false
             compileError = (message?.isEmpty == false ? message : "Shader failed to compile.")
             compileErrorLine = Self.parseLine(from: message)
+            imageSources.updateInputs(inputs)
         }
     }
 
@@ -93,7 +98,8 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             case .float:   typeStr = "float"
             case .point2D: typeStr = "point2D"
             case .color:   typeStr = "color"
-            default:       return nil   // image/audio/cube: unsupported in P1.5 controls
+            case .image:   typeStr = "image"
+            default:       return nil   // audio/cube: still unsupported
             }
 
             // Read default/min/max via doubleValue — works for all scalar types.
@@ -119,6 +125,8 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
                 defaultValue = attrib.defaultVal.boolValue
                 minVal = nil; maxVal = nil
             case .event:
+                defaultValue = nil; minVal = nil; maxVal = nil
+            case .image:
                 defaultValue = nil; minVal = nil; maxVal = nil
             default:
                 defaultValue = attrib.defaultVal.doubleValue
