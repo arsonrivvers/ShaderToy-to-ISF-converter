@@ -1,7 +1,6 @@
 import XCTest
 import Metal
 import ShadertoyISFKit
-@testable import TrueISFEditor
 
 @MainActor
 final class ISFSceneSourceTests: XCTestCase {
