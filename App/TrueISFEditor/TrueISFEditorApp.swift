@@ -115,6 +115,12 @@ void main() {
                 Button("Save As…") { saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
             }
+            CommandGroup(after: .windowArrangement) {
+                CrashLogMenuButton()
+            }
+        }
+        Window("Crash Log", id: "crash-log") {
+            CrashLogView()
         }
         Settings { SettingsView(model: settingsModel) }
     }
