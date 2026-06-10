@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "ShadertoyISFKit", targets: ["ShadertoyISFKit"])
     ],
     targets: [
-        .target(name: "ShadertoyISFKit"),
+        .target(name: "ShadertoyISFKit", resources: [.copy("TestPatterns")]),
         .testTarget(
             name: "ShadertoyISFKitTests",
             dependencies: ["ShadertoyISFKit"],
