@@ -2,3 +2,4 @@
 //  Exposes ISFMSLKit (Obj-C++) to Swift.
 #import <ISFMSLKit/ISFMSLKit.h>
 #import "ISFMSLSafeBridge.h"
+#import "CrashWriter.h"

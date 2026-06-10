@@ -9,6 +9,10 @@ struct TrueISFEditorApp: App {
     @StateObject private var settingsModel = AppModel()
 
     init() {
+        // Best-effort crash capture; accessing CrashLog.shared also ingests any crash from last session.
+        let pendingURL = MainActor.assumeIsolated { CrashLog.shared.pendingURL }
+        CrashReporter.install(pendingURL: pendingURL)
+
         // Headless debug affordance: `SHADERTOY_DEBUG_FETCH=<id>` fetches + converts that
         // shader, prints the .fs to stdout, and exits — no UI. Used to verify the WKWebView
         // fetch path in the real (entitled, sandboxed) app context. No effect in normal use.

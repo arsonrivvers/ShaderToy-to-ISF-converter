@@ -24,6 +24,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     private var renderSize: MTLSize?
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
+    private var lastLoadedSource: String?
 
     override init() {
         let props = RenderProperties.global()
@@ -49,6 +50,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     }
 
     func load(isf: String) {
+        lastLoadedSource = isf
         // Invalidate prior compile state synchronously: a new source is transpiling, so the
         // previous shader's validity no longer applies (also clears stale state between loads).
         compileValid = false
@@ -84,6 +86,9 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             compileValid = false
             compileError = (message?.isEmpty == false ? message : "Shader failed to compile.")
             compileErrorLine = Self.parseLine(from: message)
+            CrashLog.shared.record(CrashEvent(kind: .compile,
+                message: compileError ?? "compile error",
+                context: Self.shaderName(from: lastLoadedSource)))
             imageSources.updateInputs(inputs)
         }
     }
@@ -153,6 +158,17 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             return Int(digits)
         }
         return nil
+    }
+
+    /// Pull the ISF header's DESCRIPTION for crash-log context, if present.
+    static func shaderName(from source: String?) -> String? {
+        guard let source,
+              let open = source.range(of: "/*{"),
+              let close = source.range(of: "}*/") else { return nil }
+        let json = "{" + source[open.upperBound..<close.lowerBound] + "}"
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return obj["DESCRIPTION"] as? String
     }
 
     func setInput(_ name: String, _ jsonValue: String) {
@@ -249,6 +265,9 @@ extension MetalPreviewController: MTKViewDelegate {
             self.scene = nil
             self.compileValid = false
             self.compileError = (renderErr as String?) ?? "Render error."
+            CrashLog.shared.record(CrashEvent(kind: .render,
+                message: (renderErr as String?) ?? "render error",
+                context: Self.shaderName(from: lastLoadedSource)))
             return
         }
 
