@@ -2,6 +2,7 @@ import Metal
 import Foundation
 import ISFMSLKit
 import VVMetalKit
+import ShadertoyISFKit
 
 /// An ImageSource backed by a second ISFMSLScene loaded from ISF source text. Powers both test
 /// patterns and library-shader chaining. Validated by rendering one probe frame on init; if that
@@ -10,6 +11,7 @@ import VVMetalKit
 final class ISFSceneSource: ImageSource {
     let displayName: String
     private let scene: ISFMSLScene
+    private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let tempURL: URL
     private var lastGood: MTLTexture?
@@ -17,6 +19,7 @@ final class ISFSceneSource: ImageSource {
     /// Returns nil if the shader fails to compile or render a probe frame.
     init?(displayName: String, sourceText: String, device: MTLDevice, queue: MTLCommandQueue) {
         self.displayName = displayName
+        self.device = device
         self.queue = queue
         self.tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("trueisf-src-\(UUID().uuidString).fs")
@@ -38,6 +41,16 @@ final class ISFSceneSource: ImageSource {
               !compileError.boolValue else { return nil }
         self.scene = s
 
+        // Nesting rule: if this source shader is itself a filter, feed its image inputs the default
+        // test pattern (one level, no recursion) so it renders instead of showing black.
+        if let patternTex = ISFSceneSource.defaultPatternTexture(device: device, queue: queue) {
+            for attrib in s.inputs where attrib.isFilterInputImage || attrib.shouldHaveImageBuffer || attrib.type == .image {
+                if let val = ISFMSLSceneVal.create(with: patternTex) as? ISFMSLSceneVal {
+                    s.setValue(val, forInputNamed: attrib.name)
+                }
+            }
+        }
+
         // Probe frame: confirm it actually renders before we accept this source.
         guard let cb = queue.makeCommandBuffer() else { return nil }
         var err: NSString?
@@ -52,5 +65,19 @@ final class ISFSceneSource: ImageSource {
         let tex = ISFMSLSafeRender(scene, NSSize(width: size.width, height: size.height), cb, &err)
         if let tex { lastGood = tex; return tex }
         return lastGood   // keep-last-good on a transient render failure
+    }
+
+    /// Render the default test pattern once to a standalone texture (for the nesting rule).
+    private static func defaultPatternTexture(device: MTLDevice, queue: MTLCommandQueue) -> MTLTexture? {
+        let p = TestPatternCatalog.default
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("trueisf-nest-\(UUID().uuidString).fs")
+        guard (try? p.sourceText.write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        var ce: ObjCBool = false; var msg: NSString?
+        guard let scene = ISFMSLSafeCreateAndLoad(device, url, &ce, &msg), !ce.boolValue,
+              let cb = queue.makeCommandBuffer() else { return nil }
+        var err: NSString?
+        let tex = ISFMSLSafeRender(scene, NSSize(width: 320, height: 180), cb, &err)
+        cb.commit(); cb.waitUntilCompleted()
+        return tex
     }
 }
