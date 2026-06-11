@@ -89,6 +89,29 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(m.parentAID, childID)
     }
 
+    func test_livePreviewCap_favoritesAlwaysAnimate_othersFillUpToCap() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 6; m.maxLivePreviews = 4
+        await m.generate()
+        for n in m.currentBatch { m.markCompileResult(id: n.id, valid: true, error: nil) }
+        // No favorites yet: exactly maxLivePreviews animate.
+        XCTAssertEqual(m.currentBatch.filter { m.shouldAnimate($0.id) }.count, 4)
+        // Favorite two of the frozen ones -> both animate even though we're over the cap.
+        let frozen = m.currentBatch.filter { !m.shouldAnimate($0.id) }
+        m.toggleFavorite(frozen[0].id); m.toggleFavorite(frozen[1].id)
+        XCTAssertTrue(m.shouldAnimate(frozen[0].id))
+        XCTAssertTrue(m.shouldAnimate(frozen[1].id))
+        XCTAssertGreaterThanOrEqual(m.currentBatch.filter { m.shouldAnimate($0.id) }.count, 4)
+    }
+
+    func test_failedChildren_neverAnimate() async {
+        let m = model([.success("I couldn't.")])   // no ISF -> generator marks .failed
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 2; m.maxLivePreviews = 4
+        await m.generate()
+        XCTAssertTrue(m.currentBatch.allSatisfy { !m.shouldAnimate($0.id) })
+    }
+
     func test_stepBack_restoresPreviousParents() async {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 1

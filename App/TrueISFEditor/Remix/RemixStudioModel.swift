@@ -87,6 +87,22 @@ final class RemixStudioModel: ObservableObject {
         if let i = currentBatch.firstIndex(where: { $0.id == id }) { currentBatch[i] = node }
     }
 
+    // MARK: live-preview cap (performance)
+
+    /// Favorites always animate; remaining slots up to `maxLivePreviews` go to the most-recent
+    /// compiled, non-favorite children. Everything else freezes a single frame. Failed children
+    /// never animate.
+    func livePreviewIDs() -> Set<String> {
+        let compiled = currentBatch.filter { $0.status == .compiled }
+        var live = Set(compiled.filter { lineage.isFavorite($0.id) }.map(\.id))
+        let slots = max(0, maxLivePreviews - live.count)
+        let fillers = compiled.filter { !live.contains($0.id) }.suffix(slots)
+        live.formUnion(fillers.map(\.id))
+        return live
+    }
+
+    func shouldAnimate(_ id: String) -> Bool { livePreviewIDs().contains(id) }
+
     // MARK: selection
 
     func toggleFavorite(_ id: String) { lineage.toggleFavorite(id) }
