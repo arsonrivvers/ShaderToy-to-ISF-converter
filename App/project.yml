@@ -67,6 +67,7 @@ targets:
       - TrueISFEditor/ISFSceneSource.swift
       - TrueISFEditor/CameraSource.swift
       - TrueISFEditor/SourceRouter.swift
+      - TrueISFEditor/BlitFit.swift
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework

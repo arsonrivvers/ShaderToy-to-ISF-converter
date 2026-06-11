@@ -49,11 +49,12 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
         webView.evaluateJavaScript("setInput(\(nameLit), \(jsonValue));", completionHandler: nil)
     }
 
-    /// Set explicit output dimensions (drives RENDERSIZE + the canvas buffer). Pass nil/nil to fit.
-    func setRenderSize(width: Int?, height: Int?) {
+    /// Set output dimensions (drives RENDERSIZE + the canvas buffer). `fitToWindow` ⇒ the WebGL
+    /// harness fits to the canvas (0,0 sentinel); otherwise render at exactly width×height.
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
         let js: String
-        if let w = width, let h = height, w > 0, h > 0 { js = "setRenderSize(\(w), \(h));" }
-        else { js = "setRenderSize(0, 0);" }
+        if fitToWindow { js = "setRenderSize(0, 0);" }
+        else { js = "setRenderSize(\(max(width, 1)), \(max(height, 1)));" }
         guard ready else { pendingRenderSize = js; return }
         webView.evaluateJavaScript(js, completionHandler: nil)
     }

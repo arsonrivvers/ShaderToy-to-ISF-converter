@@ -33,11 +33,17 @@ final class OutputWindowManager: ObservableObject {
     }
 
     /// Apply output dimensions to the render buffer and size the window to match (1:1) when fixed.
-    func setRenderSize(width: Int?, height: Int?) {
-        coordinator.setRenderSize(width: width, height: height)
-        if let w = width, let h = height, w > 0, h > 0 {
-            window?.setContentSize(NSSize(width: w, height: h))
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
+        coordinator.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)
+        if !fitToWindow, width > 0, height > 0 {
+            window?.setContentSize(NSSize(width: width, height: height))
         }
+    }
+
+    /// Mirror the inline preview's per-input source selections so a filter renders its input here too
+    /// (camera/test-pattern/shader) instead of black.
+    func syncSelections(from inlineRouter: SourceRouter) {
+        coordinator.imageSources.applySelections(from: inlineRouter)
     }
 
     var isOpen: Bool { window?.isVisible == true }

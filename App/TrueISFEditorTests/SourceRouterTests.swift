@@ -38,4 +38,46 @@ final class SourceRouterTests: XCTestCase {
         r.updateInputs([floatInput])
         XCTAssertTrue(r.imageInputNames.isEmpty)
     }
+
+    // MARK: A4 — pop-out mirroring + shared camera
+
+    /// Mirrors the inline preview's source choices into a detached (pop-out) router so a filter
+    /// renders its input there too, instead of black.
+    func test_applySelectionsCopiesFromAnotherRouter() throws {
+        let a = try makeRouter()
+        let b = try makeRouter()
+        a.updateInputs([imageInput("inputImage")])
+        a.setSelection(.testPattern(id: "smpte_bars"), for: "inputImage")
+        b.updateInputs([imageInput("inputImage")])
+
+        b.applySelections(from: a)
+
+        XCTAssertEqual(b.selection(for: "inputImage"), .testPattern(id: "smpte_bars"))
+        XCTAssertEqual(b.source(for: "inputImage").displayName, "SMPTE Bars")
+    }
+
+    /// Both routers resolve `.camera` to the SAME injected instance — proving a single shared capture
+    /// session feeds inline + pop-out rather than two competing AVCaptureSessions.
+    func test_cameraSelectionUsesInjectedSharedCamera() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let queue = try XCTUnwrap(device.makeCommandQueue())
+        let cam = FakeImageSource(name: "SharedCam")
+        let a = SourceRouter(device: device, queue: queue, camera: cam)
+        let b = SourceRouter(device: device, queue: queue, camera: cam)
+        a.updateInputs([imageInput("inputImage")])
+        b.updateInputs([imageInput("inputImage")])
+
+        a.setSelection(.camera, for: "inputImage")
+        b.setSelection(.camera, for: "inputImage")
+
+        XCTAssertTrue(a.source(for: "inputImage") === cam)
+        XCTAssertTrue(b.source(for: "inputImage") === cam)
+    }
+}
+
+@MainActor
+private final class FakeImageSource: ImageSource {
+    let displayName: String
+    init(name: String) { displayName = name }
+    func texture(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? { nil }
 }

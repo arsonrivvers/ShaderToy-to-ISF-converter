@@ -53,7 +53,7 @@ final class MetalPreviewControllerTests: XCTestCase {
 
     func testRendersTextureForGoodShader() async throws {
         let c = MetalPreviewController()
-        c.setRenderSize(width: 64, height: 64)
+        c.setRenderSize(width: 64, height: 64, fitToWindow: false)
         c.load(isf: goodISF)
         try await waitUntil { c.compileValid }
         let tex = c.renderOnce()

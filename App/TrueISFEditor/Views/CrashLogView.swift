@@ -81,3 +81,15 @@ struct CrashLogMenuButton: View {
         .keyboardShortcut("l", modifiers: [.command, .shift])
     }
 }
+
+/// View-menu command that hides/shows the code editor column (A1). Shares the `editorCollapsed`
+/// AppStorage key with EditorScreen.
+struct EditorCollapseMenuButton: View {
+    @AppStorage("editorCollapsed") private var editorCollapsed = false
+    var body: some View {
+        Button(editorCollapsed ? "Show Code Editor" : "Hide Code Editor") {
+            editorCollapsed.toggle()
+        }
+        .keyboardShortcut("e", modifiers: [.command, .option])
+    }
+}

@@ -118,6 +118,9 @@ void main() {
             CommandGroup(after: .windowArrangement) {
                 CrashLogMenuButton()
             }
+            CommandGroup(after: .sidebar) {
+                EditorCollapseMenuButton()
+            }
         }
         Window("Crash Log", id: "crash-log") {
             CrashLogView()

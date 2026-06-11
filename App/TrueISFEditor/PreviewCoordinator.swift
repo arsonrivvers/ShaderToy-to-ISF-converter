@@ -14,7 +14,7 @@ final class PreviewCoordinator: ObservableObject {
     private let metal: PreviewEngine
     private let webkit: PreviewEngine
     private var currentSource: String?
-    private var currentRenderSize: (Int?, Int?) = (nil, nil)
+    private var currentRenderSize: (width: Int, height: Int, fit: Bool) = (640, 480, true)
     private var sub: AnyCancellable?
 
     init(metal: PreviewEngine, webkit: PreviewEngine) {
@@ -28,9 +28,9 @@ final class PreviewCoordinator: ObservableObject {
 
     func load(isf: String) { currentSource = isf; activeEngine.load(isf: isf) }
     func setInput(_ name: String, _ jsonValue: String) { activeEngine.setInput(name, jsonValue) }
-    func setRenderSize(width: Int?, height: Int?) {
-        currentRenderSize = (width, height)
-        activeEngine.setRenderSize(width: width, height: height)
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
+        currentRenderSize = (width, height, fitToWindow)
+        activeEngine.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)
     }
 
     private func subscribe() {
@@ -46,7 +46,8 @@ final class PreviewCoordinator: ObservableObject {
     }
     private func switchEngine() {
         subscribe()
-        activeEngine.setRenderSize(width: currentRenderSize.0, height: currentRenderSize.1)
+        activeEngine.setRenderSize(width: currentRenderSize.width, height: currentRenderSize.height,
+                                   fitToWindow: currentRenderSize.fit)
         if let s = currentSource { activeEngine.load(isf: s) }
         objectWillChange.send()
     }

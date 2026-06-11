@@ -74,3 +74,16 @@ final class CameraSource: ImageSource {
 
     func texture(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? { provider.currentTexture() }
 }
+
+/// Process-wide single camera so the inline preview and the pop-out output window share ONE
+/// AVCaptureSession instead of opening two competing sessions on the same device.
+@MainActor
+enum SharedCamera {
+    private static var instance: CameraSource?
+    /// The shared camera, created lazily on first request. Nil if the device has no camera.
+    static func make(device: MTLDevice) -> ImageSource? {
+        if let instance { return instance }
+        instance = CameraSource(device: device)
+        return instance
+    }
+}

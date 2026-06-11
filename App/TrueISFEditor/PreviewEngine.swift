@@ -16,7 +16,10 @@ protocol PreviewEngine: AnyObject {
 
     func load(isf: String)
     func setInput(_ name: String, _ jsonValue: String)
-    func setRenderSize(width: Int?, height: Int?)
+    /// `width`/`height` are always the target resolution (and thus the aspect ratio to preserve).
+    /// `fitToWindow` true ⇒ render the largest W×H-aspect rect that fits the view (crisp, letterboxed);
+    /// false ⇒ render at exactly width×height (also letterboxed into the view, never distorted).
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool)
 
     /// Publisher the coordinator subscribes to so it can re-publish this engine's compile state.
     var compileStateWillChange: ObservableObjectPublisher { get }

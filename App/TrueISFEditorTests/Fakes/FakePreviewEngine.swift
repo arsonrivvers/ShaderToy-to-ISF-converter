@@ -18,10 +18,10 @@ final class FakePreviewEngine: PreviewEngine, ObservableObject {
 
     private(set) var loadedISF: String?
     private(set) var lastInput: (String, String)?
-    private(set) var lastRenderSize: (Int?, Int?)?
+    private(set) var lastRenderSize: (width: Int, height: Int, fit: Bool)?
     func load(isf: String) { loadedISF = isf }
     func setInput(_ name: String, _ jsonValue: String) { lastInput = (name, jsonValue) }
-    func setRenderSize(width: Int?, height: Int?) { lastRenderSize = (width, height) }
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool) { lastRenderSize = (width, height, fitToWindow) }
 
     func simulateCompile(valid: Bool, error: String?, line: Int?, inputs: [ISFPreviewInput]) {
         self.compileValid = valid; self.compileError = error

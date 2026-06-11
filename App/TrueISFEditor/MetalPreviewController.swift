@@ -21,7 +21,10 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     private let device: MTLDevice
     private let renderQueue: MTLCommandQueue
     private var scene: ISFMSLScene?
-    private var renderSize: MTLSize?
+    // Target resolution (also the aspect to preserve) + fit mode. See setRenderSize.
+    private var renderWidth = 640
+    private var renderHeight = 480
+    private var fitToWindow = true
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
     private var lastLoadedSource: String?
@@ -202,18 +205,19 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             scene.setValue(val, forInputNamed: name)
         }
     }
-    func setRenderSize(width: Int?, height: Int?) {
-        if let w = width, let h = height, w > 0, h > 0 {
-            renderSize = MTLSize(width: w, height: h, depth: 1)
-        } else {
-            renderSize = nil
-        }
+    func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
+        renderWidth = max(width, 1)
+        renderHeight = max(height, 1)
+        self.fitToWindow = fitToWindow
     }
 
     private func targetSize() -> MTLSize {
-        if let r = renderSize { return r }
-        let s = mtkView.drawableSize
-        return MTLSize(width: max(Int(s.width), 1), height: max(Int(s.height), 1), depth: 1)
+        if fitToWindow {
+            // Largest W×H-aspect rectangle that fits the drawable → crisp + aspect-locked.
+            return BlitFit.inscribe(aspect: Double(renderWidth) / Double(renderHeight),
+                                    in: mtkView.drawableSize)
+        }
+        return MTLSize(width: renderWidth, height: renderHeight, depth: 1)
     }
 
     /// Builds the passthrough display pipeline: a fullscreen triangle whose fragment shader samples
@@ -224,10 +228,11 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         #include <metal_stdlib>
         using namespace metal;
         struct VOut { float4 pos [[position]]; float2 uv; };
-        vertex VOut tisf_blit_v(uint vid [[vertex_id]]) {
+        vertex VOut tisf_blit_v(uint vid [[vertex_id]], constant float2& fit [[buffer(0)]]) {
             float2 p = float2(float((vid << 1) & 2), float(vid & 2));
             VOut o;
-            o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0);
+            // fit letterboxes/pillarboxes the fullscreen triangle so the texture keeps its aspect.
+            o.pos = float4((p * 2.0 - 1.0) * fit, 0.0, 1.0);
             o.uv = float2(p.x, 1.0 - p.y);
             return o;
         }
@@ -311,8 +316,11 @@ extension MetalPreviewController: MTKViewDelegate {
               let rpd = view.currentRenderPassDescriptor else { cb.commit(); return }
         rpd.colorAttachments[0].loadAction = .clear
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        // Aspect-fit: letterbox/pillarbox the output texture into the drawable — never stretch.
+        var fit = BlitFit.scale(textureSize: size, drawableSize: view.drawableSize)
         if let enc = cb.makeRenderCommandEncoder(descriptor: rpd) {
             enc.setRenderPipelineState(pipeline)
+            enc.setVertexBytes(&fit, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
             enc.setFragmentTexture(srcTex, index: 0)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             enc.endEncoding()

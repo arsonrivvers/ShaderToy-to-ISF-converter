@@ -7,6 +7,7 @@ struct EditorScreen: View {
     @StateObject private var output = OutputWindowManager()
     @StateObject private var shaderAssist = ShaderAssistViewModel(
         binaryOverride: { UserDefaults.standard.string(forKey: "claudeBinaryPath") })
+    @AppStorage("editorCollapsed") private var editorCollapsed = false
 
     var body: some View {
         NavigationSplitView {
@@ -14,29 +15,41 @@ struct EditorScreen: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             HSplitView {
-                // Center: editor over warnings.
-                VStack(spacing: 0) {
-                    CodeEditorView(controller: vm.editor)
-                        .frame(minWidth: 360)
-                    Divider()
-                    DiagnosticsPanel(
-                        diagnostics: vm.diagnostics.diagnostics,
-                        sourceLines: vm.file.source.components(separatedBy: "\n"),
-                        onJump: { vm.editor.revealLine($0) },
-                        onApply: { vm.apply($0) })
-                        .frame(height: 150)
-                        .padding(6)
-                    Divider()
-                    shaderAssistSection
-                        .padding(6)
+                // Center: editor over warnings (collapsible — A1).
+                if !editorCollapsed {
+                    VStack(spacing: 0) {
+                        CodeEditorView(controller: vm.editor)
+                            .frame(minWidth: 360)
+                        Divider()
+                        DiagnosticsPanel(
+                            diagnostics: vm.diagnostics.diagnostics,
+                            sourceLines: vm.file.source.components(separatedBy: "\n"),
+                            onJump: { vm.editor.revealLine($0) },
+                            onApply: { vm.apply($0) })
+                            .frame(height: 150)
+                            .padding(6)
+                        Divider()
+                        shaderAssistSection
+                            .padding(6)
+                    }
                 }
                 // Right: preview + input controls.
                 VStack(spacing: 0) {
                     HStack {
+                        Button {
+                            editorCollapsed.toggle()
+                        } label: {
+                            Image(systemName: editorCollapsed ? "sidebar.left" : "sidebar.squares.left")
+                        }
+                        .help(editorCollapsed ? "Show the code editor (⌘⌥E)" : "Hide the code editor (⌘⌥E)")
                         Text(vm.file.displayName).font(.headline)
                         if vm.file.isDirty { Text("•").foregroundStyle(.secondary) }
                         Spacer()
-                        Button { output.show(source: vm.file.source); applyResolution() } label: {
+                        Button {
+                            output.show(source: vm.file.source)
+                            applyResolution()
+                            output.syncSelections(from: vm.preview.imageSources)
+                        } label: {
                             Image(systemName: "rectangle.portrait.and.arrow.forward")
                         }
                         .help("Pop out the output into its own window")
@@ -72,6 +85,9 @@ struct EditorScreen: View {
         .onChange(of: vm.fitToWindow) { _ in applyResolution() }
         .onChange(of: vm.renderWidth) { _ in applyResolution() }
         .onChange(of: vm.renderHeight) { _ in applyResolution() }
+        .onReceive(vm.preview.imageSources.$selections) { _ in
+            if output.isOpen { output.syncSelections(from: vm.preview.imageSources) }
+        }
         .sheet(isPresented: $vm.requestImport) {
             ShadertoyImportSheet { isf, warnings, name in
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
@@ -125,36 +141,52 @@ struct EditorScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Responsive render toolbar (A2): one row when it fits, wraps to two rows when the preview column
+    /// is narrow — nothing is ever clipped or hidden.
     private var renderControlsBar: some View {
-        HStack(spacing: 6) {
-            Toggle("Fit", isOn: $vm.fitToWindow).toggleStyle(.checkbox)
-            TextField("W", value: $vm.renderWidth, format: .number)
-                .frame(width: 52).disabled(vm.fitToWindow)
-            Text("×").foregroundStyle(.secondary)
-            TextField("H", value: $vm.renderHeight, format: .number)
-                .frame(width: 52).disabled(vm.fitToWindow)
-            Button("÷2") { vm.halveRenderSize() }
-            Button("×2") { vm.doubleRenderSize() }
-            Spacer()
-            SourceToolbarControl(router: vm.preview.imageSources, library: library)
-            Picker("Renderer", selection: Binding(get: { vm.preview.active }, set: { vm.preview.active = $0 })) {
-                Text("Metal").tag(PreviewCoordinator.Engine.metal)
-                Text("WebKit").tag(PreviewCoordinator.Engine.webkit)
+        ViewThatFits(in: .horizontal) {
+            // Wide: single row.
+            HStack(spacing: 6) {
+                sizeControls
+                Spacer(minLength: 8)
+                sourceAndRenderer
             }
-            .pickerStyle(.segmented)
-            .frame(width: 160)
-            .help("Metal = VDMX-fidelity (ES3). WebKit = legacy WebGL1 fallback.")
+            // Narrow: two rows.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) { sizeControls; Spacer(minLength: 0) }
+                HStack(spacing: 6) { sourceAndRenderer; Spacer(minLength: 0) }
+            }
         }
         .font(.caption)
         .textFieldStyle(.roundedBorder)
     }
 
-    /// Push the current output dimensions to both the inline preview and the pop-out window.
+    @ViewBuilder private var sizeControls: some View {
+        Toggle("Fit", isOn: $vm.fitToWindow).toggleStyle(.checkbox)
+        TextField("W", value: $vm.renderWidth, format: .number)
+            .frame(width: 52).disabled(vm.fitToWindow)
+        Text("×").foregroundStyle(.secondary)
+        TextField("H", value: $vm.renderHeight, format: .number)
+            .frame(width: 52).disabled(vm.fitToWindow)
+        Button("÷2") { vm.halveRenderSize() }
+        Button("×2") { vm.doubleRenderSize() }
+    }
+
+    @ViewBuilder private var sourceAndRenderer: some View {
+        SourceToolbarControl(router: vm.preview.imageSources, library: library)
+        Picker("Renderer", selection: Binding(get: { vm.preview.active }, set: { vm.preview.active = $0 })) {
+            Text("Metal").tag(PreviewCoordinator.Engine.metal)
+            Text("WebKit").tag(PreviewCoordinator.Engine.webkit)
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+        .help("Metal = VDMX-fidelity (ES3). WebKit = legacy WebGL1 fallback.")
+    }
+
+    /// Push the current output dimensions (always W×H + fit flag) to the inline preview and pop-out.
     private func applyResolution() {
-        let w: Int? = vm.fitToWindow ? nil : vm.renderWidth
-        let h: Int? = vm.fitToWindow ? nil : vm.renderHeight
-        vm.preview.setRenderSize(width: w, height: h)
-        output.setRenderSize(width: w, height: h)
+        vm.preview.setRenderSize(width: vm.renderWidth, height: vm.renderHeight, fitToWindow: vm.fitToWindow)
+        output.setRenderSize(width: vm.renderWidth, height: vm.renderHeight, fitToWindow: vm.fitToWindow)
     }
 
     private func addFolder() {

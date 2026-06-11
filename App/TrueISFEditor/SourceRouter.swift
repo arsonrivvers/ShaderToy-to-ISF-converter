@@ -17,16 +17,29 @@ enum SourceSelection: Equatable {
 final class SourceRouter: ObservableObject {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
-    private lazy var sharedCamera: ImageSource? = CameraSource(device: device)
+    private let injectedCamera: ImageSource?
+    /// Prefer an injected camera (DI/tests); otherwise the process-wide shared capture session so
+    /// inline preview and pop-out window share ONE AVCaptureSession.
+    private lazy var sharedCamera: ImageSource? = injectedCamera ?? SharedCamera.make(device: device)
 
     /// Image-input names on the current shader, in declaration order (drives the UI).
     @Published private(set) var imageInputNames: [String] = []
     @Published private(set) var selections: [String: SourceSelection] = [:]
     private var sources: [String: ImageSource] = [:]
 
-    init(device: MTLDevice, queue: MTLCommandQueue) {
+    /// `camera` lets a single shared capture session be injected so inline + pop-out share one
+    /// AVCaptureSession (and tests can inject a fake). Defaults to a per-router camera.
+    init(device: MTLDevice, queue: MTLCommandQueue, camera: ImageSource? = nil) {
         self.device = device
         self.queue = queue
+        self.injectedCamera = camera
+    }
+
+    /// Copy another router's selections onto this one (pop-out mirrors the inline preview's sources).
+    func applySelections(from other: SourceRouter) {
+        for (name, sel) in other.selections {
+            setSelection(sel, for: name)
+        }
     }
 
     /// Called by the engine on each successful compile. Adds defaults for new image inputs and
