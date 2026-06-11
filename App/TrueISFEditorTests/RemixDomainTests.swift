@@ -9,4 +9,14 @@ final class RemixDomainTests: XCTestCase {
         XCTAssertEqual(n.parents, ["a","b"])
         XCTAssertEqual(n.mode, .crossover)
     }
+
+    func test_directives_pickN_areDistinct_andStable() {
+        let a = RemixDirectives.pick(3, seed: 0)
+        XCTAssertEqual(a.count, 3)
+        XCTAssertEqual(Set(a).count, 3)            // distinct
+        XCTAssertEqual(RemixDirectives.pick(3, seed: 0), a)   // deterministic for a given seed
+    }
+    func test_directives_pickMoreThanCatalog_wrapsWithoutCrash() {
+        XCTAssertEqual(RemixDirectives.pick(99, seed: 1).count, 99)
+    }
 }
