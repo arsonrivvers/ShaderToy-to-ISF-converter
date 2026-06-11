@@ -123,6 +123,9 @@ struct RealProcess: ProcessRunning {
         let p = Process()
         p.executableURL = executable
         p.arguments = args
+        // Run from a neutral temp dir so the CLIs never scan the app's launch directory (e.g. the
+        // user's Desktop) — that scan triggers a repeated macOS TCC "access your Desktop" prompt.
+        p.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
         let outPipe = Pipe(); let errPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = errPipe
