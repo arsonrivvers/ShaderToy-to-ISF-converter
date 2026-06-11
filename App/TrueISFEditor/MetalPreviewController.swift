@@ -228,12 +228,13 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         #include <metal_stdlib>
         using namespace metal;
         struct VOut { float4 pos [[position]]; float2 uv; };
+        // Fullscreen QUAD (triangle-strip, 4 verts) at the ±fit corners. A scaled quad letterboxes
+        // cleanly; a scaled fullscreen-triangle would expose its hypotenuse as a diagonal cut.
         vertex VOut tisf_blit_v(uint vid [[vertex_id]], constant float2& fit [[buffer(0)]]) {
-            float2 p = float2(float((vid << 1) & 2), float(vid & 2));
+            float2 corner = float2(float(vid & 1), float((vid >> 1) & 1)); // (0,0)(1,0)(0,1)(1,1)
             VOut o;
-            // fit letterboxes/pillarboxes the fullscreen triangle so the texture keeps its aspect.
-            o.pos = float4((p * 2.0 - 1.0) * fit, 0.0, 1.0);
-            o.uv = float2(p.x, 1.0 - p.y);
+            o.pos = float4((corner * 2.0 - 1.0) * fit, 0.0, 1.0);
+            o.uv = float2(corner.x, 1.0 - corner.y);
             return o;
         }
         fragment float4 tisf_blit_f(VOut v [[stage_in]], texture2d<float> tex [[texture(0)]]) {
@@ -322,7 +323,7 @@ extension MetalPreviewController: MTKViewDelegate {
             enc.setRenderPipelineState(pipeline)
             enc.setVertexBytes(&fit, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
             enc.setFragmentTexture(srcTex, index: 0)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             enc.endEncoding()
         }
         cb.present(drawable)

@@ -171,19 +171,23 @@ struct EditorScreen: View {
     /// Responsive render toolbar (A2): one row when it fits, wraps to two rows when the preview column
     /// is narrow — nothing is ever clipped or hidden.
     private var renderControlsBar: some View {
+        // ViewThatFits picks the FIRST child that fits the proposed width. The measured children must
+        // NOT contain a flexible Spacer (a Spacer lets a row shrink to any width, so it always "fits"
+        // and never wraps). So each variant has a definite content width; the bar is left-aligned and
+        // wraps mobile-style as the column narrows.
         ViewThatFits(in: .horizontal) {
-            // Wide: single row.
-            HStack(spacing: 6) {
-                sizeControls
-                Spacer(minLength: 8)
-                sourceAndRenderer
+            HStack(spacing: 6) { sizeControls; sourceAndRenderer }            // one row when it fits
+            VStack(alignment: .leading, spacing: 4) {                         // two rows when narrower
+                HStack(spacing: 6) { sizeControls }
+                HStack(spacing: 6) { sourceAndRenderer }
             }
-            // Narrow: two rows.
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) { sizeControls; Spacer(minLength: 0) }
-                HStack(spacing: 6) { sourceAndRenderer; Spacer(minLength: 0) }
+            VStack(alignment: .leading, spacing: 4) {                         // three rows when narrowest
+                HStack(spacing: 6) { sizeControls }
+                SourceToolbarControl(router: vm.preview.imageSources, library: library)
+                rendererPicker
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .font(.caption)
         .textFieldStyle(.roundedBorder)
     }
@@ -201,6 +205,10 @@ struct EditorScreen: View {
 
     @ViewBuilder private var sourceAndRenderer: some View {
         SourceToolbarControl(router: vm.preview.imageSources, library: library)
+        rendererPicker
+    }
+
+    @ViewBuilder private var rendererPicker: some View {
         Picker("Renderer", selection: Binding(get: { vm.preview.active }, set: { vm.preview.active = $0 })) {
             Text("Metal").tag(PreviewCoordinator.Engine.metal)
             Text("WebKit").tag(PreviewCoordinator.Engine.webkit)
