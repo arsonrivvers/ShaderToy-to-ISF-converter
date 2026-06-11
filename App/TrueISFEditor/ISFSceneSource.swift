@@ -21,9 +21,15 @@ final class ISFSceneSource: ImageSource {
         self.displayName = displayName
         self.device = device
         self.queue = queue
-        self.tempURL = FileManager.default.temporaryDirectory
+        let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("trueisf-src-\(UUID().uuidString).fs")
-        do { try sourceText.write(to: tempURL, atomically: true, encoding: .utf8) } catch { return nil }
+        self.tempURL = url
+        do { try sourceText.write(to: url, atomically: true, encoding: .utf8) } catch { return nil }
+        // Swift does not call deinit when a failable init returns nil, so clean up the temp file on
+        // any failure path here; the deinit handles the success-then-dealloc case. Reference the
+        // local `url` (not self.tempURL) so the defer doesn't touch self before init completes.
+        var didFinishInit = false
+        defer { if !didFinishInit { try? FileManager.default.removeItem(at: url) } }
 
         // Ensure VVMetalKit / ISFMSLKit global singletons are initialized before any scene work.
         // Mirrors MetalPreviewController.init(). Without these, ISFMSLScene.loadURL: fails silently.
@@ -58,7 +64,10 @@ final class ISFSceneSource: ImageSource {
         cb.commit()
         cb.waitUntilCompleted()
         guard tex != nil, !s.compilerError else { return nil }
+        didFinishInit = true
     }
+
+    deinit { try? FileManager.default.removeItem(at: tempURL) }
 
     func texture(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? {
         var err: NSString?
@@ -72,6 +81,7 @@ final class ISFSceneSource: ImageSource {
         let p = TestPatternCatalog.default
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("trueisf-nest-\(UUID().uuidString).fs")
         guard (try? p.sourceText.write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        defer { try? FileManager.default.removeItem(at: url) }
         var ce: ObjCBool = false; var msg: NSString?
         guard let scene = ISFMSLSafeCreateAndLoad(device, url, &ce, &msg), !ce.boolValue,
               let cb = queue.makeCommandBuffer() else { return nil }
