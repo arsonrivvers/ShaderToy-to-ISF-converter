@@ -66,6 +66,7 @@ targets:
       - TrueISFEditor/ShaderAssist/CodexRunner.swift
       - TrueISFEditor/ShaderAssist/SkillPreamble.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
+      - TrueISFEditor/Remix/RemixNode.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
       - TrueISFEditor/ISFSceneSource.swift
