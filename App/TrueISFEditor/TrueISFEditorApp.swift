@@ -7,6 +7,21 @@ struct TrueISFEditorApp: App {
     @StateObject private var library = LibraryModel()
     @StateObject private var vm = EditorViewModel()
     @StateObject private var settingsModel = AppModel()
+    @StateObject private var remixModel = RemixStudioModel(
+        generator: RemixGenerator(
+            makeProvider: {
+                switch AssistProviderKind(rawValue: UserDefaults.standard.string(forKey: "assistProvider") ?? "") ?? .claude {
+                case .claude:
+                    return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(
+                        override: UserDefaults.standard.string(forKey: "claudeBinaryPath")))
+                case .codex:
+                    return CodexRunner(binary: CodexRunner.locateBinary(
+                        override: UserDefaults.standard.string(forKey: "codexBinaryPath")))
+                }
+            },
+            model: UserDefaults.standard.string(forKey: "assistClaudeModel") ?? "sonnet"
+        )
+    )
 
     init() {
         // Best-effort crash capture; accessing CrashLog.shared also ingests any crash from last session.
@@ -109,6 +124,9 @@ void main() {
                 Button("Add Folder to Library…") { addFolderToLibrary() }
                     .keyboardShortcut("o")
             }
+            CommandGroup(after: .newItem) {
+                RemixMenuButton()
+            }
             CommandGroup(replacing: .saveItem) {
                 Button("Save") { saveCurrent() }
                     .keyboardShortcut("s")
@@ -124,6 +142,20 @@ void main() {
         }
         Window("Crash Log", id: "crash-log") {
             CrashLogView()
+        }
+        Window("ISF Remix Studio", id: "remix-studio") {
+            RemixStudioView(
+                model: remixModel,
+                resolver: RemixParentResolver(
+                    currentEditorSource: { vm.file.source },
+                    fetchShadertoy: RemixParentResolver.liveFetch(
+                        apiKey: { KeychainStore.load() ?? "" })   // same source the importer uses
+                ),
+                openInEditor: { isf in
+                    vm.loadImported(isf: isf, warnings: [], suggestedName: "Remixed shader")
+                },
+                libraryEntries: library.filtered(query: "")
+            )
         }
         Settings { SettingsView(model: settingsModel) }
     }
