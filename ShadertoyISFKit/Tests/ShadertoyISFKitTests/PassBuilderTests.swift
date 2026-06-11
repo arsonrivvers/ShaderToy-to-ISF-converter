@@ -24,6 +24,20 @@ final class PassBuilderTests: XCTestCase {
         XCTAssertEqual(plan.orderedPassNames, ["Image"])
     }
 
+    func test_orderedBufferNames_matchBodyMapping() {
+        // The ordered buffer names are the single source of truth — header PASSES TARGETs and the
+        // sampler names in the body both derive from these, so they can never diverge.
+        let plan = PassBuilder.build(passes: [
+            pass(.buffer, "Buffer A", outID: "a"),
+            pass(.buffer, "Buffer B", outID: "b"),
+            pass(.buffer, "Buffer C", outID: "c"),
+            pass(.buffer, "Buffer D", outID: "d"),
+            pass(.image, "Image", outID: "img"),
+        ])
+        XCTAssertEqual(plan.orderedBufferNames, ["bufA", "bufB", "bufC", "bufD"])
+        XCTAssertEqual(plan.bufferOutputIDToName["c"], "bufC")
+    }
+
     func test_soundPass_warnsAndSkips() {
         let plan = PassBuilder.build(passes: [
             pass(.sound, "Sound", outID: "s"),

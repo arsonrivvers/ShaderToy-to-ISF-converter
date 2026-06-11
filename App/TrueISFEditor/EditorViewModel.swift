@@ -117,7 +117,9 @@ final class EditorViewModel: ObservableObject {
         statusMessage = "Imported \(suggestedName)"
         editor.setText(isf)
         headerModel.syncFromText(isf)
-        applyDiagnostics(error: preview.compileError, line: preview.compileErrorLine, valid: preview.compileValid)
+        // No pre-compile applyDiagnostics here: the source just changed, so preview's compile state is
+        // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
+        // the compileError/compileValid sink → applyDiagnostics with the new conversionWarnings merged.
         recompile(immediate: true)
     }
 

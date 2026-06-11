@@ -31,6 +31,19 @@ public enum SamplerRewriter {
             }
         }
 
+        // texture / texture2D with bias (arity 3) -> IMG_NORM_PIXEL(name, COORD) (+warn).
+        // texture(sampler, coord, bias) is valid GLSL ES 3.00; ISF has no per-sample bias, so drop it
+        // (mirrors textureLod). Without this the 3-arg call would pass through and fail to compile.
+        for fn in ["texture2D", "texture"] {
+            out = replaceCall(in: out, fn: fn, arity: 3) { args in
+                guard let name = name(forChannelArg: args[0], bindings: bindings) else { return nil }
+                warnings.append(ConversionWarning(severity: .info,
+                    message: "texture() bias argument dropped (\(args[2].trimmed)); ISF has no per-sample bias.",
+                    context: ""))
+                return "IMG_NORM_PIXEL(\(name), \(args[1].trimmed))"
+            }
+        }
+
         // Any bare `iChannelN` identifier that survives the call rewrites above is a value use —
         // e.g. the sampler passed as a function argument (`ups(..., iChannel0, ...)`), a pattern
         // some Shadertoy authors use to thread the channel through helper functions. Rewrite it to

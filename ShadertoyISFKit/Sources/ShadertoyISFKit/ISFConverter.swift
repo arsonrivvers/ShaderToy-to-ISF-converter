@@ -29,8 +29,9 @@ public enum ISFConverter {
                 // iMouse.zw is the click position with sign signalling button-down on Shadertoy;
                 // many shaders gate interaction on it (`if (iMouse.z < 0.01) ...`). Mirror xy into
                 // zw (non-zero, "pressed") so the mouse slider actually drives those shaders.
-                code = code.replacingOccurrences(of: "iMouse",
-                    with: "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)")
+                code = code.replacingOccurrences(of: #"\biMouse\b"#,
+                    with: "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)",
+                    options: .regularExpression)
             }
             let sampled = SamplerRewriter.rewrite(code, bindings: resolved.bindings)
             warnings.append(contentsOf: sampled.warnings.map {
@@ -51,9 +52,9 @@ public enum ISFConverter {
         warnings.append(contentsOf: compat.warnings)
         warnings.append(contentsOf: GLSLLint.check(glsl.code))
 
-        let bufferNames = plan.renderPasses.filter { $0.type == .buffer }.enumerated().map { i, _ in
-            "buf\(["A","B","C","D"][min(i,3)])"
-        }
+        // Reuse the plan's ordered buffer names — the single source of truth shared with the
+        // in-body sampler names — so the header PASSES TARGETs can never drift from the GLSL.
+        let bufferNames = plan.orderedBufferNames
 
         let header = HeaderBuilder.build(
             description: shader.info.description ?? shader.info.name,

@@ -3,6 +3,9 @@ public struct PassBuilder {
         public let renderPasses: [RenderPass]          // ordered: buffers then image
         public let orderedPassNames: [String]
         public let bufferOutputIDToName: [String: String]
+        /// ISF buffer names (bufA, bufB, …) in pass order. Single source of truth — both the header
+        /// PASSES TARGETs and the in-body sampler names derive from this, so they can't diverge.
+        public let orderedBufferNames: [String]
         public let commonCode: String
         public let warnings: [ConversionWarning]
     }
@@ -22,9 +25,11 @@ public struct PassBuilder {
         let images = passes.filter { $0.type == .image }
 
         var idToName: [String: String] = [:]
+        var orderedBufferNames: [String] = []
         let letters = ["A", "B", "C", "D"]
         for (i, buf) in buffers.enumerated() {
             let name = "buf\(i < letters.count ? letters[i] : String(i))"
+            orderedBufferNames.append(name)
             for out in buf.outputs { idToName[out.id] = name }
         }
 
@@ -32,6 +37,7 @@ public struct PassBuilder {
         return Plan(renderPasses: ordered,
                     orderedPassNames: ordered.map(\.name),
                     bufferOutputIDToName: idToName,
+                    orderedBufferNames: orderedBufferNames,
                     commonCode: common,
                     warnings: warnings)
     }

@@ -55,6 +55,8 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         mtkView.delegate = self
     }
 
+    deinit { try? FileManager.default.removeItem(at: tempURL) }
+
     func load(isf: String) {
         lastLoadedSource = isf
         // Invalidate prior compile state synchronously: a new source is transpiling, so the

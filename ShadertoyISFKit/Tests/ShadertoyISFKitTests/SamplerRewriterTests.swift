@@ -24,6 +24,17 @@ final class SamplerRewriterTests: XCTestCase {
         XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")
         XCTAssertTrue(r.warnings.contains { $0.message.contains("LOD") })
     }
+    func test_texture_withBias_dropsBias_andWarns() {
+        // 3-arg texture(sampler, coord, bias) is valid GLSL ES 3.00; ISF has no per-sample bias,
+        // so drop the bias (like textureLod's LOD) instead of leaving an uncompilable texture() call.
+        let r = SamplerRewriter.rewrite("texture(iChannel0, uv, -0.5)", bindings: binding())
+        XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")
+        XCTAssertTrue(r.warnings.contains { $0.message.lowercased().contains("bias") })
+    }
+    func test_texture2D_withBias_dropsBias() {
+        let r = SamplerRewriter.rewrite("texture2D(iChannel1, uv, 1.0)", bindings: binding())
+        XCTAssertEqual(r.code, "IMG_NORM_PIXEL(iChannel1img, uv)")
+    }
 
     /// Regression for N323DD: a bare `iChannelN` used as a value (e.g. passed as a function
     /// argument, not inside a builtin sampling call) must be rewritten to the bound sampler name.

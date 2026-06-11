@@ -11,16 +11,12 @@ import ShadertoyISFKit
 final class ISFSceneSource: ImageSource {
     let displayName: String
     private let scene: ISFMSLScene
-    private let device: MTLDevice
-    private let queue: MTLCommandQueue
     private let tempURL: URL
     private var lastGood: MTLTexture?
 
     /// Returns nil if the shader fails to compile or render a probe frame.
     init?(displayName: String, sourceText: String, device: MTLDevice, queue: MTLCommandQueue) {
         self.displayName = displayName
-        self.device = device
-        self.queue = queue
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("trueisf-src-\(UUID().uuidString).fs")
         self.tempURL = url

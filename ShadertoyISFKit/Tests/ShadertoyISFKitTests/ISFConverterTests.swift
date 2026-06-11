@@ -55,6 +55,17 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertFalse(text.contains("vec4(mouse * RENDERSIZE, 0.0, 0.0)"))
     }
 
+    func test_iMouse_wordBoundary_preservesLongerIdentifiers() {
+        // The iMouse rewrite must be word-boundary-aware so it doesn't corrupt longer identifiers
+        // that merely start with "iMouse" (e.g. a user-named `iMouseScale`).
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage(out vec4 O, vec2 I){ float iMouseScale = 2.0; O = vec4(iMouse.x * iMouseScale); }",
+            name: "MouseWB")
+        let (doc, _) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.fileText.contains("iMouseScale"))
+        XCTAssertTrue(doc.fileText.contains("vec4(mouse * RENDERSIZE, mouse * RENDERSIZE).x"))
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText
