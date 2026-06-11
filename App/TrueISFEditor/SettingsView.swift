@@ -5,30 +5,83 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draftKey: String = ""
     @State private var draftClaudePath: String = ""
+    @State private var draftCodexPath: String = ""
+    @State private var draftProvider: String = "claude"
+    @State private var draftClaudeModel: String = "sonnet"
+    @State private var draftCodexModel: String = ""
+
+    private let claudeModels = ["opus", "sonnet", "haiku"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("API Key (optional — Advanced)").font(.headline)
-            Text("Leave blank to fetch via the built-in browser (no account needed). An API key is only for Shadertoy Silver/Gold members.").font(.caption).foregroundStyle(.secondary)
-            SecureField("API key", text: $draftKey)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("ShaderAssist (AI)").font(.headline)
+                Picker("Provider", selection: $draftProvider) {
+                    Text("Claude (subscription)").tag("claude")
+                    Text("OpenAI · Codex (subscription)").tag("codex")
+                }
+                .pickerStyle(.radioGroup)
 
-            Divider()
+                if draftProvider == "claude" {
+                    Picker("Claude model", selection: $draftClaudeModel) {
+                        ForEach(claudeModels, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    statusRow(found: AppModel.claudeCLIFound(override: draftClaudePath),
+                              cli: "claude", hint: "Run `claude` once in Terminal to sign in.")
+                    TextField("/path/to/claude (blank = auto-detect)", text: $draftClaudePath)
+                } else {
+                    HStack {
+                        Text("Codex model")
+                        TextField("default (recommended)", text: $draftCodexModel).frame(width: 200)
+                    }
+                    Text("Leave blank to use your Codex default model.").font(.caption2).foregroundStyle(.secondary)
+                    statusRow(found: AppModel.codexCLIFound(override: draftCodexPath),
+                              cli: "codex", hint: "Run `codex login` in Terminal to sign in with ChatGPT.")
+                    TextField("/path/to/codex (blank = auto-detect)", text: $draftCodexPath)
+                }
+                Text("Both providers run on your existing subscription via their CLI — no API key, no per-call cost. The ISF authoring skills are loaded into each session.")
+                    .font(.caption2).foregroundStyle(.secondary)
 
-            Text("Claude Code path (optional)").font(.headline)
-            Text("Leave blank to auto-detect (~/.local/bin/claude, Homebrew). Used by the ShaderAssist AI feature, which runs Claude Code on your subscription.").font(.caption).foregroundStyle(.secondary)
-            TextField("/path/to/claude", text: $draftClaudePath)
+                Divider()
 
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    model.saveKey(draftKey)
-                    model.saveClaudeBinaryPath(draftClaudePath.trimmingCharacters(in: .whitespaces))
-                    dismiss()
-                }.keyboardShortcut(.defaultAction)
+                Text("API Key (optional — Advanced)").font(.headline)
+                Text("Leave blank to fetch via the built-in browser (no account needed). An API key is only for Shadertoy Silver/Gold members.").font(.caption).foregroundStyle(.secondary)
+                SecureField("Shadertoy API key", text: $draftKey)
+
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                    Button("Save") {
+                        model.saveKey(draftKey)
+                        model.saveClaudeBinaryPath(draftClaudePath.trimmingCharacters(in: .whitespaces))
+                        model.saveAssistSettings(
+                            provider: draftProvider,
+                            claudeModel: draftClaudeModel,
+                            codexModel: draftCodexModel.trimmingCharacters(in: .whitespaces),
+                            codexPath: draftCodexPath.trimmingCharacters(in: .whitespaces))
+                        dismiss()
+                    }.keyboardShortcut(.defaultAction)
+                }
             }
+            .padding(20).frame(width: 480)
         }
-        .padding(20).frame(width: 460)
-        .onAppear { draftKey = model.apiKey; draftClaudePath = model.claudeBinaryPath }
+        .frame(width: 480, height: 520)
+        .onAppear {
+            draftKey = model.apiKey
+            draftClaudePath = model.claudeBinaryPath
+            draftCodexPath = model.codexBinaryPath
+            draftProvider = model.assistProvider
+            draftClaudeModel = model.assistClaudeModel.isEmpty ? "sonnet" : model.assistClaudeModel
+            draftCodexModel = model.assistCodexModel
+        }
+    }
+
+    @ViewBuilder private func statusRow(found: Bool, cli: String, hint: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: found ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(found ? .green : .orange)
+            Text(found ? "`\(cli)` CLI found" : "`\(cli)` CLI not found — \(hint)")
+                .font(.caption)
+        }
     }
 }

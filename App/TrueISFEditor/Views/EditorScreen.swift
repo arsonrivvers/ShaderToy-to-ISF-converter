@@ -8,6 +8,7 @@ struct EditorScreen: View {
     @StateObject private var shaderAssist = ShaderAssistViewModel(
         binaryOverride: { UserDefaults.standard.string(forKey: "claudeBinaryPath") })
     @AppStorage("editorCollapsed") private var editorCollapsed = false
+    @State private var showTerminal = true
 
     var body: some View {
         NavigationSplitView {
@@ -95,6 +96,17 @@ struct EditorScreen: View {
         }
     }
 
+    /// Opens the app Settings scene. SettingsLink is macOS 14+; fall back to the AppKit selector on 13.
+    @ViewBuilder private var settingsGearButton: some View {
+        if #available(macOS 14.0, *) {
+            SettingsLink { Image(systemName: "gearshape") }
+        } else {
+            Button {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } label: { Image(systemName: "gearshape") }
+        }
+    }
+
     /// AI assistant controls + result panel, below the diagnostics list in the center column.
     private var shaderAssistSection: some View {
         let running: Bool = { if case .running = shaderAssist.state { return true } else { return false } }()
@@ -112,8 +124,23 @@ struct EditorScreen: View {
                     ProgressView().controlSize(.small)
                     Button("Cancel") { shaderAssist.cancel() }
                 }
+                Spacer()
+                settingsGearButton
+                    .help("ShaderAssist settings — provider, model, login")
             }
-            Text("Uses your Claude subscription").font(.caption2).foregroundStyle(.secondary)
+            Text(shaderAssist.providerCaption.isEmpty
+                 ? "Runs on your Claude or Codex subscription · ISF skills loaded"
+                 : shaderAssist.providerCaption)
+                .font(.caption2).foregroundStyle(.secondary)
+
+            if running || !shaderAssist.transcript.isEmpty {
+                DisclosureGroup(isExpanded: $showTerminal) {
+                    AssistTerminalView(lines: shaderAssist.transcript)
+                        .frame(height: 120)
+                } label: {
+                    Text("Activity").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
 
             switch shaderAssist.state {
             case .idle, .running:

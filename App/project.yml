@@ -61,7 +61,10 @@ targets:
       - TrueISFEditor/ISFMSLSafeBridge.mm
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
+      - TrueISFEditor/ShaderAssist/AssistProvider.swift
       - TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift
+      - TrueISFEditor/ShaderAssist/CodexRunner.swift
+      - TrueISFEditor/ShaderAssist/SkillPreamble.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/ISFSceneSource.swift

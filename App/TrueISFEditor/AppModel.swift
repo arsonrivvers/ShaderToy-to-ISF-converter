@@ -12,6 +12,12 @@ final class AppModel: ObservableObject {
     @Published var apiKey: String = KeychainStore.load() ?? ""
     /// Optional explicit path to the `claude` CLI for the ShaderAssist AI feature (blank = auto-detect).
     @Published var claudeBinaryPath: String = UserDefaults.standard.string(forKey: "claudeBinaryPath") ?? ""
+    /// Optional explicit path to the `codex` CLI (blank = auto-detect).
+    @Published var codexBinaryPath: String = UserDefaults.standard.string(forKey: "codexBinaryPath") ?? ""
+    /// ShaderAssist provider + per-provider model selection (B2).
+    @Published var assistProvider: String = UserDefaults.standard.string(forKey: "assistProvider") ?? "claude"
+    @Published var assistClaudeModel: String = UserDefaults.standard.string(forKey: "assistClaudeModel") ?? "sonnet"
+    @Published var assistCodexModel: String = UserDefaults.standard.string(forKey: "assistCodexModel") ?? ""
     @Published var pastedCode: String = ""
     /// Default filename offered in the Save panel (derived from the shader name).
     @Published var suggestedFileName: String = "converted.fs"
@@ -35,6 +41,22 @@ final class AppModel: ObservableObject {
         claudeBinaryPath = p
         UserDefaults.standard.set(p, forKey: "claudeBinaryPath")
     }
+
+    /// Persist the ShaderAssist provider/model/path settings (B2).
+    func saveAssistSettings(provider: String, claudeModel: String, codexModel: String, codexPath: String) {
+        assistProvider = provider; assistClaudeModel = claudeModel
+        assistCodexModel = codexModel; codexBinaryPath = codexPath
+        let d = UserDefaults.standard
+        d.set(provider, forKey: "assistProvider")
+        d.set(claudeModel, forKey: "assistClaudeModel")
+        d.set(codexModel, forKey: "assistCodexModel")
+        d.set(codexPath, forKey: "codexBinaryPath")
+    }
+
+    /// Whether each provider's CLI is resolvable on this machine (honest "CLI found" status — actual
+    /// login is verified by running the CLI, which the live terminal will surface).
+    static func claudeCLIFound(override: String?) -> Bool { ClaudeCodeRunner.locateBinary(override: override) != nil }
+    static func codexCLIFound(override: String?) -> Bool { CodexRunner.locateBinary(override: override) != nil }
 
     func convert() async {
         warnings = []; isfOutput = ""; importedCode = ""; statusMessage = ""

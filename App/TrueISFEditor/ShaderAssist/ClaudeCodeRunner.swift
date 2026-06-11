@@ -2,16 +2,27 @@ import Foundation
 
 struct ProcessOutput: Sendable { let stdout: String; let stderr: String; let exitCode: Int32 }
 
+/// Streaming subprocess seam. `onLine` is called for each stdout line as it arrives (live terminal);
+/// the full stdout/stderr/exit are still returned for final parsing + error mapping. Injected in tests.
 protocol ProcessRunning: Sendable {
-    func run(executable: URL, args: [String], timeout: TimeInterval) throws -> ProcessOutput
+    func run(executable: URL, args: [String], timeout: TimeInterval,
+             onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput
 }
 
-enum ClaudeRunError: Error, Equatable {
-    case binaryNotFound, notAuthenticated, timedOut, processFailed(String)
+/// Maps a non-zero CLI exit to an AssistRunError (auth vs generic failure).
+enum AssistErrorMapper {
+    static func error(stderr: String, stdout: String) -> AssistRunError {
+        let lower = (stderr + stdout).lowercased()
+        if lower.contains("login") || lower.contains("not authenticated") ||
+           lower.contains("api key") || lower.contains("auth") || lower.contains("sign in") {
+            return .notAuthenticated
+        }
+        return .processFailed(stderr.isEmpty ? stdout : stderr)
+    }
 }
 
 @MainActor
-final class ClaudeCodeRunner {
+final class ClaudeCodeRunner: AssistProvider {
     private let binary: URL?
     private let makeProcess: () -> ProcessRunning
     private(set) var lastArgsForTest: [String] = []
@@ -23,69 +34,125 @@ final class ClaudeCodeRunner {
 
     /// Resolve the claude binary: explicit override → known paths → login-shell `command -v`.
     static func locateBinary(override: String?) -> URL? {
+        BinaryLocator.locate(name: "claude", override: override,
+                             extraPaths: ["\(NSHomeDirectory())/.local/bin/claude"])
+    }
+
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval = 180,
+             onEvent: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
+        guard let binary else { throw AssistRunError.binaryNotFound }
+        // stream-json gives line-by-line events for the live terminal; --verbose is required with it.
+        var args = ["-p", "--output-format", "stream-json", "--verbose"]
+        if let model, !model.isEmpty { args += ["--model", model] }
+        if !system.isEmpty { args += ["--append-system-prompt", system] }
+        args.append(prompt)
+        lastArgsForTest = args
+        let proc = makeProcess()
+        let out: ProcessOutput
+        do {
+            out = try await Task.detached(priority: .userInitiated) {
+                try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
+            }.value
+        }
+        catch let e as AssistRunError { throw e }
+        catch { throw AssistRunError.processFailed("\(error)") }
+        if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
+        return Self.finalMessage(fromStreamJSON: out.stdout)
+    }
+
+    /// Extract the final assistant text from a claude `stream-json` stream: prefer the `result` event;
+    /// fall back to concatenated assistant text blocks.
+    static func finalMessage(fromStreamJSON stdout: String) -> String {
+        var resultText: String?
+        var assistantText = ""
+        for line in stdout.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String else { continue }
+            if type == "result", let r = obj["result"] as? String {
+                resultText = r
+            } else if type == "assistant", let msg = obj["message"] as? [String: Any],
+                      let content = msg["content"] as? [[String: Any]] {
+                for block in content where (block["type"] as? String) == "text" {
+                    if let t = block["text"] as? String { assistantText += t }
+                }
+            }
+        }
+        return resultText ?? assistantText
+    }
+}
+
+/// Shared binary resolver for the assist CLIs.
+enum BinaryLocator {
+    static func locate(name: String, override: String?, extraPaths: [String] = []) -> URL? {
         if let o = override, !o.isEmpty, FileManager.default.isExecutableFile(atPath: o) {
             return URL(fileURLWithPath: o)
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let candidates = ["\(home)/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+        let candidates = extraPaths + ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)"]
         for c in candidates where FileManager.default.isExecutableFile(atPath: c) {
             return URL(fileURLWithPath: c)
         }
         if let path = try? RealProcess().run(
             executable: URL(fileURLWithPath: "/bin/zsh"),
-            args: ["-lc", "command -v claude"], timeout: 5).stdout
+            args: ["-lc", "command -v \(name)"], timeout: 5, onLine: { _ in }).stdout
             .trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty,
            FileManager.default.isExecutableFile(atPath: path) {
             return URL(fileURLWithPath: path)
         }
         return nil
     }
-
-    func run(prompt: String, system: String, model: String, timeout: TimeInterval = 120) async throws -> String {
-        guard let binary else { throw ClaudeRunError.binaryNotFound }
-        let args = ["-p", "--output-format", "json", "--model", model,
-                    "--append-system-prompt", system, prompt]
-        lastArgsForTest = args
-        let proc = makeProcess()
-        let out: ProcessOutput
-        do {
-            // Run the blocking subprocess OFF the main actor so the UI stays responsive.
-            out = try await Task.detached(priority: .userInitiated) {
-                try proc.run(executable: binary, args: args, timeout: timeout)
-            }.value
-        }
-        catch let e as ClaudeRunError { throw e }
-        catch { throw ClaudeRunError.processFailed("\(error)") }
-        if out.exitCode != 0 {
-            let lower = (out.stderr + out.stdout).lowercased()
-            if lower.contains("login") || lower.contains("api key") || lower.contains("auth") {
-                throw ClaudeRunError.notAuthenticated
-            }
-            throw ClaudeRunError.processFailed(out.stderr.isEmpty ? out.stdout : out.stderr)
-        }
-        return out.stdout
-    }
 }
 
-/// Real Process implementation (not exercised in unit tests).
+/// Real streaming Process implementation (not exercised in unit tests).
 struct RealProcess: ProcessRunning {
-    func run(executable: URL, args: [String], timeout: TimeInterval) throws -> ProcessOutput {
-        let p = Process(); p.executableURL = executable; p.arguments = args
+    private final class Box: @unchecked Sendable { var value = Data() }
+
+    func run(executable: URL, args: [String], timeout: TimeInterval,
+             onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+        let p = Process()
+        p.executableURL = executable
+        p.arguments = args
         let outPipe = Pipe(); let errPipe = Pipe()
-        p.standardOutput = outPipe; p.standardError = errPipe
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        p.standardInput = FileHandle.nullDevice   // never block waiting on stdin
         try p.run()
-        // Drain pipes on background queues so a large output can't deadlock the wait.
-        var outData = Data(); var errData = Data()
+
+        let outBox = Box(); let errBox = Box()
         let group = DispatchGroup()
-        let q = DispatchQueue(label: "claude.pipe", attributes: .concurrent)
-        group.enter(); q.async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        group.enter(); q.async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        let deadline = Date().addingTimeInterval(timeout)
-        while p.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        if p.isRunning { p.terminate(); throw ClaudeRunError.timedOut }
+        let q = DispatchQueue(label: "assist.pipe", attributes: .concurrent)
+
+        group.enter()
+        q.async {
+            let h = outPipe.fileHandleForReading
+            var pending = Data(); var full = Data()
+            while true {
+                let chunk = h.availableData
+                if chunk.isEmpty { break }
+                full.append(chunk); pending.append(chunk)
+                while let nl = pending.firstIndex(of: 0x0A) {
+                    let lineData = pending.subdata(in: pending.startIndex..<nl)
+                    pending.removeSubrange(pending.startIndex...nl)
+                    if let s = String(data: lineData, encoding: .utf8) { onLine(s) }
+                }
+            }
+            if !pending.isEmpty, let s = String(data: pending, encoding: .utf8) { onLine(s) }
+            outBox.value = full
+            group.leave()
+        }
+        group.enter()
+        q.async { errBox.value = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+
+        let exited = DispatchSemaphore(value: 0)
+        DispatchQueue(label: "assist.wait").async { p.waitUntilExit(); exited.signal() }
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            p.terminate()
+            _ = exited.wait(timeout: .now() + 2)
+            throw AssistRunError.timedOut
+        }
         group.wait()
-        return ProcessOutput(stdout: String(decoding: outData, as: UTF8.self),
-                             stderr: String(decoding: errData, as: UTF8.self),
+        return ProcessOutput(stdout: String(decoding: outBox.value, as: UTF8.self),
+                             stderr: String(decoding: errBox.value, as: UTF8.self),
                              exitCode: p.terminationStatus)
     }
 }
