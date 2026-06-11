@@ -14,3 +14,5 @@ vendor/codemirror/package-lock.json
 vendor/_isfmslkit-build/
 vendor/_build.log
 App/ddata-build/
+App/ddata-review/
+.superpowers/
