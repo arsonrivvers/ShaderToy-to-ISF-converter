@@ -650,7 +650,7 @@ In `draw(in:)`, after obtaining `cb` and `size` and BEFORE the `ISFMSLSafeRender
         for input in inputs where input.type == "image" {
             let src = imageSources.source(for: input.name)
             if let tex = src.texture(size: size, in: cb),
-               let val = ISFMSLSceneVal.create(withTexture: tex) as? ISFMSLSceneVal {
+               let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {   // Swift folds createWithTexture: → create(with:)
                 scene.setValue(val, forInputNamed: input.name)
             }
         }
@@ -820,7 +820,7 @@ When an `ISFSceneSource` is built for a library shader that is itself a filter, 
         // default test pattern (one level, no recursion).
         if let patternSource = ISFSceneSource.defaultPatternTexture(device: device, queue: queue, size: NSSize(width: 320, height: 180)) {
             for attrib in s.inputs where attrib.isFilterInputImage || attrib.shouldHaveImageBuffer || attrib.type == .image {
-                if let val = ISFMSLSceneVal.create(withTexture: patternSource) as? ISFMSLSceneVal {
+                if let val = ISFMSLSceneVal.create(with: patternSource) as? ISFMSLSceneVal {
                     s.setValue(val, forInputNamed: attrib.name)
                 }
             }
