@@ -6,6 +6,7 @@ enum WebFetchError: Error, Equatable {
     case badID
     case challengeTimeout
     case noData
+    case httpError(Int)   // the in-page /shadertoy POST returned a non-200 status
 }
 
 /// Fetches a Shadertoy shader by driving a real WKWebView: load the shader's view page
@@ -48,46 +49,82 @@ final class WebKitShaderFetcher: NSObject {
 
     func fetchShader(id: String) async throws -> Shader {
         guard let url = URL(string: "https://www.shadertoy.com/view/\(id)") else { throw WebFetchError.badID }
+        window.title = "Fetching from Shadertoy… (if a checkbox appears, click it)"
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         defer { window.orderOut(nil) }
 
-        webView.load(URLRequest(url: url))
-        try await waitUntilReady(timeout: 20)
-        let json = try await runInPageFetch(id: id)
-        return try ShadertoyInternalParser.parse(Data(json.utf8))
+        // Retry transient failures once (Cloudflare challenges and 429/5xx are often transient):
+        // reload and try again. Definitive outcomes (parse = not-found/private, badID, other HTTP)
+        // surface immediately.
+        var lastError: Error = WebFetchError.challengeTimeout
+        for attempt in 0..<2 {
+            do {
+                if attempt == 0 { webView.load(URLRequest(url: url)) } else { webView.reload() }
+                try await waitUntilReady(timeout: 20)
+                let json = try await runInPageFetch(id: id)
+                return try ShadertoyInternalParser.parse(Data(json.utf8))
+            } catch let e as WebFetchError {
+                lastError = e
+                switch e {
+                case .challengeTimeout: continue
+                case .httpError(let s) where s == 429 || s >= 500: continue
+                default: throw e
+                }
+            }
+            // ShadertoyInternalParserError (not found / not public) isn't a WebFetchError, so it
+            // propagates out here without retry — that's the intended definitive path.
+        }
+        throw lastError
     }
 
-    /// Polls `document.title` until Cloudflare's "Just a moment…" interstitial is gone and a
-    /// real page title is present. Returns when ready; throws `challengeTimeout` on timeout.
+    /// Polls the page until Cloudflare's interstitial is gone AND we're positively on shadertoy.com
+    /// (so a redirect/error page isn't mistaken for a loaded shader). Throws `challengeTimeout`.
     private func waitUntilReady(timeout: TimeInterval) async throws {
         let start = Date()
         let challengeTitles: Set<String> = ["Just a moment...", "Just a moment…", ""]
         while Date().timeIntervalSince(start) < timeout {
             try await Task.sleep(nanoseconds: 600_000_000)
-            let title = (try? await webView.evaluateJavaScript("document.title")) as? String ?? ""
+            let info = (try? await webView.evaluateJavaScript(
+                "JSON.stringify({t: document.title, h: location.hostname})")) as? String ?? ""
+            let (title, host) = Self.parseReadyInfo(info)
             lastTitle = title
             lastURL = webView.url?.absoluteString ?? "(nil)"
             lastBody = ((try? await webView.evaluateJavaScript(
                 "(document.body ? document.body.innerText : '').slice(0,400)")) as? String ?? "")
                 .replacingOccurrences(of: "\n", with: " | ")
-            if !challengeTitles.contains(title) {
-                // Give the page's scripts a beat to settle after the challenge clears.
-                try await Task.sleep(nanoseconds: 400_000_000)
+            // Positive readiness: on shadertoy.com AND past the challenge interstitial.
+            if host.hasSuffix("shadertoy.com"), !challengeTitles.contains(title) {
+                try await Task.sleep(nanoseconds: 400_000_000)   // let scripts settle
                 return
             }
         }
         throw WebFetchError.challengeTimeout
     }
 
+    private static func parseReadyInfo(_ json: String) -> (title: String, host: String) {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ("", "") }
+        return (obj["t"] as? String ?? "", obj["h"] as? String ?? "")
+    }
+
     private func runInPageFetch(id: String) async throws -> String {
+        // Capture the HTTP status alongside the body so a Cloudflare 403/429/5xx (which returns an
+        // HTML body, not shader JSON) surfaces as a real error instead of a misleading parse failure.
         let js = """
         const body = 's=' + encodeURIComponent(JSON.stringify({shaders:[id]})) + '&nt=1&nl=1&np=1';
         const r = await fetch('/shadertoy', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body });
-        return await r.text();
+        const text = await r.text();
+        return JSON.stringify({ status: r.status, body: text });
         """
         let result = try await webView.callAsyncJavaScript(js, arguments: ["id": id], contentWorld: .page)
-        guard let text = result as? String, !text.isEmpty else { throw WebFetchError.noData }
+        guard let raw = result as? String,
+              let data = raw.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let status = obj["status"] as? Int,
+              let text = obj["body"] as? String else { throw WebFetchError.noData }
+        guard status == 200 else { throw WebFetchError.httpError(status) }
+        guard !text.isEmpty else { throw WebFetchError.noData }
         return text
     }
 }

@@ -38,7 +38,23 @@ public struct ShadertoyClient {
         return c.url!
     }
 
-    public func fetchShader(id: String) async throws -> Shader {
+    /// Fetches a shader, retrying once on a *transient* failure (network error, HTTP 429, or 5xx).
+    /// Definitive outcomes (not-accessible, decode failure, other 4xx) are surfaced immediately.
+    public func fetchShader(id: String, maxAttempts: Int = 2) async throws -> Shader {
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                return try await attemptFetch(id: id)
+            } catch let e as ShadertoyClientError where Self.isTransient(e) && attempt < maxAttempts {
+                continue
+            } catch let e where !(e is ShadertoyClientError) && attempt < maxAttempts {
+                continue   // network-layer error → retry
+            }
+        }
+    }
+
+    private func attemptFetch(id: String) async throws -> Shader {
         let (data, status) = try await fetcher.fetch(Self.apiURL(id: id, key: key))
         guard status == 200 else { throw ShadertoyClientError.httpError(status) }
         // Shadertoy returns {"Error": "..."} (HTTP 200) for inaccessible shaders.
@@ -50,5 +66,10 @@ public struct ShadertoyClient {
         } catch {
             throw ShadertoyClientError.decodingFailed
         }
+    }
+
+    private static func isTransient(_ e: ShadertoyClientError) -> Bool {
+        if case .httpError(let s) = e { return s == 429 || s >= 500 }
+        return false
     }
 }

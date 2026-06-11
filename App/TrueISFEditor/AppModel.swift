@@ -85,12 +85,31 @@ final class AppModel: ObservableObject {
             statusMessage = w.isEmpty ? "Converted cleanly." : "Converted with \(w.count) warning(s)."
         } catch ShadertoyClientError.shaderNotAccessible {
             statusMessage = "API: the shader's author must enable 'public + API'. Remove your key in Settings to use the browser path instead."
+        } catch ShadertoyClientError.httpError(let status) {
+            statusMessage = Self.httpMessage(status, source: "Shadertoy API")
+        } catch ShadertoyClientError.decodingFailed {
+            statusMessage = "Shadertoy returned data in an unexpected format. Try again, or paste the code below."
+        } catch WebFetchError.httpError(let status) {
+            statusMessage = Self.httpMessage(status, source: "Shadertoy")
+        } catch WebFetchError.noData {
+            statusMessage = "Shadertoy returned no data. Try again in a moment, or paste the code below."
         } catch WebFetchError.challengeTimeout {
             statusMessage = "Couldn't fetch automatically (Cloudflare bot check). Paste the shader's Image-tab code below and use 'Convert pasted code'."
         } catch is ShadertoyInternalParserError {
             statusMessage = "Shader not found, or it isn't public."
         } catch {
             statusMessage = "Fetch/convert failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Friendly, actionable copy for an HTTP failure status.
+    static func httpMessage(_ status: Int, source: String) -> String {
+        switch status {
+        case 429: return "\(source) is rate-limiting requests. Wait a minute and try again."
+        case 404: return "Shader not found (404). Check the URL or ID."
+        case 401, 403: return "\(source) refused the request (HTTP \(status)). If you set an API key, verify it in Settings."
+        case 500...599: return "\(source) server error (HTTP \(status)). Try again shortly."
+        default: return "\(source) request failed (HTTP \(status))."
         }
     }
 

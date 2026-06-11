@@ -19,4 +19,15 @@ final class ShadertoyURLTests: XCTestCase {
         XCTAssertNil(ShadertoyURL.shaderID(from: "not a url"))
         XCTAssertNil(ShadertoyURL.shaderID(from: ""))
     }
+    // #7: tolerate length drift — a URL-extracted ID is unambiguous by position, accept any reasonable length.
+    func test_urlID_nonStandardLength() {
+        XCTAssertEqual(ShadertoyURL.shaderID(from: "https://www.shadertoy.com/view/abcD1234"), "abcD1234")
+        XCTAssertEqual(ShadertoyURL.shaderID(from: "https://www.shadertoy.com/view/Xy9"), "Xy9")
+    }
+    func test_bareID_lengthWindow() {
+        XCTAssertEqual(ShadertoyURL.shaderID(from: "abc12"), "abc12")           // 5 ok
+        XCTAssertEqual(ShadertoyURL.shaderID(from: "abcd123456"), "abcd123456") // 10 ok
+        XCTAssertNil(ShadertoyURL.shaderID(from: "abcd"))                       // 4 too short for a bare guess
+        XCTAssertNil(ShadertoyURL.shaderID(from: "abcdefghijk1"))               // 12 too long for a bare guess
+    }
 }
