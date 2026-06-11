@@ -30,6 +30,8 @@ final class EditorViewModel: ObservableObject {
     let preview = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
     let editor = CodeEditorController()
     let diagnostics = DiagnosticsModel()
+    /// Drives the Inputs/Passes authoring tabs; kept in sync with `file.source` both ways.
+    let headerModel = HeaderAuthoringModel()
 
     private var debounceTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -60,8 +62,20 @@ final class EditorViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] err, line, valid in self?.applyDiagnostics(error: err, line: line, valid: valid) }
             .store(in: &cancellables)
+        // GUI authoring (Inputs/Passes) writes the header back through `applyHeaderRewrite`; the
+        // editor.setText it does NOT re-fire onChange, so there's no sync feedback loop.
+        headerModel.onRewrite = { [weak self] newSource in self?.applyHeaderRewrite(newSource) }
         editor.setText(self.file.source)
+        headerModel.syncFromText(self.file.source)
         recompile(immediate: true)
+    }
+
+    /// A header-authoring GUI edit produced new full source: adopt it, push it to the editor (no echo),
+    /// and recompile. The header model already holds the matching parsed header.
+    private func applyHeaderRewrite(_ newSource: String) {
+        file.source = newSource
+        editor.setText(newSource)
+        recompile(immediate: false)
     }
 
     // MARK: document lifecycle
@@ -83,6 +97,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = []
         statusMessage = "New shader"
         editor.setText(file.source)
+        headerModel.syncFromText(file.source)
         recompile(immediate: true)
     }
 
@@ -92,6 +107,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = warnings
         statusMessage = "Imported \(suggestedName)"
         editor.setText(isf)
+        headerModel.syncFromText(isf)
         applyDiagnostics(error: preview.compileError, line: preview.compileErrorLine, valid: preview.compileValid)
         recompile(immediate: true)
     }
@@ -128,6 +144,7 @@ final class EditorViewModel: ObservableObject {
 
     private func sourceEdited(_ text: String) {
         file.source = text          // marks dirty
+        headerModel.syncFromText(text)   // reflect hand edits into the Inputs/Passes tabs
         recompile(immediate: false)
     }
 

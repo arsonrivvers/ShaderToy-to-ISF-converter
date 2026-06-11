@@ -62,8 +62,8 @@ struct EditorScreen: View {
                     ISFPreviewView(coordinator: vm.preview)
                         .frame(minHeight: 220)
                     Divider()
-                    PreviewControlsView(coordinator: vm.preview)
-                        .frame(height: 170)
+                    HeaderPanelView(coordinator: vm.preview, model: vm.headerModel)
+                        .frame(height: 210)
                 }
                 .frame(minWidth: 320)
             }
