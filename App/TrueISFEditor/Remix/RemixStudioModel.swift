@@ -1,0 +1,102 @@
+import Foundation
+import Combine
+
+/// Which parent slot a source/child fills.
+enum ParentSlot { case a, b }
+
+/// Owns the Remix Studio state and drives the Module 1 generator. Parents are real lineage nodes
+/// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
+@MainActor
+final class RemixStudioModel: ObservableObject {
+    @Published private(set) var parentAID: String?
+    @Published private(set) var parentBID: String?
+    @Published var mode: RemixMode = .crossover
+    @Published var steer: String = ""
+    @Published var batchSize: Int = 5
+    @Published var maxLivePreviews: Int = 4
+    @Published private(set) var currentBatch: [RemixNode] = []
+    @Published private(set) var lineage = RemixLineage()
+    @Published private(set) var isGenerating = false
+
+    private let generator: RemixGenerator
+    private var round = 0
+    private var seedCounter = 0
+    private var history: [(String?, String?)] = []   // parent (A,B) configs for step-back
+
+    init(generator: RemixGenerator) { self.generator = generator }
+
+    // MARK: derived
+
+    var parentIDs: [String] { [parentAID, parentBID].compactMap { $0 } }
+    var parentSources: [String] { parentIDs.compactMap { lineage.node($0)?.isfSource } }
+    var canGenerate: Bool {
+        guard !isGenerating else { return false }
+        let needed = (mode == .crossover) ? 2 : 1
+        return parentSources.count >= needed
+    }
+    var favoriteNodes: [RemixNode] {
+        lineage.order.compactMap { lineage.node($0) }.filter { lineage.isFavorite($0.id) }
+    }
+
+    // MARK: parents
+
+    /// Set a parent from an external ISF source: creates a round-0 seed node and points the slot at it.
+    func setParent(_ slot: ParentSlot, isf: String) {
+        let id = "seed-\(seedCounter)"; seedCounter += 1
+        let node = RemixNode(id: id, isfSource: isf, parents: [], mode: .crossover,
+                             steer: "", directive: "seed", round: 0, status: .compiled)
+        lineage.insert(node)
+        switch slot { case .a: parentAID = id; case .b: parentBID = id }
+    }
+
+    /// Promote an existing lineage node (a child) to a parent slot — no new seed.
+    func promoteToParent(_ slot: ParentSlot, nodeID: String) {
+        switch slot { case .a: parentAID = nodeID; case .b: parentBID = nodeID }
+    }
+
+    func clearParent(_ slot: ParentSlot) {
+        switch slot { case .a: parentAID = nil; case .b: parentBID = nil }
+    }
+
+    // MARK: generation
+
+    func generate() async {
+        guard canGenerate else { return }
+        history.append((parentAID, parentBID))
+        round += 1
+        let r = round
+        let pids = parentIDs
+        isGenerating = true
+        currentBatch = []
+        await generator.generate(parents: parentSources, mode: mode, steer: steer,
+                                 batchSize: batchSize, round: r) { [weak self] node in
+            guard let self else { return }
+            var n = node
+            n.parents = pids                 // record true parent ids in the lineage graph
+            self.currentBatch.append(n)
+            self.lineage.insert(n)
+        }
+        isGenerating = false
+    }
+
+    /// Card preview reports the real compile outcome; update status in the batch and the lineage.
+    func markCompileResult(id: String, valid: Bool, error: String?) {
+        guard var node = lineage.node(id) else { return }
+        node.status = valid ? .compiled : .failed(error ?? "compile failed")
+        lineage.insert(node)
+        if let i = currentBatch.firstIndex(where: { $0.id == id }) { currentBatch[i] = node }
+    }
+
+    // MARK: selection
+
+    func toggleFavorite(_ id: String) { lineage.toggleFavorite(id) }
+
+    /// Restore the parent config from the previous round. `generate()` records the config it used
+    /// before each round, so the top of `history` is the current round's config — discard it and
+    /// restore the one beneath. No-op until at least two rounds have run.
+    func stepBack() {
+        guard history.count >= 2 else { return }
+        history.removeLast()                       // drop the current round's config
+        (parentAID, parentBID) = history[history.count - 1]
+    }
+}
