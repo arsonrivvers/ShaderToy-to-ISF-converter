@@ -26,6 +26,20 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         XCTAssertTrue(args.contains("P"))
     }
 
+    /// CSO CRITICAL-1/HIGH-1 regression guard: the tool-restriction flags must always be present so a
+    /// prompt-injected shader can't reach Bash/Edit/MCP, regardless of the host's settings.json.
+    func testAlwaysPinsSafetyFlags() async throws {
+        let fake = FakeProcess(stdout: "{\"type\":\"result\",\"result\":\"ok\"}", exitCode: 0, stderr: "")
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"), process: { fake })
+        _ = try await runner.run(prompt: "P", system: "S", model: "sonnet")
+        let args = runner.lastArgsForTest
+        XCTAssertTrue(args.contains("--permission-mode"))
+        XCTAssertTrue(args.contains("plan"))
+        XCTAssertTrue(args.contains("--allowedTools"))
+        XCTAssertTrue(args.contains("--strict-mcp-config"))
+        XCTAssertTrue(args.contains("--disable-slash-commands"))
+    }
+
     func testForwardsStreamLinesAsEvents() async throws {
         let json = "{\"type\":\"system\"}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n{\"type\":\"result\",\"result\":\"DONE\"}"
         let fake = FakeProcess(stdout: json, exitCode: 0, stderr: "")

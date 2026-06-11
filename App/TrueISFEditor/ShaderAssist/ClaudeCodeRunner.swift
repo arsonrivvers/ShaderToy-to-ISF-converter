@@ -42,7 +42,18 @@ final class ClaudeCodeRunner: AssistProvider {
              onEvent: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
         guard let binary else { throw AssistRunError.binaryNotFound }
         // stream-json gives line-by-line events for the live terminal; --verbose is required with it.
-        var args = ["-p", "--output-format", "stream-json", "--verbose"]
+        // SECURITY (CSO CRITICAL-1): the shader source is untrusted (opened from the web/others) and
+        // goes into the prompt — a prompt-injection sink. This task is pure text analysis, so we strip
+        // ALL tool/action capability structurally rather than rely on the model refusing:
+        //   --permission-mode plan : read/think-only, cannot take mutating actions
+        //   --allowedTools ""       : no tool is grantable (closes Bash/Edit/WebFetch sinks)
+        //   --strict-mcp-config     : ignore ambient MCP servers (we pass no --mcp-config)
+        //   --disable-slash-commands: no skill/command execution from injected text
+        // These are pinned here so the app's safety never depends on the host's settings.json
+        // (which defaults to bypassPermissions). Verified: injection blocked, subscription auth intact.
+        var args = ["-p", "--output-format", "stream-json", "--verbose",
+                    "--permission-mode", "plan", "--allowedTools", "",
+                    "--strict-mcp-config", "--disable-slash-commands"]
         if let model, !model.isEmpty { args += ["--model", model] }
         if !system.isEmpty { args += ["--append-system-prompt", system] }
         args.append(prompt)
@@ -146,8 +157,13 @@ struct RealProcess: ProcessRunning {
         let exited = DispatchSemaphore(value: 0)
         DispatchQueue(label: "assist.wait").async { p.waitUntilExit(); exited.signal() }
         if exited.wait(timeout: .now() + timeout) == .timedOut {
+            // CSO MEDIUM-2: SIGTERM, brief grace, then SIGKILL so a wedged agent (or a child that
+            // ignores SIGTERM) can't outlive the timeout still holding resources.
             p.terminate()
-            _ = exited.wait(timeout: .now() + 2)
+            if exited.wait(timeout: .now() + 2) == .timedOut {
+                kill(p.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + 1)
+            }
             throw AssistRunError.timedOut
         }
         group.wait()
