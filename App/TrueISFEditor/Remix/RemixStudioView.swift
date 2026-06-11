@@ -1,0 +1,184 @@
+import SwiftUI
+
+/// Layout A: parents bay + controls on top, a streaming child gallery in the center, and a right rail
+/// (favorites + lineage breadcrumb). Entirely driven by `RemixStudioModel`.
+struct RemixStudioView: View {
+    @ObservedObject var model: RemixStudioModel
+    /// Resolves a chosen parent source to ISF text (injected at the App level).
+    let resolver: RemixParentResolver
+    /// Opens a winning child in the main editor (wired to EditorViewModel.loadImported).
+    let openInEditor: (String) -> Void
+    /// Library entries for the parent picker.
+    let libraryEntries: [LibraryEntry]
+
+    @State private var pasteText = ""
+    @State private var linkText = ""
+    @State private var resolveError: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            parentsBay
+            Divider()
+            gallery
+        }
+        .frame(minWidth: 900, minHeight: 600)
+    }
+
+    // MARK: parents bay + controls
+
+    private var parentsBay: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                parentSlot("Parent A", id: model.parentAID, slot: .a)
+                if model.mode == .crossover { parentSlot("Parent B", id: model.parentBID, slot: .b) }
+                Divider().frame(height: 80)
+                controls
+            }
+            sourceRow
+            if let resolveError { Text(resolveError).font(.caption).foregroundStyle(.red) }
+        }
+        .padding(12)
+    }
+
+    private func parentSlot(_ title: String, id: String?, slot: ParentSlot) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            ZStack {
+                RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary)
+                if let id, let node = model.lineage.node(id) {
+                    RemixThumbnailView(isf: node.isfSource, animating: true) { _, _ in }
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    Text("Empty").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 120, height: 80)
+            if id != nil {
+                Button("Clear") { model.clearParent(slot) }.font(.caption2).buttonStyle(.link)
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Mode", selection: $model.mode) {
+                Text("Crossover").tag(RemixMode.crossover)
+                Text("Mutate").tag(RemixMode.mutate)
+            }.pickerStyle(.segmented).frame(width: 220)
+            TextField("Steer (optional): e.g. 'wavy, neon'", text: $model.steer).frame(width: 280)
+            HStack {
+                Stepper("Batch: \(model.batchSize)", value: $model.batchSize, in: 1...8).frame(width: 160)
+                Button {
+                    Task { await model.generate() }
+                } label: { Label("Generate", systemImage: "bolt.fill") }
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(!model.canGenerate)
+            }
+            if model.isGenerating { ProgressView().controlSize(.small) }
+        }
+    }
+
+    private var sourceRow: some View {
+        HStack(spacing: 8) {
+            Menu("Add from Library") {
+                ForEach(libraryEntries) { entry in
+                    Button(entry.name) { resolveParent(.libraryFile(entry.url)) }
+                }
+            }.frame(width: 160)
+            Button("Use Current Editor") { resolveParent(.currentEditor) }
+            TextField("Shadertoy link…", text: $linkText, onCommit: {
+                guard !linkText.isEmpty else { return }
+                resolveParent(.shadertoyLink(linkText)); linkText = ""
+            }).frame(width: 220)
+            TextField("Paste ISF…", text: $pasteText, onCommit: {
+                guard !pasteText.isEmpty else { return }
+                resolveParent(.pastedISF(pasteText)); pasteText = ""
+            }).frame(width: 220)
+        }
+    }
+
+    /// Fills the first empty slot (A, then B for crossover) with the resolved source.
+    private func resolveParent(_ spec: ParentSpec) {
+        let slot: ParentSlot = (model.parentAID == nil) ? .a
+            : (model.mode == .crossover && model.parentBID == nil) ? .b : .a
+        Task {
+            do {
+                let isf = try await resolver.resolve(spec)
+                model.setParent(slot, isf: isf)
+                resolveError = nil
+            } catch { resolveError = "Couldn't load parent: \(error)" }
+        }
+    }
+
+    // MARK: gallery
+
+    private let columns = [GridItem(.adaptive(minimum: 180), spacing: 12)]
+
+    private var gallery: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(model.currentBatch) { node in childCard(node) }
+                }.padding(12)
+            }
+            Divider()
+            rightRail.frame(width: 220)
+        }
+    }
+
+    private func childCard(_ node: RemixNode) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.05))
+                switch node.status {
+                case .generating:
+                    ProgressView().controlSize(.small)
+                case .failed(let msg):
+                    VStack { Image(systemName: "exclamationmark.triangle"); Text(msg).font(.caption2).lineLimit(2) }
+                        .foregroundStyle(.orange).padding(4)
+                case .compiled:
+                    RemixThumbnailView(isf: node.isfSource, animating: model.shouldAnimate(node.id)) { valid, err in
+                        model.markCompileResult(id: node.id, valid: valid, error: err)
+                    }.clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .frame(height: 130)
+            HStack(spacing: 10) {
+                Button { model.toggleFavorite(node.id) } label: {
+                    Image(systemName: model.lineage.isFavorite(node.id) ? "star.fill" : "star")
+                }.help("Favorite")
+                Button { model.promoteToParent(.a, nodeID: node.id) } label: {
+                    Image(systemName: "arrow.up.circle")
+                }.help("Promote to Parent A")
+                Button { openInEditor(node.isfSource) } label: {
+                    Image(systemName: "square.and.pencil")
+                }.help("Open in editor")
+            }
+            .buttonStyle(.borderless)
+            Text(node.directive).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.background).shadow(radius: 1))
+    }
+
+    private var rightRail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Favorites").font(.headline)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.favoriteNodes) { node in
+                        HStack {
+                            RemixThumbnailView(isf: node.isfSource, animating: true) { _, _ in }
+                                .frame(width: 60, height: 40).clipShape(RoundedRectangle(cornerRadius: 4))
+                            Button("Promote") { model.promoteToParent(.a, nodeID: node.id) }.font(.caption2)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button { model.stepBack() } label: { Label("Step Back", systemImage: "arrow.uturn.backward") }
+            Text("Lineage: \(model.lineage.order.count) nodes").font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(10)
+    }
+}
