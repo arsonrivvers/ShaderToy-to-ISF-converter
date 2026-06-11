@@ -77,6 +77,11 @@
     window.__symbols = map;
   };
 
+  // The shader's declared input names, pushed from Swift on each compile/header change, so
+  // autocomplete offers the shader's own uniforms.
+  window.__inputNames = [];
+  window.setInputNames = function (arr) { window.__inputNames = arr || []; };
+
   post({ type: "ready" });
 })();
 </script>

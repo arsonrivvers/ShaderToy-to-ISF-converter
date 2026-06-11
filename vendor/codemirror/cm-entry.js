@@ -6,6 +6,31 @@ import { cpp } from "@codemirror/lang-cpp";
 import { setDiagnostics } from "@codemirror/lint";
 import { hoverTooltip } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { autocompletion } from "@codemirror/autocomplete";
+
+// Autocomplete sources: ISF builtins (window.__symbols, from symbols.json), the shader's own declared
+// input names (window.__inputNames, pushed live from Swift), and a static GLSL keyword/builtin list.
+const GLSL_KEYWORDS = ["void","float","int","bool","vec2","vec3","vec4","mat2","mat3","mat4",
+  "return","if","else","for","while","const","in","out","inout","struct","break","continue",
+  "discard","true","false","uniform","sampler2D"];
+const GLSL_BUILTINS = ["sin","cos","tan","asin","acos","atan","pow","exp","log","exp2","log2",
+  "sqrt","inversesqrt","abs","sign","floor","ceil","fract","mod","min","max","clamp","mix","step",
+  "smoothstep","length","distance","dot","cross","normalize","reflect","refract","radians","degrees"];
+
+function isfCompletions(context) {
+  const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
+  if (!word || (word.from === word.to && !context.explicit)) return null;
+  const options = [];
+  const symbols = window.__symbols || {};
+  for (const name in symbols) {
+    const s = symbols[name];
+    options.push({ label: name, type: "function", detail: s.signature, info: s.summary });
+  }
+  (window.__inputNames || []).forEach((n) => options.push({ label: n, type: "variable", detail: "input" }));
+  GLSL_KEYWORDS.forEach((k) => options.push({ label: k, type: "keyword" }));
+  GLSL_BUILTINS.forEach((b) => options.push({ label: b, type: "function" }));
+  return { from: word.from, options };
+}
 
 // Inline symbol lookup: hover an identifier; if it's in window.__symbols (set by the harness
 // from the bundled symbols.json), show its signature + summary. Pure local lookup, no round-trip.
@@ -51,6 +76,7 @@ window.__createEditor = function (parent, initialDoc, onChange) {
         cpp(),
         oneDark,
         symbolHover,
+        autocompletion({ override: [isfCompletions], activateOnTyping: true }),
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChange(u.state.doc.toString());

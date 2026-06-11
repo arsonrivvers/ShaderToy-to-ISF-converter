@@ -20,6 +20,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
     private var initialized = false
     private var lastText = ""                       // text currently believed to be in the editor
     private var pendingDiagnostics: [EditorDiagnostic]?
+    private var inputNames: [String] = []           // declared input names for autocomplete
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -59,6 +60,20 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("applyTextEdit(\(fromLine), \(toLine), \(lit));")
     }
 
+    /// Push the shader's declared input names so autocomplete offers the shader's own uniforms.
+    /// Stored and re-pushed on (re)init since names change as the header is edited.
+    func setInputNames(_ names: [String]) {
+        inputNames = names
+        pushInputNames()
+    }
+
+    private func pushInputNames() {
+        guard ready, initialized,
+              let data = try? JSONEncoder().encode(inputNames),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("setInputNames(\(json));")
+    }
+
     /// Load the bundled symbol DB into the editor for inline hover lookups.
     private func pushSymbols() {
         guard let url = Bundle.main.url(forResource: "symbols", withExtension: "json"),
@@ -83,6 +98,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
                 webView.evaluateJavaScript("initEditor(\(lit));") { [weak self] _, _ in
                     self?.initialized = true
                     self?.pushSymbols()
+                    self?.pushInputNames()
                     if let p = self?.pendingDiagnostics { self?.pendingDiagnostics = nil; self?.setDiagnostics(p) }
                 }
             }

@@ -24615,6 +24615,85 @@
   var oneDark = [oneDarkTheme, /* @__PURE__ */ syntaxHighlighting(oneDarkHighlightStyle)];
 
   // cm-entry.js
+  var GLSL_KEYWORDS = [
+    "void",
+    "float",
+    "int",
+    "bool",
+    "vec2",
+    "vec3",
+    "vec4",
+    "mat2",
+    "mat3",
+    "mat4",
+    "return",
+    "if",
+    "else",
+    "for",
+    "while",
+    "const",
+    "in",
+    "out",
+    "inout",
+    "struct",
+    "break",
+    "continue",
+    "discard",
+    "true",
+    "false",
+    "uniform",
+    "sampler2D"
+  ];
+  var GLSL_BUILTINS = [
+    "sin",
+    "cos",
+    "tan",
+    "asin",
+    "acos",
+    "atan",
+    "pow",
+    "exp",
+    "log",
+    "exp2",
+    "log2",
+    "sqrt",
+    "inversesqrt",
+    "abs",
+    "sign",
+    "floor",
+    "ceil",
+    "fract",
+    "mod",
+    "min",
+    "max",
+    "clamp",
+    "mix",
+    "step",
+    "smoothstep",
+    "length",
+    "distance",
+    "dot",
+    "cross",
+    "normalize",
+    "reflect",
+    "refract",
+    "radians",
+    "degrees"
+  ];
+  function isfCompletions(context) {
+    const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
+    if (!word || word.from === word.to && !context.explicit) return null;
+    const options = [];
+    const symbols = window.__symbols || {};
+    for (const name2 in symbols) {
+      const s = symbols[name2];
+      options.push({ label: name2, type: "function", detail: s.signature, info: s.summary });
+    }
+    (window.__inputNames || []).forEach((n) => options.push({ label: n, type: "variable", detail: "input" }));
+    GLSL_KEYWORDS.forEach((k) => options.push({ label: k, type: "keyword" }));
+    GLSL_BUILTINS.forEach((b) => options.push({ label: b, type: "function" }));
+    return { from: word.from, options };
+  }
   var symbolHover = hoverTooltip((view, pos) => {
     const { from, to, text } = view.state.doc.lineAt(pos);
     const word = /[A-Za-z_][A-Za-z0-9_]*/;
@@ -24657,6 +24736,7 @@
           cpp(),
           oneDark,
           symbolHover,
+          autocompletion({ override: [isfCompletions], activateOnTyping: true }),
           EditorView.lineWrapping,
           EditorView.updateListener.of((u2) => {
             if (u2.docChanged) onChange(u2.state.doc.toString());

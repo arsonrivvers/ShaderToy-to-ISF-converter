@@ -65,6 +65,12 @@ final class EditorViewModel: ObservableObject {
         // GUI authoring (Inputs/Passes) writes the header back through `applyHeaderRewrite`; the
         // editor.setText it does NOT re-fire onChange, so there's no sync feedback loop.
         headerModel.onRewrite = { [weak self] newSource in self?.applyHeaderRewrite(newSource) }
+        // Feed declared input names to the editor so autocomplete offers the shader's own uniforms.
+        headerModel.$header
+            .map { $0.inputs.map(\.name) }
+            .removeDuplicates()
+            .sink { [weak self] names in self?.editor.setInputNames(names) }
+            .store(in: &cancellables)
         editor.setText(self.file.source)
         headerModel.syncFromText(self.file.source)
         recompile(immediate: true)
