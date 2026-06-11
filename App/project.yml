@@ -71,6 +71,7 @@ targets:
       - TrueISFEditor/Remix/RemixPrompt.swift
       - TrueISFEditor/Remix/RemixResponseParser.swift
       - TrueISFEditor/Remix/RemixGenerator.swift
+      - TrueISFEditor/Remix/RemixLineage.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
       - TrueISFEditor/ISFSceneSource.swift
