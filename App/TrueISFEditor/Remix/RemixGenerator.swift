@@ -9,11 +9,17 @@ final class RemixGenerator {
     private let makeProvider: () -> AssistProvider
     private let model: String?
     private let maxConcurrent: Int
+    private let timeout: TimeInterval
 
-    init(makeProvider: @escaping () -> AssistProvider, model: String?, maxConcurrent: Int = 4) {
+    /// `maxConcurrent` defaults to 2: each provider call spawns a full Claude/Codex CLI environment, so
+    /// 4+ at once thrash the machine and individually blow past the timeout (a single call is ~37s).
+    /// `timeout` is per child (from-scratch generation is heavier than an edit — 420s with margin).
+    init(makeProvider: @escaping () -> AssistProvider, model: String?,
+         maxConcurrent: Int = 2, timeout: TimeInterval = 420) {
         self.makeProvider = makeProvider
         self.model = model
         self.maxConcurrent = maxConcurrent
+        self.timeout = timeout
     }
 
     /// `onLog` receives `(childId, line)` for every raw streaming line each provider emits — used to
@@ -31,10 +37,11 @@ final class RemixGenerator {
                 let prompt = RemixPrompt.user(parents: parents, mode: mode, steer: steer, directive: directive)
                 let provider = makeProvider()
                 let mdl = model
+                let to = timeout
                 group.addTask { @MainActor in
                     let id = "r\(round)-\(slot)"
                     do {
-                        let out = try await provider.run(prompt: prompt, system: system, model: mdl, timeout: 240) { line in
+                        let out = try await provider.run(prompt: prompt, system: system, model: mdl, timeout: to) { line in
                             onLog(id, line)
                         }
                         if let isf = RemixResponseParser.extractISF(out) {

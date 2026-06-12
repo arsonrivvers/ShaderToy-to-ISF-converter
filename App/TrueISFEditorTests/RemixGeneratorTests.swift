@@ -5,11 +5,13 @@ import XCTest
 @MainActor
 private final class FakeProvider: AssistProvider {
     var scripts: [Result<String, Error>]
+    private(set) var lastTimeout: TimeInterval = 0
     private var i = 0
     init(_ scripts: [Result<String, Error>]) { self.scripts = scripts }
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
              onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
         defer { i += 1 }
+        lastTimeout = timeout
         switch scripts[min(i, scripts.count - 1)] {
         case .success(let s): return s
         case .failure(let e): throw e
@@ -42,6 +44,13 @@ final class RemixGeneratorTests: XCTestCase {
         }
         XCTAssertEqual(children.count, 2)
         XCTAssertEqual(children.filter { if case .failed = $0.status { return true } else { return false } }.count, 1)
+    }
+
+    func test_generate_passesConfiguredTimeoutToProvider() async {
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])
+        let gen = RemixGenerator(makeProvider: { provider }, model: nil, maxConcurrent: 2, timeout: 420)
+        await gen.generate(parents: ["/*{A}*/"], mode: .mutate, steer: "", batchSize: 1, round: 1) { _ in }
+        XCTAssertEqual(provider.lastTimeout, 420)
     }
 
     func test_generate_noISFInResponse_marksFailed() async {

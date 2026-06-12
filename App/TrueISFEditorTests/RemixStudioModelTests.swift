@@ -129,6 +129,23 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertFalse(m.transcript.contains("[old] stale line from a previous round"))
     }
 
+    func test_makePlaceholders_areGenerating_withMatchingIdsAndDirectives() {
+        let ps = RemixStudioModel.makePlaceholders(round: 2, size: 3, parents: ["seed-0"])
+        XCTAssertEqual(ps.count, 3)
+        XCTAssertEqual(ps.map(\.id), ["r2-0", "r2-1", "r2-2"])          // ids match the generator
+        XCTAssertTrue(ps.allSatisfy { $0.status == .generating })
+        XCTAssertTrue(ps.allSatisfy { $0.parents == ["seed-0"] })
+        XCTAssertEqual(ps.map(\.directive), RemixDirectives.pick(3, seed: 2))  // directives match
+    }
+
+    func test_generate_doesNotDuplicate_placeholdersReplacedInPlace() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 3
+        await m.generate()
+        XCTAssertEqual(m.currentBatch.count, 3)                          // not 6 (placeholders replaced)
+        XCTAssertTrue(m.currentBatch.allSatisfy { $0.status != .generating })
+    }
+
     func test_generatingCount_zeroAfterBatchCompletes() async {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 3

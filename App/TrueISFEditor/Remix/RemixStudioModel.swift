@@ -72,15 +72,21 @@ final class RemixStudioModel: ObservableObject {
         let r = round
         let pids = parentIDs
         isGenerating = true
-        currentBatch = []
         transcript = []
+        // Seed the gallery with .generating placeholders up front so cards (⚙) and the "N generating"
+        // header appear immediately — otherwise nothing shows until a child returns (~37s+ each).
+        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids)
         await generator.generate(
             parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
             onChild: { [weak self] node in
                 guard let self else { return }
                 var n = node
                 n.parents = pids             // record true parent ids in the lineage graph
-                self.currentBatch.append(n)
+                if let i = self.currentBatch.firstIndex(where: { $0.id == n.id }) {
+                    self.currentBatch[i] = n // replace the placeholder in place
+                } else {
+                    self.currentBatch.append(n)
+                }
                 self.lineage.insert(n)
             },
             onLog: { [weak self] id, line in
@@ -88,6 +94,16 @@ final class RemixStudioModel: ObservableObject {
             }
         )
         isGenerating = false
+    }
+
+    /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives
+    /// the generator will use — so each placeholder is replaced in place when its child lands.
+    static func makePlaceholders(round: Int, size: Int, parents: [String]) -> [RemixNode] {
+        let directives = RemixDirectives.pick(size, seed: round)
+        return (0..<size).map { slot in
+            RemixNode(id: "r\(round)-\(slot)", isfSource: "", parents: parents, mode: .crossover,
+                      steer: "", directive: directives[slot], round: round, status: .generating)
+        }
     }
 
     /// Append one provider output line to the merged terminal, tagged by child id and memory-bounded.
