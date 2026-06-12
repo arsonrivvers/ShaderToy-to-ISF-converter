@@ -45,14 +45,22 @@ final class ClaudeCodeRunner: AssistProvider {
         // SECURITY (CSO CRITICAL-1): the shader source is untrusted (opened from the web/others) and
         // goes into the prompt — a prompt-injection sink. This task is pure text analysis, so we strip
         // ALL tool/action capability structurally rather than rely on the model refusing:
-        //   --permission-mode plan : read/think-only, cannot take mutating actions
-        //   --allowedTools ""       : no tool is grantable (closes Bash/Edit/WebFetch sinks)
+        //   --tools ""              : remove the built-in toolset (no Bash/Edit/WebFetch/ExitPlanMode)
+        //   --disallowedTools LSP   : --tools "" alone STILL leaves the LSP code tool exposed (verified
+        //                             empirically on CLI v2.1.175); deny it explicitly so the toolset is
+        //                             genuinely empty — the call is a pure text→text transform
+        //   --allowedTools ""       : belt-and-suspenders: nothing is grantable even if a tool existed
         //   --strict-mcp-config     : ignore ambient MCP servers (we pass no --mcp-config)
         //   --disable-slash-commands: no skill/command execution from injected text
+        // NOTE: this used to be `--permission-mode plan`. Plan mode was actually WEAKER (it left read
+        // tools available read-only) AND changed task semantics — on complex generation prompts the
+        // model PLANNED and called ExitPlanMode instead of emitting the shader (3/3 remix children
+        // failed "No ISF in reply", 2026-06-12). The --tools/--disallowedTools pair is strictly
+        // stronger and keeps single-turn answer semantics.
         // These are pinned here so the app's safety never depends on the host's settings.json
         // (which defaults to bypassPermissions). Verified: injection blocked, subscription auth intact.
         var args = ["-p", "--output-format", "stream-json", "--verbose",
-                    "--permission-mode", "plan", "--allowedTools", "",
+                    "--tools", "", "--disallowedTools", "LSP", "--allowedTools", "",
                     "--strict-mcp-config", "--disable-slash-commands"]
         if let model, !model.isEmpty { args += ["--model", model] }
         if !system.isEmpty { args += ["--append-system-prompt", system] }

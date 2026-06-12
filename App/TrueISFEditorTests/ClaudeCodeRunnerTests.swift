@@ -28,16 +28,25 @@ final class ClaudeCodeRunnerTests: XCTestCase {
 
     /// CSO CRITICAL-1/HIGH-1 regression guard: the tool-restriction flags must always be present so a
     /// prompt-injected shader can't reach Bash/Edit/MCP, regardless of the host's settings.json.
+    /// `--tools ""` strips the ENTIRE built-in toolset (stronger than the old plan mode, which also
+    /// broke generation: the model planned + called ExitPlanMode instead of emitting the shader).
     func testAlwaysPinsSafetyFlags() async throws {
         let fake = FakeProcess(stdout: "{\"type\":\"result\",\"result\":\"ok\"}", exitCode: 0, stderr: "")
         let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"), process: { fake })
         _ = try await runner.run(prompt: "P", system: "S", model: "sonnet")
         let args = runner.lastArgsForTest
-        XCTAssertTrue(args.contains("--permission-mode"))
-        XCTAssertTrue(args.contains("plan"))
+        let toolsIdx = args.firstIndex(of: "--tools")
+        XCTAssertNotNil(toolsIdx)
+        XCTAssertEqual(args[toolsIdx! + 1], "")              // empty toolset, structurally
+        let disallowIdx = args.firstIndex(of: "--disallowedTools")
+        XCTAssertNotNil(disallowIdx)
+        XCTAssertEqual(args[disallowIdx! + 1], "LSP")        // --tools "" alone still leaks LSP
         XCTAssertTrue(args.contains("--allowedTools"))
         XCTAssertTrue(args.contains("--strict-mcp-config"))
         XCTAssertTrue(args.contains("--disable-slash-commands"))
+        // plan mode must STAY GONE: it made the model answer with a plan, not the artifact
+        // (3/3 remix children failed "No ISF in reply" on 2026-06-12).
+        XCTAssertFalse(args.contains("--permission-mode"))
     }
 
     func testForwardsStreamLinesAsEvents() async throws {
