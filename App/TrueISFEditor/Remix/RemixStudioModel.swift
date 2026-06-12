@@ -41,9 +41,6 @@ final class RemixStudioModel: ObservableObject {
         let needed = (mode == .crossover) ? 2 : 1
         return parentSources.count >= needed
     }
-    var favoriteNodes: [RemixNode] {
-        lineage.order.compactMap { lineage.node($0) }.filter { lineage.isFavorite($0.id) }
-    }
     /// Children of the current batch still awaiting a reply — for the terminal's "N generating" header.
     /// If this stays > 0 while the transcript goes quiet, generation is likely hung.
     var generatingCount: Int { currentBatch.filter { $0.status == .generating }.count }

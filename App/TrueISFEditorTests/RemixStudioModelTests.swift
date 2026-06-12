@@ -78,7 +78,7 @@ final class RemixStudioModelTests: XCTestCase {
         let id = m.currentBatch[0].id
         m.toggleFavorite(id)
         XCTAssertTrue(m.lineage.isFavorite(id))
-        XCTAssertEqual(m.favoriteNodes.map(\.id), [id])
+        XCTAssertEqual(m.treeRows(collapsed: [], favoritesOnly: true).map(\.id), [id])
     }
 
     func test_promoteToParent_setsParentToExistingNode_noNewSeed() async {

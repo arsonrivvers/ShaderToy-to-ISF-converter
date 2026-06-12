@@ -228,6 +228,4 @@ struct RemixStudioView: View {
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(.background).shadow(radius: 1))
     }
-
-
 }
