@@ -16,8 +16,12 @@ final class RemixGenerator {
         self.maxConcurrent = maxConcurrent
     }
 
+    /// `onLog` receives `(childId, line)` for every raw streaming line each provider emits — used to
+    /// drive a live terminal so the user can watch Claude/Codex work and spot a hang. It is called from
+    /// the provider's background reader thread, so implementations must hop to their own actor.
     func generate(parents: [String], mode: RemixMode, steer: String, batchSize: Int, round: Int,
-                  onChild: @escaping (RemixNode) -> Void) async {
+                  onChild: @escaping (RemixNode) -> Void,
+                  onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }) async {
         let directives = RemixDirectives.pick(batchSize, seed: round)
         let system = RemixPrompt.system()
         await withTaskGroup(of: RemixNode.self) { group in
@@ -30,7 +34,9 @@ final class RemixGenerator {
                 group.addTask { @MainActor in
                     let id = "r\(round)-\(slot)"
                     do {
-                        let out = try await provider.run(prompt: prompt, system: system, model: mdl, timeout: 240) { _ in }
+                        let out = try await provider.run(prompt: prompt, system: system, model: mdl, timeout: 240) { line in
+                            onLog(id, line)
+                        }
                         if let isf = RemixResponseParser.extractISF(out) {
                             return RemixNode(id: id, isfSource: isf, parents: [], mode: mode, steer: steer,
                                              directive: directive, round: round, status: .compiled)

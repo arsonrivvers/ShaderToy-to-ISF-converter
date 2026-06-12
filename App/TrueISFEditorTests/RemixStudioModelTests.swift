@@ -112,6 +112,30 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertTrue(m.currentBatch.allSatisfy { !m.shouldAnimate($0.id) })
     }
 
+    func test_appendLog_tagsByChildId_andBoundsMemory() {
+        let m = model([.success(isf)])
+        m.appendLog("r1-0", "thinking…")
+        XCTAssertEqual(m.transcript.last, "[r1-0] thinking…")
+        for i in 0..<2100 { m.appendLog("r1-0", "line \(i)") }
+        XCTAssertLessThanOrEqual(m.transcript.count, 2000)        // bounded
+        XCTAssertEqual(m.transcript.last, "[r1-0] line 2099")     // keeps the newest
+    }
+
+    func test_generate_clearsStaleTranscript() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 1
+        m.appendLog("old", "stale line from a previous round")
+        await m.generate()
+        XCTAssertFalse(m.transcript.contains("[old] stale line from a previous round"))
+    }
+
+    func test_generatingCount_zeroAfterBatchCompletes() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 3
+        await m.generate()
+        XCTAssertEqual(m.generatingCount, 0)   // all replies landed -> none left generating
+    }
+
     func test_stepBack_restoresPreviousParents() async {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 1

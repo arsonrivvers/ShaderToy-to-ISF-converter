@@ -14,14 +14,73 @@ struct RemixStudioView: View {
     @State private var pasteText = ""
     @State private var linkText = ""
     @State private var resolveError: String?
+    @AppStorage("remixTerminalExpanded") private var terminalExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
             parentsBay
             Divider()
             gallery
+            Divider()
+            terminal
         }
         .frame(minWidth: 900, minHeight: 600)
+    }
+
+    // MARK: terminal (live Claude/Codex activity)
+
+    private var terminal: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    terminalExpanded.toggle()
+                } label: {
+                    Image(systemName: terminalExpanded ? "chevron.down" : "chevron.right")
+                    Text("Generation terminal")
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                if model.isGenerating {
+                    ProgressView().controlSize(.small)
+                    Text("\(model.generatingCount) generating · \(model.currentBatch.count - model.generatingCount) done")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if !model.currentBatch.isEmpty {
+                    Text("idle · \(model.currentBatch.count - model.generatingCount) returned")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Claude/Codex · subscription").font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            if terminalExpanded {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(Array(model.transcript.enumerated()), id: \.offset) { idx, line in
+                                Text(line)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(idx)
+                            }
+                            if model.transcript.isEmpty {
+                                Text(model.isGenerating ? "Waiting for output…" : "No activity yet — hit Generate.")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, 8)
+                    }
+                    .frame(height: 150)
+                    .onChange(of: model.transcript.count) { _ in
+                        if let last = model.transcript.indices.last {
+                            withAnimation(.linear(duration: 0.1)) { proxy.scrollTo(last, anchor: .bottom) }
+                        }
+                    }
+                }
+            }
+        }
+        .background(.black.opacity(0.03))
     }
 
     // MARK: parents bay + controls

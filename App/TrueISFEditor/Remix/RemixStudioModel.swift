@@ -17,6 +17,8 @@ final class RemixStudioModel: ObservableObject {
     @Published private(set) var currentBatch: [RemixNode] = []
     @Published private(set) var lineage = RemixLineage()
     @Published private(set) var isGenerating = false
+    /// Live, merged terminal of every child's provider output, each line tagged by child id.
+    @Published private(set) var transcript: [String] = []
 
     private let generator: RemixGenerator
     private var round = 0
@@ -37,6 +39,9 @@ final class RemixStudioModel: ObservableObject {
     var favoriteNodes: [RemixNode] {
         lineage.order.compactMap { lineage.node($0) }.filter { lineage.isFavorite($0.id) }
     }
+    /// Children of the current batch still awaiting a reply — for the terminal's "N generating" header.
+    /// If this stays > 0 while the transcript goes quiet, generation is likely hung.
+    var generatingCount: Int { currentBatch.filter { $0.status == .generating }.count }
 
     // MARK: parents
 
@@ -68,15 +73,27 @@ final class RemixStudioModel: ObservableObject {
         let pids = parentIDs
         isGenerating = true
         currentBatch = []
-        await generator.generate(parents: parentSources, mode: mode, steer: steer,
-                                 batchSize: batchSize, round: r) { [weak self] node in
-            guard let self else { return }
-            var n = node
-            n.parents = pids                 // record true parent ids in the lineage graph
-            self.currentBatch.append(n)
-            self.lineage.insert(n)
-        }
+        transcript = []
+        await generator.generate(
+            parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
+            onChild: { [weak self] node in
+                guard let self else { return }
+                var n = node
+                n.parents = pids             // record true parent ids in the lineage graph
+                self.currentBatch.append(n)
+                self.lineage.insert(n)
+            },
+            onLog: { [weak self] id, line in
+                Task { @MainActor in self?.appendLog(id, line) }
+            }
+        )
         isGenerating = false
+    }
+
+    /// Append one provider output line to the merged terminal, tagged by child id and memory-bounded.
+    func appendLog(_ id: String, _ line: String) {
+        transcript.append("[\(id)] \(line)")
+        if transcript.count > 2000 { transcript.removeFirst(transcript.count - 2000) }
     }
 
     /// Card preview reports the real compile outcome; update status in the batch and the lineage.
