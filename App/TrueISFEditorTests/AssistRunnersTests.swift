@@ -13,6 +13,8 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertTrue(args.contains("--json"))
         XCTAssertTrue(args.contains("-s")); XCTAssertTrue(args.contains("read-only"))
         XCTAssertTrue(args.contains("--skip-git-repo-check"))
+        // CSO trifecta guard: user's global hooks/config must never re-enter the codex run.
+        XCTAssertTrue(args.contains("--ignore-user-config"))
         XCTAssertTrue(args.contains("-m")); XCTAssertTrue(args.contains("gpt-5-codex"))
         // system is prepended to the prompt (codex has no --append-system-prompt)
         XCTAssertTrue(args.last?.contains("S") == true && args.last?.contains("P") == true)
