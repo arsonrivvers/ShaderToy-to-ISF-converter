@@ -105,7 +105,8 @@ struct RemixStudioView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary)
                 if let id, let node = model.lineage.node(id) {
-                    RemixThumbnailView(isf: node.isfSource, animating: true) { _, _ in }
+                    RemixThumbnailView(isf: node.isfSource, animating: true,
+                                       onSnapshot: { img in model.storeSnapshot(id: node.id, image: img) }) { _, _ in }
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
                     Text("Empty").font(.caption2).foregroundStyle(.tertiary)
@@ -160,10 +161,17 @@ struct RemixStudioView: View {
     private func resolveParent(_ spec: ParentSpec) {
         let slot: ParentSlot = (model.parentAID == nil) ? .a
             : (model.mode == .crossover && model.parentBID == nil) ? .b : .a
+        let label: String
+        switch spec {
+        case .libraryFile(let url): label = url.deletingPathExtension().lastPathComponent
+        case .currentEditor:        label = "editor"
+        case .shadertoyLink:        label = "shadertoy"
+        case .pastedISF:            label = "pasted"
+        }
         Task {
             do {
                 let isf = try await resolver.resolve(spec)
-                model.setParent(slot, isf: isf)
+                model.setParent(slot, isf: isf, label: label)
                 resolveError = nil
             } catch { resolveError = "Couldn't load parent: \(error)" }
         }
@@ -181,7 +189,7 @@ struct RemixStudioView: View {
                 }.padding(12)
             }
             Divider()
-            rightRail.frame(width: 220)
+            RemixLineageTreeView(model: model, openInEditor: openInEditor).frame(width: 260)
         }
     }
 
@@ -196,7 +204,8 @@ struct RemixStudioView: View {
                     VStack { Image(systemName: "exclamationmark.triangle"); Text(msg).font(.caption2).lineLimit(2) }
                         .foregroundStyle(.orange).padding(4)
                 case .compiled:
-                    RemixThumbnailView(isf: node.isfSource, animating: model.shouldAnimate(node.id)) { valid, err in
+                    RemixThumbnailView(isf: node.isfSource, animating: model.shouldAnimate(node.id),
+                                       onSnapshot: { img in model.storeSnapshot(id: node.id, image: img) }) { valid, err in
                         model.markCompileResult(id: node.id, valid: valid, error: err)
                     }.clipShape(RoundedRectangle(cornerRadius: 8))
                 }
@@ -220,24 +229,5 @@ struct RemixStudioView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(.background).shadow(radius: 1))
     }
 
-    private var rightRail: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Favorites").font(.headline)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.favoriteNodes) { node in
-                        HStack {
-                            RemixThumbnailView(isf: node.isfSource, animating: true) { _, _ in }
-                                .frame(width: 60, height: 40).clipShape(RoundedRectangle(cornerRadius: 4))
-                            Button("Promote") { model.promoteToParent(.a, nodeID: node.id) }.font(.caption2)
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button { model.stepBack() } label: { Label("Step Back", systemImage: "arrow.uturn.backward") }
-            Text("Lineage: \(model.lineage.order.count) nodes").font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(10)
-    }
+
 }
