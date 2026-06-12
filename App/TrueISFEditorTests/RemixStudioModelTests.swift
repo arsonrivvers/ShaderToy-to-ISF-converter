@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import TrueISFEditor
 
 /// Canonical fake provider (same shape as RemixGeneratorTests). Returns a scripted ISF per call or throws.
@@ -164,5 +165,39 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(m.parentAID, childID)
         m.stepBack()
         XCTAssertEqual(m.parentAID, seedID)      // restored to the round-1 config
+    }
+
+    func test_setParent_recordsLabel_onSeedNode() {
+        let m = model([.success(isf)])
+        m.setParent(.a, isf: "a", label: "plasma")
+        XCTAssertEqual(m.lineage.node(m.parentAID!)?.label, "plasma")
+        m.setParent(.b, isf: "b")                       // label optional, defaults nil
+        XCTAssertNil(m.lineage.node(m.parentBID!)?.label)
+    }
+
+    func test_selectedNodeID_defaultsNil_andPublishesSelection() {
+        let m = model([.success(isf)])
+        XCTAssertNil(m.selectedNodeID)
+        m.selectedNodeID = "r1-0"
+        XCTAssertEqual(m.selectedNodeID, "r1-0")
+    }
+
+    func test_storeSnapshot_cachesByID() {
+        let m = model([.success(isf)])
+        let ctx = CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let img = ctx.makeImage()!
+        m.storeSnapshot(id: "r1-0", image: img)
+        XCTAssertNotNil(m.snapshots["r1-0"])
+        XCTAssertNil(m.snapshots["r9-9"])
+    }
+
+    func test_treeRows_passesThrough_toBuilder() {
+        let m = model([.success(isf)])
+        m.setParent(.a, isf: "a", label: "plasma")
+        let rows = m.treeRows(collapsed: [], favoritesOnly: false)
+        XCTAssertEqual(rows.map(\.id), [m.parentAID!])
+        XCTAssertEqual(m.treeRows(collapsed: [], favoritesOnly: true), [])  // nothing starred yet
     }
 }

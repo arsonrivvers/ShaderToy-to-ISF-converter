@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CoreGraphics
 
 /// Which parent slot a source/child fills.
 enum ParentSlot { case a, b }
@@ -19,6 +20,10 @@ final class RemixStudioModel: ObservableObject {
     @Published private(set) var isGenerating = false
     /// Live, merged terminal of every child's provider output, each line tagged by child id.
     @Published private(set) var transcript: [String] = []
+    /// Lineage-tree selection; the right rail's action strip renders while non-nil.
+    @Published var selectedNodeID: String?
+    /// One static frame per node id, captured at compile time — the tree's row swatches.
+    @Published private(set) var snapshots: [String: CGImage] = [:]
 
     private let generator: RemixGenerator
     private var round = 0
@@ -46,10 +51,11 @@ final class RemixStudioModel: ObservableObject {
     // MARK: parents
 
     /// Set a parent from an external ISF source: creates a round-0 seed node and points the slot at it.
-    func setParent(_ slot: ParentSlot, isf: String) {
+    /// `label` is the human display name for the tree (library entry name / "editor" / "pasted").
+    func setParent(_ slot: ParentSlot, isf: String, label: String? = nil) {
         let id = "seed-\(seedCounter)"; seedCounter += 1
         let node = RemixNode(id: id, isfSource: isf, parents: [], mode: .crossover,
-                             steer: "", directive: "seed", round: 0, status: .compiled)
+                             steer: "", directive: "seed", round: 0, status: .compiled, label: label)
         lineage.insert(node)
         switch slot { case .a: parentAID = id; case .b: parentBID = id }
     }
@@ -139,6 +145,12 @@ final class RemixStudioModel: ObservableObject {
     // MARK: selection
 
     func toggleFavorite(_ id: String) { lineage.toggleFavorite(id) }
+
+    func storeSnapshot(id: String, image: CGImage) { snapshots[id] = image }
+
+    func treeRows(collapsed: Set<String>, favoritesOnly: Bool) -> [RemixTreeRow] {
+        RemixTreeBuilder.flatten(lineage, collapsed: collapsed, favoritesOnly: favoritesOnly)
+    }
 
     /// Restore the parent config from the previous round. `generate()` records the config it used
     /// before each round, so the top of `history` is the current round's config — discard it and
