@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Layout A: parents bay + controls on top, a streaming child gallery in the center, and a right rail
 /// (favorites + lineage breadcrumb). Entirely driven by `RemixStudioModel`.
@@ -48,6 +49,14 @@ struct RemixStudioView: View {
                     Text("idle · \(model.currentBatch.count - model.generatingCount) returned")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.transcript.joined(separator: "\n"),
+                                                   forType: .string)
+                } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.borderless)
+                .disabled(model.transcript.isEmpty)
+                .help("Copy full terminal transcript")
                 Text("Claude/Codex · subscription").font(.caption2).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
