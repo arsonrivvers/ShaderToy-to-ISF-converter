@@ -57,6 +57,9 @@ struct RemixThumbnailView: NSViewRepresentable {
                     if valid {
                         self.reported = true
                         self.onCompile(true, nil)
+                        // renderOnce() commits without waiting for GPU completion — intentional:
+                        // CoreImage on the same MTLDevice serializes against it, and a blocking
+                        // wait here would stall the main thread for a cosmetic 24×16 swatch.
                         if let onSnapshot = self.onSnapshot,
                            let tex = self.controller.renderOnce(),
                            let img = TextureSnapshot.cgImage(from: tex) {
