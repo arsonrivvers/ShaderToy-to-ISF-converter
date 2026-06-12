@@ -12,4 +12,5 @@ struct RemixNode: Identifiable, Equatable {
     var directive: String
     var round: Int
     var status: Status = .generating
+    var label: String? = nil          // display name for seeds (library name / "editor" / "pasted")
 }
