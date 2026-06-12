@@ -121,11 +121,10 @@ void main() {
                 Button("New from Shadertoy…") { vm.requestImport = true }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                 Divider()
+                RemixMenuButton()
+                Divider()
                 Button("Add Folder to Library…") { addFolderToLibrary() }
                     .keyboardShortcut("o")
-            }
-            CommandGroup(after: .newItem) {
-                RemixMenuButton()
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Save") { saveCurrent() }
