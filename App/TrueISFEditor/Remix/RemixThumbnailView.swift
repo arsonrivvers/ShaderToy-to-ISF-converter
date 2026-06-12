@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import CoreGraphics
 
 /// A small Metal preview of one child ISF. Hosts a `MetalPreviewController`, loads the source once,
 /// and reports the compile outcome back via `onCompile`. When `animating` is false it renders a single
@@ -8,10 +9,12 @@ import Combine
 struct RemixThumbnailView: NSViewRepresentable {
     let isf: String
     let animating: Bool
+    /// Optional: receives one downscaled CGImage frame at first successful compile (tree swatches).
+    var onSnapshot: ((CGImage) -> Void)? = nil
     /// Called on the main actor with (valid, errorMessage) once the engine finishes compiling.
     let onCompile: (Bool, String?) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onCompile: onCompile) }
+    func makeCoordinator() -> Coordinator { Coordinator(onCompile: onCompile, onSnapshot: onSnapshot) }
 
     func makeNSView(context: Context) -> NSView {
         let controller = context.coordinator.controller
@@ -35,11 +38,15 @@ struct RemixThumbnailView: NSViewRepresentable {
     final class Coordinator {
         let controller = MetalPreviewController()
         let onCompile: (Bool, String?) -> Void
+        let onSnapshot: ((CGImage) -> Void)?
         var loadedISF: String?
         private var bag = Set<AnyCancellable>()
         private var reported = false
 
-        init(onCompile: @escaping (Bool, String?) -> Void) { self.onCompile = onCompile }
+        init(onCompile: @escaping (Bool, String?) -> Void, onSnapshot: ((CGImage) -> Void)?) {
+            self.onCompile = onCompile
+            self.onSnapshot = onSnapshot
+        }
 
         func observe(_ c: MetalPreviewController) {
             // Fire once when compile resolves (valid true, or an error string appears).
@@ -47,8 +54,18 @@ struct RemixThumbnailView: NSViewRepresentable {
                 .combineLatest(c.$compileError)
                 .sink { [weak self] valid, error in
                     guard let self, !self.reported else { return }
-                    if valid { self.reported = true; self.onCompile(true, nil) }
-                    else if let error, !error.isEmpty { self.reported = true; self.onCompile(false, error) }
+                    if valid {
+                        self.reported = true
+                        self.onCompile(true, nil)
+                        if let onSnapshot = self.onSnapshot,
+                           let tex = self.controller.renderOnce(),
+                           let img = TextureSnapshot.cgImage(from: tex) {
+                            onSnapshot(img)
+                        }
+                    } else if let error, !error.isEmpty {
+                        self.reported = true
+                        self.onCompile(false, error)
+                    }
                 }
                 .store(in: &bag)
         }
