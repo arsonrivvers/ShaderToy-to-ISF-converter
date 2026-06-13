@@ -1,4 +1,5 @@
 import Foundation
+
 public enum ShaderAssistPrompt {
     public static func system(for task: ShaderAssistTask) -> String {
         let common = """
@@ -7,6 +8,7 @@ public enum ShaderAssistPrompt {
         skills and their knowledge. Line numbers are 1-based exactly as shown in the user message. \
         Respond with ONLY a single JSON object matching the schema below — no prose, no markdown fences.
         """
+
         switch task {
         case .diagnoseAndFix:
             return common + "\n" + """
@@ -14,15 +16,33 @@ public enum ShaderAssistPrompt {
             "replacement": string (the full replacement text for those lines), "rationale": string} ]}. \
             If nothing needs fixing, return an empty "edits" array and explain why.
             """
-        case .suggestionGoals, .suggestions(goal: _), .applySuggestions(goal: _, selectedIdeas: _):
+        case .suggestionGoals:
             return common + "\n" + """
-            Suggest creative evolutions of this working shader. Identify hardcoded constants that could \
-            become interactive ISF INPUTS, and ways the visual design could develop. \
-            Schema: {"ideas": [ {"title": string, "detail": string, "kind": string \
-            (one of: make-interactive, design, technique, perf), "lines": [int] or null} ]}.
+            Before suggesting edits, identify 4-5 useful goals tailored to THIS shader. Mix practical \
+            performability goals and creative evolution goals when the source supports them. \
+            Schema: {"goals": [ {"id": string, "title": string, "detail": string, "kind": string, \
+            "whyThisShader": string} ]}. The "whyThisShader" field must cite a concrete property of the \
+            provided shader, not generic advice.
+            """
+        case .suggestions(goal: _):
+            return common + "\n" + """
+            Suggest creative evolutions scoped ONLY to the selected goal. Identify hardcoded constants that \
+            could become interactive ISF INPUTS when relevant, and ways the visual design could develop. \
+            Schema: {"goal": string, "ideas": [ {"id": string, "title": string, "detail": string, \
+            "kind": string (one of: make-interactive, design, technique, perf), "lines": [int] or null, \
+            "impact": string or null} ]}.
+            """
+        case .applySuggestions(goal: _, selectedIdeas: _):
+            return common + "\n" + """
+            Implement the selected suggestions as ONE coordinated shader rewrite. Return a complete valid ISF \
+            source file in "replacementSource"; do not return line patches. Preserve valid ISF JSON header \
+            syntax, existing inputs, passes, and image inputs unless the selected suggestions require a change. \
+            Preserve the shader's visual identity unless the selected goal explicitly asks for transformation. \
+            Schema: {"explanation": string, "replacementSource": string, "changedLines": [int]}.
             """
         }
     }
+
     public static func user(task: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) -> String {
         let numbered = source.components(separatedBy: "\n").enumerated()
             .map { "\($0.offset + 1): \($0.element)" }.joined(separator: "\n")
@@ -31,13 +51,26 @@ public enum ShaderAssistPrompt {
                 let loc = d.line.map { "line \($0)" } ?? "—"
                 return "[\(d.severity)] \(loc): \(d.message)"
             }.joined(separator: "\n")
+
         let header: String
         switch task {
         case .diagnoseAndFix:
             header = "Diagnose and fix the compile/diagnostic issues in this ISF shader."
-        case .suggestionGoals, .suggestions(goal: _), .applySuggestions(goal: _, selectedIdeas: _):
-            header = "Suggest how this ISF shader could evolve (interactivity + visual design)."
+        case .suggestionGoals:
+            header = "Suggest 4-5 improvement goals tailored to this ISF shader before proposing edits."
+        case .suggestions(let goal):
+            header = "Suggest actionable changes for this ISF shader.\nGoal: \(goal)"
+        case .applySuggestions(let goal, let selectedIdeas):
+            let ideasJSON = selectedIdeasJSON(selectedIdeas)
+            header = """
+            Implement the selected ShaderAssist suggestions in one coordinated rewrite.
+            Goal: \(goal)
+            Selected suggestions JSON:
+            \(ideasJSON)
+            Return the full replacement source in "replacementSource".
+            """
         }
+
         return """
         \(header)
 
@@ -47,5 +80,11 @@ public enum ShaderAssistPrompt {
         CURRENT DIAGNOSTICS:
         \(diagText)
         """
+    }
+
+    private static func selectedIdeasJSON(_ ideas: [AIIdea]) -> String {
+        guard let data = try? JSONEncoder().encode(ideas),
+              let json = String(data: data, encoding: .utf8) else { return "[]" }
+        return json
     }
 }
