@@ -16,3 +16,4 @@ vendor/_build.log
 App/ddata-build/
 App/ddata-review/
 .superpowers/
+.worktrees/
