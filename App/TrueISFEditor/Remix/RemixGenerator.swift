@@ -34,7 +34,8 @@ final class RemixGenerator {
             var launched = 0
             func launch(_ slot: Int) {
                 let directive = directives[slot]
-                let prompt = RemixPrompt.user(parents: parents, mode: mode, steer: steer, directive: directive)
+                let labeled = parents.enumerated().map { (label: $0.offset == 0 ? "A" : "B", source: $0.element) }
+                let prompt = RemixPrompt.user(parents: labeled, mode: mode, steer: steer, directive: directive)
                 let provider = makeProvider()
                 let mdl = model
                 let to = timeout

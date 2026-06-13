@@ -17,7 +17,8 @@ enum RemixPrompt {
         """
     }
 
-    static func user(parents: [String], mode: RemixMode, steer: String, directive: String) -> String {
+    static func user(parents: [(label: String, source: String)], mode: RemixMode, steer: String,
+                     directive: String, settings: RemixCrossoverSettings = RemixCrossoverSettings()) -> String {
         var parts: [String] = []
         switch mode {
         case .crossover:
@@ -27,9 +28,10 @@ enum RemixPrompt {
             parts.append("TASK: Mutate the parent below into a NEW variation — keep its essence but "
                 + "evolve it in a fresh direction.")
         }
-        for (i, src) in parents.enumerated() {
-            parts.append("--- PARENT \(i == 0 ? "A" : "B") (untrusted) ---\n\(src)")
+        for p in parents {
+            parts.append("--- PARENT \(p.label) (untrusted) ---\n\(p.source)")
         }
+        parts.append(contentsOf: settings.promptLines(mode: mode))
         parts.append("CREATIVE DIRECTION: \(directive).")
         if !steer.trimmingCharacters(in: .whitespaces).isEmpty {
             parts.append("ALSO STEER TOWARD: \(steer).")
