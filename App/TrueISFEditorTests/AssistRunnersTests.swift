@@ -27,6 +27,42 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertFalse(runner.lastArgsForTest.contains("-m"))
     }
 
+    func testCodexLaunchEnvironmentAddsExecutableDirectoryToPath() {
+        let executable = URL(fileURLWithPath: "/Users/me/.nvm/versions/node/v22.0.0/bin/codex")
+        let env = RealProcess.assistLaunchEnvironment(
+            executable: executable,
+            base: ["PATH": "/usr/bin:/bin"])
+        let parts = env["PATH"]?.split(separator: ":").map(String.init) ?? []
+        XCTAssertEqual(parts.first, "/Users/me/.nvm/versions/node/v22.0.0/bin")
+        XCTAssertTrue(parts.contains("/opt/homebrew/bin"))
+        XCTAssertTrue(parts.contains("/usr/local/bin"))
+        XCTAssertTrue(parts.contains("/usr/bin"))
+    }
+
+    func testProviderSelectionUsesCodexModelOnlyWhenCodexSelected() {
+        let suiteName = "AssistProviderSelectionTests-\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: suiteName)!
+        defer { suite.removePersistentDomain(forName: suiteName) }
+
+        suite.set("codex", forKey: "assistProvider")
+        suite.set("sonnet", forKey: "assistClaudeModel")
+        suite.set("gpt-5-codex", forKey: "assistCodexModel")
+        var selection = AssistProviderSelection.current(defaults: suite)
+        XCTAssertEqual(selection.kind, .codex)
+        XCTAssertEqual(selection.model, "gpt-5-codex")
+        XCTAssertEqual(selection.caption, "Using OpenAI · Codex · gpt-5-codex")
+
+        suite.set("", forKey: "assistCodexModel")
+        selection = AssistProviderSelection.current(defaults: suite)
+        XCTAssertNil(selection.model)
+        XCTAssertEqual(selection.caption, "Using OpenAI · Codex · default")
+
+        suite.set("claude", forKey: "assistProvider")
+        selection = AssistProviderSelection.current(defaults: suite)
+        XCTAssertEqual(selection.kind, .claude)
+        XCTAssertEqual(selection.model, "sonnet")
+    }
+
     func testCodexFinalMessageExtractsAgentMessage() {
         // Real captured codex --json schema.
         let stream = """

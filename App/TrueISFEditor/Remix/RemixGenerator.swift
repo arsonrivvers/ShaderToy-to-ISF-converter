@@ -15,7 +15,8 @@ final class RemixGenerator {
         return seed % 2 == 0 ? pairs : [pairs[1], pairs[0]]
     }
     private let makeProvider: () -> AssistProvider
-    private let model: String?
+    private let modelProvider: () -> String?
+    private let systemProvider: () -> String
     private let maxConcurrent: Int
     private let timeout: TimeInterval
 
@@ -23,9 +24,21 @@ final class RemixGenerator {
     /// 4+ at once thrash the machine and individually blow past the timeout (a single call is ~37s).
     /// `timeout` is per child (from-scratch generation is heavier than an edit — 420s with margin).
     init(makeProvider: @escaping () -> AssistProvider, model: String?,
-         maxConcurrent: Int = 2, timeout: TimeInterval = 420) {
+         maxConcurrent: Int = 2, timeout: TimeInterval = 420,
+         systemProvider: @escaping () -> String = RemixPrompt.system) {
         self.makeProvider = makeProvider
-        self.model = model
+        self.modelProvider = { model }
+        self.systemProvider = systemProvider
+        self.maxConcurrent = maxConcurrent
+        self.timeout = timeout
+    }
+
+    init(makeProvider: @escaping () -> AssistProvider, modelProvider: @escaping () -> String?,
+         maxConcurrent: Int = 2, timeout: TimeInterval = 420,
+         systemProvider: @escaping () -> String = RemixPrompt.system) {
+        self.makeProvider = makeProvider
+        self.modelProvider = modelProvider
+        self.systemProvider = systemProvider
         self.maxConcurrent = maxConcurrent
         self.timeout = timeout
     }
@@ -39,7 +52,7 @@ final class RemixGenerator {
                   onChild: @escaping (RemixNode) -> Void,
                   onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }) async {
         let directives = RemixDirectives.pick(batchSize, seed: round, from: pool)
-        let system = RemixPrompt.system()
+        let system = systemProvider()
         await withTaskGroup(of: RemixNode.self) { group in
             var launched = 0
             func launch(_ slot: Int) {
@@ -49,7 +62,7 @@ final class RemixGenerator {
                 let prompt = RemixPrompt.user(parents: ordered, mode: mode, steer: steer,
                                               directive: directive, settings: settings)
                 let provider = makeProvider()
-                let mdl = model
+                let mdl = modelProvider()
                 let to = timeout
                 group.addTask { @MainActor in
                     let id = "r\(round)-\(slot)"

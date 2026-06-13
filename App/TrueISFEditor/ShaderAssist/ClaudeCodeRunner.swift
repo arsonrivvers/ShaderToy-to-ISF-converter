@@ -126,11 +126,39 @@ enum BinaryLocator {
 struct RealProcess: ProcessRunning {
     private final class Box: @unchecked Sendable { var value = Data() }
 
+    static func assistLaunchEnvironment(executable: URL,
+                                        base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var env = base
+        let existing = (base["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        let preferred = [
+            executable.deletingLastPathComponent().path,
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+        var seen = Set<String>()
+        let path = (preferred + existing).filter { part in
+            guard !part.isEmpty, !seen.contains(part) else { return false }
+            seen.insert(part)
+            return true
+        }
+        env["PATH"] = path.joined(separator: ":")
+        return env
+    }
+
     func run(executable: URL, args: [String], timeout: TimeInterval,
              onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
         let p = Process()
         p.executableURL = executable
         p.arguments = args
+        p.environment = Self.assistLaunchEnvironment(executable: executable)
         // Run from a neutral temp dir so the CLIs never scan the app's launch directory (e.g. the
         // user's Desktop) — that scan triggers a repeated macOS TCC "access your Desktop" prompt.
         p.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())

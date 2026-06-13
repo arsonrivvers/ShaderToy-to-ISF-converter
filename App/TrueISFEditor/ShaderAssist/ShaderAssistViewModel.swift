@@ -41,28 +41,17 @@ final class ShaderAssistViewModel: ObservableObject {
 
     // MARK: provider selection (from Settings / UserDefaults)
 
-    private var providerKind: AssistProviderKind {
-        AssistProviderKind(rawValue: defaults.string(forKey: "assistProvider") ?? "") ?? .claude
+    private var providerSelection: AssistProviderSelection {
+        AssistProviderSelection.current(defaults: defaults)
     }
-    private func makeProvider() -> AssistProvider {
+    private func makeProvider(kind: AssistProviderKind) -> AssistProvider {
         if let providerOverride { return providerOverride }
-        switch providerKind {
+        switch kind {
         case .claude:
             return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(override: binaryOverride()))
         case .codex:
             return CodexRunner(binary: CodexRunner.locateBinary(
                 override: defaults.string(forKey: "codexBinaryPath")))
-        }
-    }
-    /// Model id for the active provider; nil ⇒ provider default.
-    private func currentModel() -> String? {
-        switch providerKind {
-        case .claude:
-            let m = defaults.string(forKey: "assistClaudeModel") ?? "sonnet"
-            return m.isEmpty ? "sonnet" : m
-        case .codex:
-            let m = defaults.string(forKey: "assistCodexModel") ?? ""
-            return m.isEmpty ? nil : m   // Codex default
         }
     }
 
@@ -167,10 +156,11 @@ final class ShaderAssistViewModel: ObservableObject {
     func run(_ t: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) {
         task?.cancel(); handledEdits = []; transcript = []
         state = .running(t)
-        let kind = providerKind
-        let provider = makeProvider()
-        let model = currentModel()
-        providerCaption = "Using \(kind == .claude ? "Claude" : "OpenAI · Codex") · \(model ?? "default")"
+        let selection = providerSelection
+        let kind = selection.kind
+        let provider = makeProvider(kind: kind)
+        let model = selection.model
+        providerCaption = selection.caption
         // Prepend the ISF skills preamble so both providers reason with ISF expertise (B4).
         // Defense-in-depth (secondary to the runner's tool-restriction flags): mark the shader source
         // as untrusted data so embedded "instructions" in shader comments are not obeyed.

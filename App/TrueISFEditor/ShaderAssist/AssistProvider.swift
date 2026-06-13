@@ -30,3 +30,25 @@ enum AssistProviderKind: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String { self == .claude ? "Claude (subscription)" : "OpenAI · Codex (subscription)" }
 }
+
+struct AssistProviderSelection: Equatable {
+    let kind: AssistProviderKind
+    let model: String?
+
+    var caption: String {
+        let provider = kind == .claude ? "Claude" : "OpenAI · Codex"
+        return "Using \(provider) · \(model ?? "default")"
+    }
+
+    static func current(defaults: UserDefaults = .standard) -> AssistProviderSelection {
+        let kind = AssistProviderKind(rawValue: defaults.string(forKey: "assistProvider") ?? "") ?? .claude
+        switch kind {
+        case .claude:
+            let model = defaults.string(forKey: "assistClaudeModel") ?? "sonnet"
+            return AssistProviderSelection(kind: kind, model: model.isEmpty ? "sonnet" : model)
+        case .codex:
+            let model = defaults.string(forKey: "assistCodexModel") ?? ""
+            return AssistProviderSelection(kind: kind, model: model.isEmpty ? nil : model)
+        }
+    }
+}

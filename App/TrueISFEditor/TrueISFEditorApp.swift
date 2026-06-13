@@ -10,7 +10,7 @@ struct TrueISFEditorApp: App {
     @StateObject private var remixModel = RemixStudioModel(
         generator: RemixGenerator(
             makeProvider: {
-                switch AssistProviderKind(rawValue: UserDefaults.standard.string(forKey: "assistProvider") ?? "") ?? .claude {
+                switch AssistProviderSelection.current().kind {
                 case .claude:
                     return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(
                         override: UserDefaults.standard.string(forKey: "claudeBinaryPath")))
@@ -19,7 +19,7 @@ struct TrueISFEditorApp: App {
                         override: UserDefaults.standard.string(forKey: "codexBinaryPath")))
                 }
             },
-            model: UserDefaults.standard.string(forKey: "assistClaudeModel") ?? "sonnet"
+            modelProvider: { AssistProviderSelection.current().model }
         )
     )
 
