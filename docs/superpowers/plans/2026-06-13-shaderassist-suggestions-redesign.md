@@ -12,29 +12,29 @@
 
 ## File Map
 
-- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistTypes.swift`  
+- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistTypes.swift`
   Add goal/apply result types, stable suggestion IDs, and associated `ShaderAssistTask` cases.
-- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistPrompt.swift`  
+- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistPrompt.swift`
   Add goal, scoped suggestions, and apply prompt branches.
-- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift`  
+- Modify: `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift`
   Add `suggestionGoals` and `applyResult` parse entry points.
 - Modify tests:
   - `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistTypesTests.swift`
   - `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistPromptTests.swift`
   - `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ShaderAssistResponseParserTests.swift`
-- Modify: `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift`  
+- Modify: `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift`
   Add workflow state, fake-provider injection, source fingerprints, selected IDs, apply preview handling.
-- Modify: `App/TrueISFEditorTests/ShaderAssistViewModelTests.swift`  
+- Modify: `App/TrueISFEditorTests/ShaderAssistViewModelTests.swift`
   Add fake-provider workflow tests.
-- Modify: `App/TrueISFEditor/EditorViewModel.swift`  
+- Modify: `App/TrueISFEditor/EditorViewModel.swift`
   Add full-source AI replacement method.
-- Create: `App/TrueISFEditor/Views/SuggestionGoalSheet.swift`  
+- Create: `App/TrueISFEditor/Views/SuggestionGoalSheet.swift`
   Focused first-run goal chooser.
-- Modify: `App/TrueISFEditor/Views/SuggestionsPanel.swift`  
+- Modify: `App/TrueISFEditor/Views/SuggestionsPanel.swift`
   Convert flat advisory cards to selectable scoped suggestions.
-- Create: `App/TrueISFEditor/Views/ApplyPreviewPanel.swift`  
+- Create: `App/TrueISFEditor/Views/ApplyPreviewPanel.swift`
   User-gated before/after source review.
-- Modify: `App/TrueISFEditor/Views/EditorScreen.swift`  
+- Modify: `App/TrueISFEditor/Views/EditorScreen.swift`
   Wire sheet, active goal, rerun/change/start-over, selectable suggestions, and apply preview into ShaderAssist section.
 
 ---
