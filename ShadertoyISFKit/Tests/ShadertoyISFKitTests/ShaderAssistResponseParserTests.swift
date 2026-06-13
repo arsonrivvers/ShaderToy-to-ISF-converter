@@ -42,6 +42,14 @@ final class ShaderAssistResponseParserTests: XCTestCase {
         XCTAssertEqual(r.changedLines, [2])
         XCTAssertTrue(r.replacementSource.contains("void main"))
     }
+
+    func testApplyResultParseIgnoresBracesInsideReplacementString() throws {
+        let replacement = "/*{}*/\n// Preserved comment with }\nvoid main() { gl_FragColor = vec4(1.0); }"
+        let s = #"{"explanation":"Kept comment","replacementSource":"\#(escaped(replacement))","changedLines":[3]}"#
+        let r = try ShaderAssistResponseParser.applyResult(fromClaudeStdout: s)
+        XCTAssertEqual(r.replacementSource, replacement)
+    }
+
     private func escaped(_ s: String) -> String {
         let data = try! JSONEncoder().encode(s)
         return String(String(data: data, encoding: .utf8)!.dropFirst().dropLast())

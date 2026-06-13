@@ -21,9 +21,26 @@ public enum ShaderAssistResponseParser {
         }
         guard let start = text.firstIndex(of: "{") else { return nil }
         var depth = 0; var i = start
+        var inString = false
+        var escaped = false
         while i < text.endIndex {
             let c = text[i]
-            if c == "{" { depth += 1 } else if c == "}" { depth -= 1; if depth == 0 { return String(text[start...i]) } }
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if c == "\\" {
+                    escaped = true
+                } else if c == "\"" {
+                    inString = false
+                }
+            } else if c == "\"" {
+                inString = true
+            } else if c == "{" {
+                depth += 1
+            } else if c == "}" {
+                depth -= 1
+                if depth == 0 { return String(text[start...i]) }
+            }
             i = text.index(after: i)
         }
         return nil
