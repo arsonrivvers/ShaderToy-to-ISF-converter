@@ -5,8 +5,8 @@ struct SuggestionGoalSheet: View {
     @ObservedObject var model: ShaderAssistViewModel
     let source: String
     let diagnostics: [Diagnostic]
-    /// All selected goals (AI goal titles + custom goals), in menu order.
-    let onChoose: ([String]) -> Void
+    /// All selected goals as ideas (AI goals + custom goals), in menu order, to implement directly.
+    let onApply: ([AIIdea]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var customGoal = ""
@@ -21,7 +21,7 @@ struct SuggestionGoalSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("What do you want to improve?")
                         .font(.title3.bold())
-                    Text("Pick as many goals as you like — add your own too. ShaderAssist tailors suggestions to all of them.")
+                    Text("Pick as many as you like — add your own too. ShaderAssist rewrites the shader to implement all of them, then shows you a preview before applying.")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
@@ -48,10 +48,10 @@ struct SuggestionGoalSheet: View {
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Get Suggestions") {
-                    let goals = orderedSelectedGoals
-                    guard !goals.isEmpty else { return }
-                    onChoose(goals)
+                Button("Apply Selected") {
+                    let ideas = orderedSelectedIdeas
+                    guard !ideas.isEmpty else { return }
+                    onApply(ideas)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -163,14 +163,21 @@ struct SuggestionGoalSheet: View {
         customGoal = ""
     }
 
-    /// Selected goals in menu order: AI goals first (as listed), then custom goals in add order.
-    private var orderedSelectedGoals: [String] {
-        var ordered: [String] = []
+    /// Selected goals as ideas in menu order: AI goals first (carrying their detail/kind so the rewrite
+    /// has the full spec), then custom goals in add order. The detail is what tells the LLM exactly what
+    /// to implement.
+    private var orderedSelectedIdeas: [AIIdea] {
+        var ideas: [AIIdea] = []
         if case .suggestionGoals(let result) = model.state {
-            ordered += result.goals.map(\.title).filter { selected.contains($0) }
+            for g in result.goals where selected.contains(g.title) {
+                ideas.append(AIIdea(id: g.id, title: g.title, detail: g.detail,
+                                    kind: g.kind, lines: nil, impact: nil))
+            }
         }
-        ordered += customGoals.filter { selected.contains($0) }
-        return ordered
+        for c in customGoals where selected.contains(c) {
+            ideas.append(AIIdea(id: c, title: c, detail: "", kind: "custom", lines: nil, impact: nil))
+        }
+        return ideas
     }
 
     private var emptyState: some View {

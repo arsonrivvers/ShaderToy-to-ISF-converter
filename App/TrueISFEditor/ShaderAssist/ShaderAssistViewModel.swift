@@ -111,6 +111,21 @@ final class ShaderAssistViewModel: ObservableObject {
             .joined(separator: "; ")
     }
 
+    /// Implement the selected goals directly as ONE coordinated rewrite, skipping the intermediate
+    /// suggestions step. Goes straight to the apply preview — still user-gated before the editor source
+    /// is replaced. No-op if nothing valid is selected.
+    func applySelectedGoals(_ ideas: [AIIdea], source: String, diagnostics: [Diagnostic]) {
+        let valid = ideas.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !valid.isEmpty else { return }
+        let combined = Self.combineGoals(valid.map(\.title))
+        activeSuggestionGoal = combined
+        selectedIdeaIDs = []
+        lastSuggestions = nil
+        applyPreviewSourceFingerprint = nil
+        suggestionSourceFingerprint = Self.sourceFingerprint(source)
+        run(.applySuggestions(goal: combined, selectedIdeas: valid), source: source, diagnostics: diagnostics)
+    }
+
     func rerunSuggestions(source: String, diagnostics: [Diagnostic]) {
         guard let goal = activeSuggestionGoal else { return }
         chooseSuggestionGoal(goal, source: source, diagnostics: diagnostics)

@@ -91,6 +91,30 @@ final class ShaderAssistViewModelTests: XCTestCase {
         }
     }
 
+    func testApplySelectedGoalsGoesStraightToApplyPreview() async {
+        let source = "/*{}*/\nvoid main(){}"
+        let provider = FakeAssistProvider([.success(#"{"explanation":"Done","replacementSource":"/*{}*/\nvoid main(){ gl_FragColor = vec4(1.0); }","changedLines":[2]}"#)])
+        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let ideas = [AIIdea(id: "g1", title: "Add motion", detail: "animate it",
+                            kind: "design", lines: nil, impact: nil)]
+        vm.applySelectedGoals(ideas, source: source, diagnostics: [])
+        await settle()
+        XCTAssertEqual(vm.activeSuggestionGoal, "Add motion")
+        if case .applyPreview(let r) = vm.state {
+            XCTAssertEqual(r.explanation, "Done")
+            XCTAssertEqual(vm.applyPreviewSourceFingerprint, ShaderAssistViewModel.sourceFingerprint(source))
+        } else {
+            XCTFail("expected applyPreview, got \(vm.state)")
+        }
+    }
+
+    func testApplySelectedGoalsNoOpWhenEmpty() async {
+        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
+        vm.applySelectedGoals([], source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        if case .idle = vm.state {} else { XCTFail("expected idle, got \(vm.state)") }
+    }
+
     func testApplySelectedProducesApplyPreview() async {
         let idea = AIIdea(id: "speed", title: "Speed", detail: "Expose speed",
                           kind: "make-interactive", lines: [3], impact: "Playable")

@@ -98,9 +98,9 @@ struct EditorScreen: View {
         .sheet(isPresented: $showSuggestionGoalSheet) {
             SuggestionGoalSheet(model: shaderAssist,
                                 source: vm.file.source,
-                                diagnostics: vm.diagnostics.diagnostics) { goals in
-                shaderAssist.chooseSuggestionGoals(goals, source: vm.file.source,
-                                                   diagnostics: vm.diagnostics.diagnostics)
+                                diagnostics: vm.diagnostics.diagnostics) { ideas in
+                shaderAssist.applySelectedGoals(ideas, source: vm.file.source,
+                                                diagnostics: vm.diagnostics.diagnostics)
             }
         }
     }
@@ -126,12 +126,7 @@ struct EditorScreen: View {
                                      diagnostics: vm.diagnostics.diagnostics)
                 }.disabled(running)
                 Button("Suggestions") {
-                    if shaderAssist.activeSuggestionGoal == nil {
-                        showSuggestionGoalSheet = true
-                    } else {
-                        shaderAssist.rerunSuggestions(source: vm.file.source,
-                                                      diagnostics: vm.diagnostics.diagnostics)
-                    }
+                    showSuggestionGoalSheet = true
                 }.disabled(running)
                 if running {
                     ProgressView().controlSize(.small)
