@@ -98,9 +98,9 @@ struct EditorScreen: View {
         .sheet(isPresented: $showSuggestionGoalSheet) {
             SuggestionGoalSheet(model: shaderAssist,
                                 source: vm.file.source,
-                                diagnostics: vm.diagnostics.diagnostics) { goal in
-                shaderAssist.chooseSuggestionGoal(goal, source: vm.file.source,
-                                                  diagnostics: vm.diagnostics.diagnostics)
+                                diagnostics: vm.diagnostics.diagnostics) { goals in
+                shaderAssist.chooseSuggestionGoals(goals, source: vm.file.source,
+                                                   diagnostics: vm.diagnostics.diagnostics)
             }
         }
     }

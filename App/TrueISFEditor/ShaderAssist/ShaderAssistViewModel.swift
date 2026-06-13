@@ -93,6 +93,24 @@ final class ShaderAssistViewModel: ObservableObject {
         run(.suggestions(goal: goal), source: source, diagnostics: diagnostics)
     }
 
+    /// Run scoped suggestions for several goals at once (the goal menu's multi-select). Empty/blank
+    /// goals are dropped; the survivors are combined into one goal string so suggestions cover them
+    /// all in a single LLM call. No-op if nothing valid is selected.
+    func chooseSuggestionGoals(_ goals: [String], source: String, diagnostics: [Diagnostic]) {
+        let combined = Self.combineGoals(goals)
+        guard !combined.isEmpty else { return }
+        chooseSuggestionGoal(combined, source: source, diagnostics: diagnostics)
+    }
+
+    /// Combine selected goals into one prompt-ready string, trimming blanks and dropping empties,
+    /// preserving order. Exposed for testing.
+    static func combineGoals(_ goals: [String]) -> String {
+        goals
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "; ")
+    }
+
     func rerunSuggestions(source: String, diagnostics: [Diagnostic]) {
         guard let goal = activeSuggestionGoal else { return }
         chooseSuggestionGoal(goal, source: source, diagnostics: diagnostics)

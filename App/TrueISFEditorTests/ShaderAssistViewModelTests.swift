@@ -39,6 +39,32 @@ final class ShaderAssistViewModelTests: XCTestCase {
         }
     }
 
+    func testCombineGoalsTrimsAndDropsBlanksPreservingOrder() {
+        XCTAssertEqual(
+            ShaderAssistViewModel.combineGoals(["  Add color  ", "", "Expose speed", "   "]),
+            "Add color; Expose speed")
+        XCTAssertEqual(ShaderAssistViewModel.combineGoals([]), "")
+        XCTAssertEqual(ShaderAssistViewModel.combineGoals(["   ", ""]), "")
+    }
+
+    func testChoosingMultipleGoalsCombinesIntoOneSuggestionCall() async {
+        let provider = FakeAssistProvider([.success(#"{"goal":"Add color; Expose speed","ideas":[{"id":"a","title":"A","detail":"d","kind":"creative","lines":[1],"impact":"x"}]}"#)])
+        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        vm.chooseSuggestionGoals(["Add color", "  ", "Expose speed"],
+                                 source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        XCTAssertEqual(vm.activeSuggestionGoal, "Add color; Expose speed")
+        if case .suggestions = vm.state {} else { XCTFail("expected suggestions") }
+    }
+
+    func testChoosingNoValidGoalsIsNoOp() async {
+        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
+        vm.chooseSuggestionGoals(["   ", ""], source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        XCTAssertNil(vm.activeSuggestionGoal)
+        if case .idle = vm.state {} else { XCTFail("expected idle, got \(vm.state)") }
+    }
+
     func testToggleSelectionByIdeaID() {
         let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
         vm.toggleIdeaSelection("speed")
