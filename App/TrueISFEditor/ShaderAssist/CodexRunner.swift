@@ -38,8 +38,38 @@ final class CodexRunner: AssistProvider {
         }
         catch let e as AssistRunError { throw e }
         catch { throw AssistRunError.processFailed("\(error)") }
-        if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
+        if out.exitCode != 0 {
+            // Codex reports real failures as JSON events on STDOUT (`error` / `turn.failed`); STDERR only
+            // carries the benign "Reading additional input from stdin..." status line (codex always reads
+            // stdin to append to the prompt arg). Surfacing stderr would mask the actual error, so read
+            // the stream first and fall back to stderr only when no JSON error is present.
+            if let codexMessage = Self.errorMessage(fromCodexJSON: out.stdout) {
+                throw AssistErrorMapper.error(stderr: codexMessage, stdout: out.stdout)
+            }
+            throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout)
+        }
         return Self.finalMessage(fromCodexJSON: out.stdout)
+    }
+
+    /// Extract the failure message from a `codex exec --json` JSONL stream, if any. Reads both the
+    /// `{"type":"error","message":...}` and `{"type":"turn.failed","error":{"message":...}}` events;
+    /// the last one wins. Returns nil when the stream carries no error event.
+    static func errorMessage(fromCodexJSON stdout: String) -> String? {
+        var message: String?
+        for line in stdout.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            switch obj["type"] as? String {
+            case "error":
+                if let m = obj["message"] as? String, !m.isEmpty { message = m }
+            case "turn.failed":
+                if let err = obj["error"] as? [String: Any],
+                   let m = err["message"] as? String, !m.isEmpty { message = m }
+            default:
+                continue
+            }
+        }
+        return message
     }
 
     /// Extract the last `agent_message` text from a `codex exec --json` JSONL stream.

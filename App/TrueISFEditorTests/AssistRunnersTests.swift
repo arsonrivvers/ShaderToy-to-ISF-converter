@@ -74,6 +74,48 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(CodexRunner.finalMessage(fromCodexJSON: stream), "FINAL")
     }
 
+    func testCodexErrorMessageExtractsFromStream() {
+        let stream = """
+        {"type":"thread.started","thread_id":"x"}
+        {"type":"turn.started"}
+        {"type":"error","message":"You've hit your usage limit. Try again at 3:09 PM."}
+        {"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again at 3:09 PM."}}
+        """
+        XCTAssertEqual(CodexRunner.errorMessage(fromCodexJSON: stream),
+                       "You've hit your usage limit. Try again at 3:09 PM.")
+    }
+
+    func testCodexErrorMessageNilWhenNoErrorEvent() {
+        let stream = """
+        {"type":"turn.started"}
+        {"type":"item.completed","item":{"type":"agent_message","text":"ok"}}
+        {"type":"turn.completed","usage":{}}
+        """
+        XCTAssertNil(CodexRunner.errorMessage(fromCodexJSON: stream))
+    }
+
+    // Regression: codex puts the real failure in the STDOUT JSON stream while STDERR only carries the
+    // benign "Reading additional input from stdin..." status line. The runner must surface the real
+    // error, not the stdin status line. (Root-caused 2026-06-13 from a live usage-limit failure.)
+    func testCodexSurfacesJSONErrorNotStdinStatusLine() async {
+        let stream = """
+        {"type":"turn.started"}
+        {"type":"error","message":"You've hit your usage limit. Try again at 3:09 PM."}
+        {"type":"turn.failed","error":{"message":"You've hit your usage limit. Try again at 3:09 PM."}}
+        """
+        let fake = ClaudeCodeRunnerTests.FakeProcess(
+            stdout: stream, exitCode: 1, stderr: "Reading additional input from stdin...")
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: nil)
+            XCTFail("expected throw")
+        } catch let AssistRunError.processFailed(msg) {
+            XCTAssertTrue(msg.contains("usage limit"), "should surface the real error, got: \(msg)")
+            XCTAssertFalse(msg.contains("Reading additional input"),
+                           "must not surface the benign stdin status line")
+        } catch { XCTFail("wrong error: \(error)") }
+    }
+
     func testCodexBinaryNotFound() async {
         let runner = CodexRunner(binary: nil)
         do { _ = try await runner.run(prompt: "P", system: "S", model: nil); XCTFail("expected throw") }
