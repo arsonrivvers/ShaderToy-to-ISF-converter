@@ -15,6 +15,7 @@ struct RemixStudioView: View {
     @State private var pasteText = ""
     @State private var linkText = ""
     @State private var resolveError: String?
+    @State private var showCrossoverSettings = false
     @AppStorage("remixTerminalExpanded") private var terminalExpanded = true
 
     var body: some View {
@@ -142,7 +143,13 @@ struct RemixStudioView: View {
                 } label: { Label("Generate", systemImage: "bolt.fill") }
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(!model.canGenerate)
+                Button { showCrossoverSettings.toggle() } label: { Label("Crossover", systemImage: "gearshape") }
+                    .popover(isPresented: $showCrossoverSettings, arrowEdge: .bottom) {
+                        RemixCrossoverPopover(model: model)
+                    }
             }
+            Text(model.crossoverSettings.summary)
+                .font(.caption2).foregroundStyle(.secondary)
             if model.isGenerating { ProgressView().controlSize(.small) }
         }
     }
