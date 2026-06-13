@@ -9,6 +9,7 @@ struct EditorScreen: View {
         binaryOverride: { UserDefaults.standard.string(forKey: "claudeBinaryPath") })
     @AppStorage("editorCollapsed") private var editorCollapsed = false
     @State private var showTerminal = true
+    @State private var showSuggestionGoalSheet = false
 
     var body: some View {
         NavigationSplitView {
@@ -94,6 +95,14 @@ struct EditorScreen: View {
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
             }
         }
+        .sheet(isPresented: $showSuggestionGoalSheet) {
+            SuggestionGoalSheet(model: shaderAssist,
+                                source: vm.file.source,
+                                diagnostics: vm.diagnostics.diagnostics) { goal in
+                shaderAssist.chooseSuggestionGoal(goal, source: vm.file.source,
+                                                  diagnostics: vm.diagnostics.diagnostics)
+            }
+        }
     }
 
     /// Opens the app Settings scene. SettingsLink is macOS 14+; fall back to the AppKit selector on 13.
@@ -117,8 +126,12 @@ struct EditorScreen: View {
                                      diagnostics: vm.diagnostics.diagnostics)
                 }.disabled(running)
                 Button("Suggestions") {
-                    shaderAssist.requestSuggestionGoals(source: vm.file.source,
-                                                        diagnostics: vm.diagnostics.diagnostics)
+                    if shaderAssist.activeSuggestionGoal == nil {
+                        showSuggestionGoalSheet = true
+                    } else {
+                        shaderAssist.rerunSuggestions(source: vm.file.source,
+                                                      diagnostics: vm.diagnostics.diagnostics)
+                    }
                 }.disabled(running)
                 if running {
                     ProgressView().controlSize(.small)
@@ -152,26 +165,34 @@ struct EditorScreen: View {
                     vm.apply(ShaderAssistViewModel.textEdit(from: edit, source: vm.file.source))
                 }
                 .frame(maxHeight: 280)
-            case .suggestionGoals(let r):
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(r.goals) { goal in
-                            Button(goal.title) {
-                                shaderAssist.chooseSuggestionGoal(goal.title, source: vm.file.source,
-                                                                  diagnostics: vm.diagnostics.diagnostics)
-                            }
-                            .buttonStyle(.link)
-                            Text(goal.detail).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 280)
+            case .suggestionGoals:
+                EmptyView()
             case .suggestions(let r):
-                SuggestionsPanel(result: r) { vm.editor.revealLine($0) }
-                    .frame(maxHeight: 280)
+                SuggestionsPanel(result: r,
+                                 selectedIDs: shaderAssist.selectedIdeaIDs,
+                                 onToggle: { shaderAssist.toggleIdeaSelection($0) },
+                                 onJump: { vm.editor.revealLine($0) },
+                                 onApply: { shaderAssist.applySelectedSuggestions(source: vm.file.source) },
+                                 onRerun: {
+                                     shaderAssist.rerunSuggestions(source: vm.file.source,
+                                                                   diagnostics: vm.diagnostics.diagnostics)
+                                 },
+                                 onChangeGoal: { showSuggestionGoalSheet = true },
+                                 onStartOver: {
+                                     shaderAssist.startSuggestionFlowOver()
+                                     showSuggestionGoalSheet = true
+                                 })
+                .frame(maxHeight: 280)
             case .applyPreview(let r):
-                Text(r.explanation).font(.caption).textSelection(.enabled)
+                ApplyPreviewPanel(originalSource: vm.file.source,
+                                  result: r,
+                                  onApply: {
+                                      shaderAssist.confirmApplyPreview(currentSource: vm.file.source) { replacement in
+                                          vm.replaceSourceFromAssist(replacement)
+                                      }
+                                  },
+                                  onDiscard: { shaderAssist.discardApplyPreview() })
+                .frame(maxHeight: 320)
             case .rawAnswer(let s):
                 ScrollView {
                     Text(s).font(.system(.caption, design: .monospaced))
