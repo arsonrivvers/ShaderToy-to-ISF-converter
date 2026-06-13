@@ -131,7 +131,7 @@ final class RemixStudioModelTests: XCTestCase {
     }
 
     func test_makePlaceholders_areGenerating_withMatchingIdsAndDirectives() {
-        let ps = RemixStudioModel.makePlaceholders(round: 2, size: 3, parents: ["seed-0"])
+        let ps = RemixStudioModel.makePlaceholders(round: 2, size: 3, parents: ["seed-0"], pool: RemixDirectives.catalog)
         XCTAssertEqual(ps.count, 3)
         XCTAssertEqual(ps.map(\.id), ["r2-0", "r2-1", "r2-2"])          // ids match the generator
         XCTAssertTrue(ps.allSatisfy { $0.status == .generating })
@@ -199,5 +199,28 @@ final class RemixStudioModelTests: XCTestCase {
         let rows = m.treeRows(collapsed: [], favoritesOnly: false)
         XCTAssertEqual(rows.map(\.id), [m.parentAID!])
         XCTAssertEqual(m.treeRows(collapsed: [], favoritesOnly: true), [])  // nothing starred yet
+    }
+
+    func test_crossoverSettings_persistAcrossModelInstances() {
+        UserDefaults.standard.removeObject(forKey: "remixCrossoverSettings")
+        let m1 = model([.success(isf)])
+        m1.crossoverSettings.balance = 0.8
+        let m2 = model([.success(isf)])               // fresh instance reads persisted blob
+        XCTAssertEqual(m2.crossoverSettings.balance, 0.8, accuracy: 0.0001)
+        UserDefaults.standard.removeObject(forKey: "remixCrossoverSettings")
+    }
+
+    func test_corruptSettingsBlob_fallsBackToDefaults() {
+        UserDefaults.standard.set(Data("not json".utf8), forKey: "remixCrossoverSettings")
+        let m = model([.success(isf)])
+        XCTAssertEqual(m.crossoverSettings.balance, 0.5, accuracy: 0.0001)  // default
+        UserDefaults.standard.removeObject(forKey: "remixCrossoverSettings")
+    }
+
+    func test_makePlaceholders_directivesMatchGenerator_forReducedPool() {
+        let pool = ["lean minimal and restrained", "emphasize bold color and palette shifts"]
+        let placeholders = RemixStudioModel.makePlaceholders(round: 2, size: 4, parents: [], pool: pool)
+        let generatorDirectives = RemixDirectives.pick(4, seed: 2, from: pool)
+        XCTAssertEqual(placeholders.map(\.directive), generatorDirectives)
     }
 }

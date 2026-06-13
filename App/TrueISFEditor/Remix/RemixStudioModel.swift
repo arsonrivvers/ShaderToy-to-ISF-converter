@@ -25,12 +25,21 @@ final class RemixStudioModel: ObservableObject {
     /// One static frame per node id, captured at compile time — the tree's row swatches.
     @Published private(set) var snapshots: [String: CGImage] = [:]
 
+    private static let settingsKey = "remixCrossoverSettings"
+    @Published var crossoverSettings = RemixCrossoverSettings() { didSet { persistSettings() } }
+
     private let generator: RemixGenerator
     private var round = 0
     private var seedCounter = 0
     private var history: [(String?, String?)] = []   // parent (A,B) configs for step-back
 
-    init(generator: RemixGenerator) { self.generator = generator }
+    init(generator: RemixGenerator) {
+        self.generator = generator
+        if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
+           let decoded = try? JSONDecoder().decode(RemixCrossoverSettings.self, from: data) {
+            self.crossoverSettings = decoded
+        }
+    }
 
     // MARK: derived
 
@@ -78,9 +87,11 @@ final class RemixStudioModel: ObservableObject {
         transcript = []
         // Seed the gallery with .generating placeholders up front so cards (⚙) and the "N generating"
         // header appear immediately — otherwise nothing shows until a child returns (~37s+ each).
-        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids)
+        let pool = RemixDirectives.catalog.filter(crossoverSettings.enabledDirectives.contains)
+        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool)
         await generator.generate(
             parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
+            settings: crossoverSettings, pool: pool,
             onChild: { [weak self] node in
                 guard let self else { return }
                 var n = node
@@ -101,11 +112,17 @@ final class RemixStudioModel: ObservableObject {
 
     /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives
     /// the generator will use — so each placeholder is replaced in place when its child lands.
-    static func makePlaceholders(round: Int, size: Int, parents: [String]) -> [RemixNode] {
-        let directives = RemixDirectives.pick(size, seed: round)
+    static func makePlaceholders(round: Int, size: Int, parents: [String], pool: [String]) -> [RemixNode] {
+        let directives = RemixDirectives.pick(size, seed: round, from: pool)
         return (0..<size).map { slot in
             RemixNode(id: "r\(round)-\(slot)", isfSource: "", parents: parents, mode: .crossover,
                       steer: "", directive: directives[slot], round: round, status: .generating)
+        }
+    }
+
+    private func persistSettings() {
+        if let data = try? JSONEncoder().encode(crossoverSettings) {
+            UserDefaults.standard.set(data, forKey: Self.settingsKey)
         }
     }
 
