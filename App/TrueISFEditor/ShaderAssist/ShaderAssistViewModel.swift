@@ -71,6 +71,10 @@ final class ShaderAssistViewModel: ObservableObject {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    nonisolated static func replacementHasValidISFHeader(_ source: String) -> Bool {
+        (try? ISFHeader.parse(source)) != nil
+    }
+
     /// Map an AIEdit to a guarded P2 TextEdit, deriving expectedContains from the current source line.
     static func textEdit(from edit: AIEdit, source: String) -> TextEdit {
         let lines = source.components(separatedBy: "\n")
@@ -196,7 +200,7 @@ final class ShaderAssistViewModel: ObservableObject {
                     } else { self?.state = .rawAnswer(final) }
                 case .applySuggestions(goal: _, selectedIdeas: _):
                     if let r = try? ShaderAssistResponseParser.applyResult(fromClaudeStdout: final) {
-                        guard r.replacementSource.contains("/*{") else {
+                        guard Self.replacementHasValidISFHeader(r.replacementSource) else {
                             self?.state = .error("Claude did not return a valid ISF replacement source.")
                             return
                         }

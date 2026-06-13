@@ -103,6 +103,25 @@ final class ShaderAssistViewModelTests: XCTestCase {
             XCTFail("expected invalid replacement error")
         }
     }
+
+    func testApplyRejectsReplacementWithMalformedISFHeader() async {
+        let idea = AIIdea(id: "speed", title: "Speed", detail: "Expose speed",
+                          kind: "make-interactive", lines: [3], impact: "Playable")
+        let source = "/*{}*/\nvoid main(){}"
+        let provider = FakeAssistProvider([.success(#"{"explanation":"Bad","replacementSource":"/*{bad}*/\nvoid main(){}","changedLines":[1]}"#)])
+        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        vm.activeSuggestionGoal = "Expose controls"
+        vm.lastSuggestions = AISuggestionsResult(goal: "Expose controls", ideas: [idea])
+        vm.suggestionSourceFingerprint = ShaderAssistViewModel.sourceFingerprint(source)
+        vm.toggleIdeaSelection("speed")
+        vm.applySelectedSuggestions(source: source)
+        await settle()
+        if case .error(let message) = vm.state {
+            XCTAssertTrue(message.contains("valid ISF"))
+        } else {
+            XCTFail("expected invalid replacement error")
+        }
+    }
 }
 
 @MainActor
