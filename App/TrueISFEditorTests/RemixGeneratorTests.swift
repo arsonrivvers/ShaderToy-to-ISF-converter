@@ -63,4 +63,20 @@ final class RemixGeneratorTests: XCTestCase {
         XCTAssertEqual(children.count, 1)
         if case .failed = children[0].status {} else { XCTFail("expected .failed") }
     }
+
+    func test_orderedParents_evenSeed_keepsAFirst() {
+        let pairs = [(label: "A", source: "a"), (label: "B", source: "b")]
+        let out = RemixGenerator.orderedParents(pairs, seed: 4000)   // even
+        XCTAssertEqual(out.map(\.label), ["A", "B"])
+    }
+    func test_orderedParents_oddSeed_putsBFirst() {
+        let pairs = [(label: "A", source: "a"), (label: "B", source: "b")]
+        let out = RemixGenerator.orderedParents(pairs, seed: 4001)   // odd
+        XCTAssertEqual(out.map(\.label), ["B", "A"])
+        XCTAssertEqual(out.first?.source, "b")                       // label travels with source
+    }
+    func test_orderedParents_singleParent_unchanged() {
+        let pairs = [(label: "A", source: "a")]
+        XCTAssertEqual(RemixGenerator.orderedParents(pairs, seed: 1).map(\.label), ["A"])
+    }
 }

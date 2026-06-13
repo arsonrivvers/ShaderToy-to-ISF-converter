@@ -6,6 +6,14 @@ import Foundation
 /// tests; the studio layer can namespace by round).
 @MainActor
 final class RemixGenerator {
+    /// Presentation order for a child's parents. Two parents alternate by seed parity (even ⇒ A-first,
+    /// odd ⇒ B-first) to defeat first-position anchoring; labels travel with their source so "A"
+    /// always names parent-slot-A regardless of print order. Other counts are returned unchanged.
+    nonisolated static func orderedParents(_ pairs: [(label: String, source: String)],
+                                           seed: Int) -> [(label: String, source: String)] {
+        guard pairs.count == 2 else { return pairs }
+        return seed % 2 == 0 ? pairs : [pairs[1], pairs[0]]
+    }
     private let makeProvider: () -> AssistProvider
     private let model: String?
     private let maxConcurrent: Int
@@ -26,16 +34,20 @@ final class RemixGenerator {
     /// drive a live terminal so the user can watch Claude/Codex work and spot a hang. It is called from
     /// the provider's background reader thread, so implementations must hop to their own actor.
     func generate(parents: [String], mode: RemixMode, steer: String, batchSize: Int, round: Int,
+                  settings: RemixCrossoverSettings = RemixCrossoverSettings(),
+                  pool: [String] = RemixDirectives.catalog,
                   onChild: @escaping (RemixNode) -> Void,
                   onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }) async {
-        let directives = RemixDirectives.pick(batchSize, seed: round)
+        let directives = RemixDirectives.pick(batchSize, seed: round, from: pool)
         let system = RemixPrompt.system()
         await withTaskGroup(of: RemixNode.self) { group in
             var launched = 0
             func launch(_ slot: Int) {
                 let directive = directives[slot]
                 let labeled = parents.enumerated().map { (label: $0.offset == 0 ? "A" : "B", source: $0.element) }
-                let prompt = RemixPrompt.user(parents: labeled, mode: mode, steer: steer, directive: directive)
+                let ordered = RemixGenerator.orderedParents(labeled, seed: round * 1000 + slot)
+                let prompt = RemixPrompt.user(parents: ordered, mode: mode, steer: steer,
+                                              directive: directive, settings: settings)
                 let provider = makeProvider()
                 let mdl = model
                 let to = timeout
