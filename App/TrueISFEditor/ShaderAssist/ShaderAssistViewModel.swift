@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ShadertoyISFKit
 
 @MainActor
@@ -7,7 +8,9 @@ final class ShaderAssistViewModel: ObservableObject {
         case idle
         case running(ShaderAssistTask)
         case fix(AIFixResult)
+        case suggestionGoals(AISuggestionGoalsResult)
         case suggestions(AISuggestionsResult)
+        case applyPreview(AIApplyResult)
         case rawAnswer(String)
         case error(String)
     }
@@ -17,14 +20,23 @@ final class ShaderAssistViewModel: ObservableObject {
     @Published private(set) var transcript: [String] = []
     /// "Using <provider> · <model>" caption for the UI.
     @Published private(set) var providerCaption: String = ""
+    @Published var activeSuggestionGoal: String?
+    @Published var suggestionSourceFingerprint: String?
+    @Published var applyPreviewSourceFingerprint: String?
+    @Published var selectedIdeaIDs: Set<String> = []
+    @Published var lastSuggestions: AISuggestionsResult?
 
     private let binaryOverride: () -> String?
     private let defaults: UserDefaults
+    private let providerOverride: AssistProvider?
     private var task: Task<Void, Never>?
 
-    init(binaryOverride: @escaping () -> String?, defaults: UserDefaults = .standard) {
+    init(binaryOverride: @escaping () -> String?,
+         defaults: UserDefaults = .standard,
+         providerOverride: AssistProvider? = nil) {
         self.binaryOverride = binaryOverride
         self.defaults = defaults
+        self.providerOverride = providerOverride
     }
 
     // MARK: provider selection (from Settings / UserDefaults)
@@ -33,6 +45,7 @@ final class ShaderAssistViewModel: ObservableObject {
         AssistProviderKind(rawValue: defaults.string(forKey: "assistProvider") ?? "") ?? .claude
     }
     private func makeProvider() -> AssistProvider {
+        if let providerOverride { return providerOverride }
         switch providerKind {
         case .claude:
             return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(override: binaryOverride()))
@@ -53,6 +66,11 @@ final class ShaderAssistViewModel: ObservableObject {
         }
     }
 
+    nonisolated static func sourceFingerprint(_ source: String) -> String {
+        let digest = SHA256.hash(data: Data(source.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Map an AIEdit to a guarded P2 TextEdit, deriving expectedContains from the current source line.
     static func textEdit(from edit: AIEdit, source: String) -> TextEdit {
         let lines = source.components(separatedBy: "\n")
@@ -62,6 +80,84 @@ final class ShaderAssistViewModel: ObservableObject {
         return TextEdit(fromLine: edit.fromLine, toLine: edit.toLine,
                         replacement: edit.replacement,
                         expectedContains: expect.isEmpty ? nil : String(expect.prefix(40)))
+    }
+
+    func requestSuggestionGoals(source: String, diagnostics: [Diagnostic]) {
+        activeSuggestionGoal = nil
+        selectedIdeaIDs = []
+        lastSuggestions = nil
+        applyPreviewSourceFingerprint = nil
+        suggestionSourceFingerprint = Self.sourceFingerprint(source)
+        run(.suggestionGoals, source: source, diagnostics: diagnostics)
+    }
+
+    func chooseSuggestionGoal(_ goal: String, source: String, diagnostics: [Diagnostic]) {
+        activeSuggestionGoal = goal
+        selectedIdeaIDs = []
+        lastSuggestions = nil
+        applyPreviewSourceFingerprint = nil
+        suggestionSourceFingerprint = Self.sourceFingerprint(source)
+        run(.suggestions(goal: goal), source: source, diagnostics: diagnostics)
+    }
+
+    func rerunSuggestions(source: String, diagnostics: [Diagnostic]) {
+        guard let goal = activeSuggestionGoal else { return }
+        chooseSuggestionGoal(goal, source: source, diagnostics: diagnostics)
+    }
+
+    func startSuggestionFlowOver() {
+        activeSuggestionGoal = nil
+        suggestionSourceFingerprint = nil
+        applyPreviewSourceFingerprint = nil
+        selectedIdeaIDs = []
+        lastSuggestions = nil
+        state = .idle
+    }
+
+    func toggleIdeaSelection(_ id: String) {
+        if selectedIdeaIDs.contains(id) {
+            selectedIdeaIDs.remove(id)
+        } else {
+            selectedIdeaIDs.insert(id)
+        }
+    }
+
+    func applySelectedSuggestions(source: String) {
+        guard let goal = activeSuggestionGoal, let suggestions = lastSuggestions else {
+            state = .error("Generate suggestions before applying.")
+            return
+        }
+        guard suggestionSourceFingerprint == Self.sourceFingerprint(source) else {
+            state = .error("Shader changed since these suggestions were generated. Rerun suggestions.")
+            return
+        }
+        let selected = suggestions.ideas.filter { selectedIdeaIDs.contains($0.id) }
+        guard !selected.isEmpty else {
+            state = .error("Select at least one suggestion to apply.")
+            return
+        }
+        applyPreviewSourceFingerprint = nil
+        run(.applySuggestions(goal: goal, selectedIdeas: selected), source: source, diagnostics: [])
+    }
+
+    func confirmApplyPreview(currentSource: String, apply: (String) -> Void) {
+        guard case .applyPreview(let result) = state else { return }
+        guard applyPreviewSourceFingerprint == Self.sourceFingerprint(currentSource) else {
+            state = .error("Shader changed since this diff was generated. Rerun apply.")
+            return
+        }
+        apply(result.replacementSource)
+        applyPreviewSourceFingerprint = nil
+        state = .idle
+    }
+
+    func discardApplyPreview() {
+        applyPreviewSourceFingerprint = nil
+        if let lastSuggestions {
+            state = .suggestions(lastSuggestions)
+        } else {
+            state = .idle
+        }
     }
 
     func run(_ t: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) {
@@ -89,9 +185,24 @@ final class ShaderAssistViewModel: ObservableObject {
                 case .diagnoseAndFix:
                     if let r = try? ShaderAssistResponseParser.fixResult(fromClaudeStdout: final) { self?.state = .fix(r) }
                     else { self?.state = .rawAnswer(final) }
-                case .suggestions:
-                    if let r = try? ShaderAssistResponseParser.suggestions(fromClaudeStdout: final) { self?.state = .suggestions(r) }
+                case .suggestionGoals:
+                    if let r = try? ShaderAssistResponseParser.suggestionGoals(fromClaudeStdout: final) { self?.state = .suggestionGoals(r) }
                     else { self?.state = .rawAnswer(final) }
+                case .suggestions(goal: _):
+                    if let r = try? ShaderAssistResponseParser.suggestions(fromClaudeStdout: final) {
+                        self?.lastSuggestions = r
+                        self?.selectedIdeaIDs = []
+                        self?.state = .suggestions(r)
+                    } else { self?.state = .rawAnswer(final) }
+                case .applySuggestions(goal: _, selectedIdeas: _):
+                    if let r = try? ShaderAssistResponseParser.applyResult(fromClaudeStdout: final) {
+                        guard r.replacementSource.contains("/*{") else {
+                            self?.state = .error("Claude did not return a valid ISF replacement source.")
+                            return
+                        }
+                        self?.applyPreviewSourceFingerprint = Self.sourceFingerprint(source)
+                        self?.state = .applyPreview(r)
+                    } else { self?.state = .rawAnswer(final) }
                 }
             } catch let e as AssistRunError {
                 self?.state = .error(Self.message(for: e, provider: kind))
@@ -99,7 +210,14 @@ final class ShaderAssistViewModel: ObservableObject {
         }
     }
 
-    func cancel() { task?.cancel(); state = .idle }
+    func cancel() {
+        task?.cancel()
+        if let lastSuggestions {
+            state = .suggestions(lastSuggestions)
+        } else {
+            state = .idle
+        }
+    }
 
     private func appendTranscript(_ line: String) {
         transcript.append(line)

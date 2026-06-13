@@ -117,8 +117,8 @@ struct EditorScreen: View {
                                      diagnostics: vm.diagnostics.diagnostics)
                 }.disabled(running)
                 Button("Suggestions") {
-                    shaderAssist.run(.suggestions, source: vm.file.source,
-                                     diagnostics: vm.diagnostics.diagnostics)
+                    shaderAssist.requestSuggestionGoals(source: vm.file.source,
+                                                        diagnostics: vm.diagnostics.diagnostics)
                 }.disabled(running)
                 if running {
                     ProgressView().controlSize(.small)
@@ -152,9 +152,26 @@ struct EditorScreen: View {
                     vm.apply(ShaderAssistViewModel.textEdit(from: edit, source: vm.file.source))
                 }
                 .frame(maxHeight: 280)
+            case .suggestionGoals(let r):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(r.goals) { goal in
+                            Button(goal.title) {
+                                shaderAssist.chooseSuggestionGoal(goal.title, source: vm.file.source,
+                                                                  diagnostics: vm.diagnostics.diagnostics)
+                            }
+                            .buttonStyle(.link)
+                            Text(goal.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 280)
             case .suggestions(let r):
                 SuggestionsPanel(result: r) { vm.editor.revealLine($0) }
                     .frame(maxHeight: 280)
+            case .applyPreview(let r):
+                Text(r.explanation).font(.caption).textSelection(.enabled)
             case .rawAnswer(let s):
                 ScrollView {
                     Text(s).font(.system(.caption, design: .monospaced))
