@@ -2,6 +2,8 @@ import Foundation
 public enum ShaderAssistResponseParser {
     public static func fixResult(fromClaudeStdout s: String) throws -> AIFixResult { try decode(AIFixResult.self, from: candidateJSON(s)) }
     public static func suggestions(fromClaudeStdout s: String) throws -> AISuggestionsResult { try decode(AISuggestionsResult.self, from: candidateJSON(s)) }
+    public static func suggestionGoals(fromClaudeStdout s: String) throws -> AISuggestionGoalsResult { try decode(AISuggestionGoalsResult.self, from: candidateJSON(s)) }
+    public static func applyResult(fromClaudeStdout s: String) throws -> AIApplyResult { try decode(AIApplyResult.self, from: candidateJSON(s)) }
     private struct Envelope: Decodable { let result: String?; let is_error: Bool? }
     private static func candidateJSON(_ stdout: String) -> String {
         let trimmed = stdout.trimmingCharacters(in: .whitespacesAndNewlines)

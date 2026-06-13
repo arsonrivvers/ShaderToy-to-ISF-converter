@@ -22,9 +22,25 @@ final class ShaderAssistResponseParserTests: XCTestCase {
         }
     }
     func testSuggestionsParse() throws {
-        let s = #"{"ideas":[{"title":"t","detail":"d","kind":"design","lines":null}]}"#
+        let s = #"{"goal":"Design","ideas":[{"id":"palette","title":"t","detail":"d","kind":"design","lines":null,"impact":"i"}]}"#
         let env = #"{"is_error":false,"result":"\#(escaped(s))"}"#
-        let r = try ShaderAssistResponseParser.suggestions(fromClaudeStdout: env); XCTAssertEqual(r.ideas[0].kind, "design")
+        let r = try ShaderAssistResponseParser.suggestions(fromClaudeStdout: env)
+        XCTAssertEqual(r.goal, "Design")
+        XCTAssertEqual(r.ideas[0].id, "palette")
+        XCTAssertEqual(r.ideas[0].impact, "i")
+    }
+    func testSuggestionGoalsParse() throws {
+        let s = #"{"goals":[{"id":"motion","title":"Add motion","detail":"Animate the field","kind":"design","whyThisShader":"The current shader is static."}]}"#
+        let env = #"{"is_error":false,"result":"\#(escaped(s))"}"#
+        let r = try ShaderAssistResponseParser.suggestionGoals(fromClaudeStdout: env)
+        XCTAssertEqual(r.goals[0].id, "motion")
+    }
+    func testApplyResultParse() throws {
+        let s = #"{"explanation":"Added input","replacementSource":"/*{}*/\nvoid main(){}","changedLines":[2]}"#
+        let env = #"{"is_error":false,"result":"\#(escaped(s))"}"#
+        let r = try ShaderAssistResponseParser.applyResult(fromClaudeStdout: env)
+        XCTAssertEqual(r.changedLines, [2])
+        XCTAssertTrue(r.replacementSource.contains("void main"))
     }
     private func escaped(_ s: String) -> String {
         let data = try! JSONEncoder().encode(s)
