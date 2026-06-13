@@ -84,6 +84,7 @@ targets:
       - TrueISFEditor/SourceRouter.swift
       - TrueISFEditor/BlitFit.swift
     dependencies:
+      - target: TrueISFEditor
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
         embed: true
@@ -101,8 +102,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditorTests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: ""
-        BUNDLE_LOADER: ""
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TrueISFEditor.app/Contents/MacOS/TrueISFEditor"
+        BUNDLE_LOADER: "$(TEST_HOST)"
         FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
         SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
