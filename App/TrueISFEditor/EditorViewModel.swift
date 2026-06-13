@@ -146,6 +146,15 @@ final class EditorViewModel: ObservableObject {
         statusMessage = "Applied fix"
     }
 
+    /// Replace the full editor source after a user-approved ShaderAssist diff.
+    func replaceSourceFromAssist(_ source: String, status: String = "Applied ShaderAssist suggestions") {
+        file.source = source
+        editor.setText(source)
+        headerModel.syncFromText(source)
+        recompile(immediate: true)
+        statusMessage = status
+    }
+
     // MARK: recompile loop
 
     private func sourceEdited(_ text: String) {
