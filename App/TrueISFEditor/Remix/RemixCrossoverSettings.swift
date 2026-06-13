@@ -53,7 +53,7 @@ struct RemixCrossoverSettings: Codable, Equatable {
         parts.append(pct == 50 ? "balanced" : (pct > 50 ? "\(pct)% B" : "\(100 - pct)% A"))
         switch variation {
         case ..<0.25: parts.append("faithful")
-        case ..<0.5:  parts.append("balanced mix")
+        case ..<0.5:  parts.append("measured")
         case ..<0.75: parts.append("adventurous")
         default:      parts.append("wild")
         }

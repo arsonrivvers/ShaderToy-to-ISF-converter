@@ -64,6 +64,10 @@ struct RemixCrossoverPopover: View {
                         }
                     )).font(.caption2).toggleStyle(.checkbox)
                 }
+                if model.crossoverSettings.enabledDirectives.isEmpty {
+                    Text("All off — the batch falls back to every vector.")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
             }
         }
         .padding(16)
