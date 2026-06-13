@@ -28,4 +28,13 @@ final class FakePreviewEngine: PreviewEngine, ObservableObject {
         self.compileErrorLine = line; self.inputs = inputs
         objectWillChange.send()
     }
+
+    /// Mimics the REAL `@Published` notification ordering of MetalPreviewController.applyCompile:
+    /// each property's `objectWillChange` fires BEFORE the new value is stored, and there is NO
+    /// trailing manual send. A coordinator that reads engine state inside the will-change handler
+    /// therefore sees pre-store (stale) values. Use this to catch the off-by-one mirror bug.
+    func simulateCompileLikePublished(valid: Bool, error: String?, line: Int?, inputs: [ISFPreviewInput]) {
+        self.compileValid = valid; self.compileError = error
+        self.compileErrorLine = line; self.inputs = inputs
+    }
 }

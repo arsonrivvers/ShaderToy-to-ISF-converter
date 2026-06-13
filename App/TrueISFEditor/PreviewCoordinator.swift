@@ -35,7 +35,16 @@ final class PreviewCoordinator: ObservableObject {
 
     private func subscribe() {
         sub = activeEngine.compileStateWillChange
-            .sink { [weak self] _ in self?.mirror() }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                // The signal is `objectWillChange` — it fires BEFORE the engine stores the new
+                // value. A synchronous mirror here reads pre-store (stale) state, which left the
+                // Adjust panel empty after a programmatic load until the next compile. Mirror now
+                // (covers engines that signal post-store) AND on the next main-actor turn (covers
+                // real @Published will-change ordering, where the value lands right after).
+                self.mirror()
+                Task { @MainActor in self.mirror() }
+            }
         mirror()
     }
     private func mirror() {

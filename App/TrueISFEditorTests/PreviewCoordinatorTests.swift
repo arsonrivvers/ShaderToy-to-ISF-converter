@@ -17,6 +17,21 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertTrue(coord.compileValid)
     }
 
+    /// Regression: opening a populated shader programmatically (Remix "open in editor") left the
+    /// Adjust panel empty until the user edited the code. Root cause — the coordinator mirrored
+    /// engine state inside the will-change handler and read inputs BEFORE the engine stored them.
+    /// With real @Published ordering (no trailing signal) the coordinator must still surface inputs.
+    func testSurfacesInputsWithRealPublishedOrdering() async {
+        let fake = FakePreviewEngine()
+        let coord = PreviewCoordinator(metal: fake, webkit: FakePreviewEngine())
+        let inputs = [ISFPreviewInput(name: "amount", type: "float", defaultValue: 0.0,
+                                      min: 0.0, max: 1.0, labels: nil, values: nil)]
+        fake.simulateCompileLikePublished(valid: true, error: nil, line: nil, inputs: inputs)
+        await Task.yield(); await Task.yield()
+        XCTAssertEqual(coord.inputs.map(\.name), ["amount"])
+        XCTAssertTrue(coord.compileValid)
+    }
+
     func testToggleReloadsCurrentSourceOnNewEngine() {
         let metal = FakePreviewEngine(); let webkit = FakePreviewEngine()
         let coord = PreviewCoordinator(metal: metal, webkit: webkit)
