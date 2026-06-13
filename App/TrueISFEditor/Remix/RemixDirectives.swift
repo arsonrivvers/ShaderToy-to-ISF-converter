@@ -14,8 +14,11 @@ enum RemixDirectives {
         "blend the two parents evenly and faithfully",
     ]
     /// `seed` rotates the starting point so successive rounds don't always lead with the same vector.
-    static func pick(_ n: Int, seed: Int) -> [String] {
-        guard n > 0, !catalog.isEmpty else { return [] }
-        return (0..<n).map { catalog[(seed + $0) % catalog.count] }
+    /// `from` restricts the draw to an allowlist (the user's enabled directive pool); an empty pool
+    /// falls back to the full catalog so we never produce zero directives.
+    static func pick(_ n: Int, seed: Int, from pool: [String] = catalog) -> [String] {
+        let source = pool.isEmpty ? catalog : pool
+        guard n > 0, !source.isEmpty else { return [] }
+        return (0..<n).map { source[(seed + $0) % source.count] }
     }
 }
