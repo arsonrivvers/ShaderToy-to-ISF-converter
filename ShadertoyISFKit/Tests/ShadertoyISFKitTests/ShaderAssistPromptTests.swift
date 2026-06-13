@@ -12,5 +12,5 @@ final class ShaderAssistPromptTests: XCTestCase {
         XCTAssertTrue(s.contains("isf-shader-development")); XCTAssertTrue(s.contains("shader-dev"))
         XCTAssertTrue(s.lowercased().contains("json")); XCTAssertTrue(s.contains("\"edits\""))
     }
-    func testSuggestionsSystemHasIdeasSchema() { XCTAssertTrue(ShaderAssistPrompt.system(for: .suggestions).contains("\"ideas\"")) }
+    func testSuggestionsSystemHasIdeasSchema() { XCTAssertTrue(ShaderAssistPrompt.system(for: .suggestions(goal: "")).contains("\"ideas\"")) }
 }

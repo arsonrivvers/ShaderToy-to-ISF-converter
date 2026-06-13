@@ -14,7 +14,7 @@ public enum ShaderAssistPrompt {
             "replacement": string (the full replacement text for those lines), "rationale": string} ]}. \
             If nothing needs fixing, return an empty "edits" array and explain why.
             """
-        case .suggestions:
+        case .suggestionGoals, .suggestions(goal: _), .applySuggestions(goal: _, selectedIdeas: _):
             return common + "\n" + """
             Suggest creative evolutions of this working shader. Identify hardcoded constants that could \
             become interactive ISF INPUTS, and ways the visual design could develop. \
@@ -31,9 +31,13 @@ public enum ShaderAssistPrompt {
                 let loc = d.line.map { "line \($0)" } ?? "—"
                 return "[\(d.severity)] \(loc): \(d.message)"
             }.joined(separator: "\n")
-        let header = task == .diagnoseAndFix
-            ? "Diagnose and fix the compile/diagnostic issues in this ISF shader."
-            : "Suggest how this ISF shader could evolve (interactivity + visual design)."
+        let header: String
+        switch task {
+        case .diagnoseAndFix:
+            header = "Diagnose and fix the compile/diagnostic issues in this ISF shader."
+        case .suggestionGoals, .suggestions(goal: _), .applySuggestions(goal: _, selectedIdeas: _):
+            header = "Suggest how this ISF shader could evolve (interactivity + visual design)."
+        }
         return """
         \(header)
 
