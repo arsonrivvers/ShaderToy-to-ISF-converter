@@ -39,7 +39,12 @@ public enum ISFConverter {
             passBodies.append(sampled.code)
         }
 
-        let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: plan.commonCode)
+        // The Common code is shared, un-renamed source. Rewrite its FILE-SCOPE Shadertoy uniforms
+        // (e.g. `#define res iResolution.xy`) while leaving helper-function parameters/bodies alone —
+        // some shaders thread the uniforms through helpers as parameters, which the per-pass
+        // whole-string rewriter would corrupt.
+        let commonCode = CommonUniformRewriter.rewrite(plan.commonCode)
+        let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
         let compat = GLSLCompat.apply(glsl.code)
