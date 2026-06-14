@@ -20,7 +20,9 @@ public enum ISFConverter {
                 imageInputNames.insert(b.glslName)
             }
 
-            var code = pass.code
+            // Splice `\` line-continuations first — glslang rejects them and black-screens the
+            // shader; downstream rewriters and the transpiler then see clean, single-logical-line code.
+            var code = GLSLLineContinuation.splice(pass.code)
             if code.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
 
             code = UniformRewriter.rewrite(code)
@@ -44,7 +46,7 @@ public enum ISFConverter {
         // (e.g. `#define res iResolution.xy`) while leaving helper-function parameters/bodies alone —
         // some shaders thread the uniforms through helpers as parameters, which the per-pass
         // whole-string rewriter would corrupt.
-        let commonCode = CommonUniformRewriter.rewrite(plan.commonCode)
+        let commonCode = CommonUniformRewriter.rewrite(GLSLLineContinuation.splice(plan.commonCode))
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
