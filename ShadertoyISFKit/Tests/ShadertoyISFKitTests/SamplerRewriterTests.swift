@@ -50,4 +50,23 @@ final class SamplerRewriterTests: XCTestCase {
         let r = SamplerRewriter.rewrite("vec4 c = texture(iChannel1, uv); foo(iChannel1);", bindings: binding())
         XCTAssertEqual(r.code, "vec4 c = IMG_NORM_PIXEL(iChannel1img, uv); foo(iChannel1img);")
     }
+
+    /// Regression for sXBGWy: a cubemap channel is sampled with a vec3 direction. ISF has no cubemap,
+    /// so the 2D stub must wrap the direction in an equirectangular projection — otherwise
+    /// IMG_NORM_PIXEL (which takes vec2) has "no matching overload" and the shader black-screens.
+    private func cubemapBinding() -> [Int: ChannelBinding.Binding] {
+        [0: .init(glslName: "iChannel0img", kind: .cubemap)]
+    }
+    func test_cubemapChannel_texture_wrapsWithEquirect() {
+        let r = SamplerRewriter.rewrite("texture(iChannel0, reflect(rd, n))", bindings: cubemapBinding())
+        XCTAssertEqual(r.code, "IMG_NORM_PIXEL(iChannel0img, _dirToEquirect(reflect(rd, n)))")
+    }
+    func test_cubemapChannel_textureLod_wrapsWithEquirect() {
+        let r = SamplerRewriter.rewrite("textureLod(iChannel0, rd, 0.0)", bindings: cubemapBinding())
+        XCTAssertEqual(r.code, "IMG_NORM_PIXEL(iChannel0img, _dirToEquirect(rd))")
+    }
+    func test_2dChannel_notWrapped() {
+        let r = SamplerRewriter.rewrite("texture(iChannel0, uv)", bindings: binding())
+        XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")  // buffer/2D stays a plain coord
+    }
 }

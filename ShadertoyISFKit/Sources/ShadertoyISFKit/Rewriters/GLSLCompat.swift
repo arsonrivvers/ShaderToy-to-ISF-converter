@@ -52,6 +52,13 @@ public enum GLSLCompat {
                 context: ""))
         }
 
+        // Cubemap fake: SamplerRewriter rewrites cubemap samples `texture(cube, dir)` to
+        // `IMG_NORM_PIXEL(img, _dirToEquirect(dir))`. Inject the projection helper when it's used so
+        // the 2D image stub samples the 3D direction as a lat-long environment map.
+        if callsFunction(code, "_dirToEquirect") {
+            out = "vec2 _dirToEquirect(vec3 d){ d = normalize(d); return vec2(atan(d.z, d.x) * 0.15915494 + 0.5, acos(clamp(d.y, -1.0, 1.0)) * 0.31830989); }\n\n" + out
+        }
+
         // Request the packing extension if any pack/unpack builtin is used. Must be the FIRST
         // line of the shader body (glslang requires #extension before any non-preprocessor token),
         // so it goes ahead of any polyfill block prepended above.

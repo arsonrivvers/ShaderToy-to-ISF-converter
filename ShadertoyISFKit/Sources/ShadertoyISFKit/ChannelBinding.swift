@@ -1,5 +1,5 @@
 public struct ChannelBinding {
-    public enum Kind: Equatable { case texture, buffer, unsupported }
+    public enum Kind: Equatable { case texture, buffer, cubemap, unsupported }
     public struct Binding: Equatable {
         public let glslName: String   // sampler name used in rewritten GLSL
         public let kind: Kind
@@ -27,7 +27,14 @@ public struct ChannelBinding {
                         message: "iChannel\(input.channel) references an unknown buffer; mapped to an image input.",
                         context: ""))
                 }
-            case .keyboard, .webcam, .music, .musicstream, .mic, .cubemap, .volume, .video:
+            case .cubemap:
+                // ISF has no cubemap input. Map to a 2D image and sample it via an equirectangular
+                // (lat-long) projection of the 3D direction — the standard 2D fake for a cubemap.
+                bindings[input.channel] = Binding(glslName: "iChannel\(input.channel)img", kind: .cubemap)
+                warnings.append(ConversionWarning(severity: .warning,
+                    message: "iChannel\(input.channel) is a cubemap; ISF has no cubemap input — mapped to a 2D image sampled via equirectangular projection. Supply an equirect (lat-long) image for correct results.",
+                    context: ""))
+            case .keyboard, .webcam, .music, .musicstream, .mic, .volume, .video:
                 bindings[input.channel] = Binding(glslName: "iChannel\(input.channel)img", kind: .unsupported)
                 warnings.append(ConversionWarning(severity: .warning,
                     message: "iChannel\(input.channel) is '\(input.ctype.rawValue)', which has no clean ISF equivalent — stubbed as an image input; verify manually.",

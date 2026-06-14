@@ -10,11 +10,11 @@ public enum SamplerRewriter {
 
         // textureLod(iChannelN, COORD, LOD)  ->  IMG_NORM_PIXEL(name, COORD)  (+warn)
         out = replaceCall(in: out, fn: "textureLod", arity: 3) { args in
-            guard let name = name(forChannelArg: args[0], bindings: bindings) else { return nil }
+            guard let b = binding(forChannelArg: args[0], bindings: bindings) else { return nil }
             warnings.append(ConversionWarning(severity: .info,
                 message: "textureLod LOD argument dropped (\(args[2].trimmed)); ISF has no per-sample LOD.",
                 context: ""))
-            return "IMG_NORM_PIXEL(\(name), \(args[1].trimmed))"
+            return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
         }
 
         // texelFetch(iChannelN, COORD, LOD) -> IMG_PIXEL(name, vec2(COORD))
@@ -26,8 +26,8 @@ public enum SamplerRewriter {
         // texture / texture2D (arity 2) -> IMG_NORM_PIXEL(name, COORD)
         for fn in ["texture2D", "texture"] {
             out = replaceCall(in: out, fn: fn, arity: 2) { args in
-                guard let name = name(forChannelArg: args[0], bindings: bindings) else { return nil }
-                return "IMG_NORM_PIXEL(\(name), \(args[1].trimmed))"
+                guard let b = binding(forChannelArg: args[0], bindings: bindings) else { return nil }
+                return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
             }
         }
 
@@ -36,11 +36,11 @@ public enum SamplerRewriter {
         // (mirrors textureLod). Without this the 3-arg call would pass through and fail to compile.
         for fn in ["texture2D", "texture"] {
             out = replaceCall(in: out, fn: fn, arity: 3) { args in
-                guard let name = name(forChannelArg: args[0], bindings: bindings) else { return nil }
+                guard let b = binding(forChannelArg: args[0], bindings: bindings) else { return nil }
                 warnings.append(ConversionWarning(severity: .info,
                     message: "texture() bias argument dropped (\(args[2].trimmed)); ISF has no per-sample bias.",
                     context: ""))
-                return "IMG_NORM_PIXEL(\(name), \(args[1].trimmed))"
+                return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
             }
         }
 
@@ -60,9 +60,21 @@ public enum SamplerRewriter {
 
     private static func name(forChannelArg arg: String,
                              bindings: [Int: ChannelBinding.Binding]) -> String? {
+        binding(forChannelArg: arg, bindings: bindings)?.glslName
+    }
+
+    private static func binding(forChannelArg arg: String,
+                                bindings: [Int: ChannelBinding.Binding]) -> ChannelBinding.Binding? {
         let t = arg.trimmed
         guard t.hasPrefix("iChannel"), let n = Int(t.dropFirst("iChannel".count)) else { return nil }
-        return bindings[n]?.glslName
+        return bindings[n]
+    }
+
+    /// The sample coordinate for a binding: cubemap channels are sampled with a vec3 direction, so
+    /// project it to 2D via `_dirToEquirect` (ISF has no cubemap; the helper is injected by
+    /// GLSLCompat when present). All other (2D) channels pass the coordinate through unchanged.
+    private static func coord(_ raw: String, _ b: ChannelBinding.Binding) -> String {
+        b.kind == .cubemap ? "_dirToEquirect(\(raw.trimmed))" : raw.trimmed
     }
 
     /// Replaces `fn(arg0, arg1, ...)` with `transform(args)`, respecting nested parens.

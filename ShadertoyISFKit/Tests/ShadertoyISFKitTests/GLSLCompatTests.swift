@@ -39,4 +39,15 @@ final class GLSLCompatTests: XCTestCase {
         let r = GLSLCompat.apply("void main(){ gl_FragColor = vec4(1.0); }")
         XCTAssertFalse(r.code.contains("#extension"))
     }
+
+    /// The cubemap equirectangular-projection helper is injected when SamplerRewriter emitted a
+    /// `_dirToEquirect(...)` call (cubemap channel sampled with a vec3 direction).
+    func test_dirToEquirect_injectedWhenUsed() {
+        let r = GLSLCompat.apply("vec3 c = IMG_NORM_PIXEL(x, _dirToEquirect(rd)).rgb;")
+        XCTAssertTrue(r.code.contains("vec2 _dirToEquirect(vec3"))
+    }
+    func test_dirToEquirect_notInjectedWhenUnused() {
+        let r = GLSLCompat.apply("void main(){ gl_FragColor = vec4(1.0); }")
+        XCTAssertFalse(r.code.contains("_dirToEquirect"))
+    }
 }
