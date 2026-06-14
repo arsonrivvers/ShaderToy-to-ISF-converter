@@ -29,9 +29,14 @@ public enum CommonUniformRewriter {
         }
 
         // Delimiters inside comments must NOT affect depth (a `:(` in a comment once made the whole
-        // rest of the file look "protected"). Track comment state and skip depth counting there.
-        enum Mode { case normal, line, block }
+        // rest of the file look "protected"). Same for preprocessor directives: a `#define` whose
+        // body has an unbalanced `{` (a "header macro" like `#define Main void mainImage(…){ …`)
+        // would otherwise leave the rest of the file looking like a function body. Track comment AND
+        // directive state and skip depth counting there; directive bodies are still file-scope, so
+        // their uniforms get rewritten.
+        enum Mode { case normal, line, block, directive }
         var mode: Mode = .normal
+        var atLineStart = true
         let chars = Array(code)
         var i = 0
         while i < chars.count {
@@ -42,7 +47,10 @@ public enum CommonUniformRewriter {
             case .normal:
                 if ch == "/", next == "/" { mode = .line }
                 else if ch == "/", next == "*" { mode = .block }
+                else if atLineStart, ch == "#" { mode = .directive }
             case .line:
+                if ch == "\n" { mode = .normal }
+            case .directive:
                 if ch == "\n" { mode = .normal }
             case .block:
                 if ch == "*", next == "/" {
@@ -53,6 +61,11 @@ public enum CommonUniformRewriter {
                     continue
                 }
             }
+
+            // Track line-start (leading whitespace preserves it) so `#` is only a directive at the
+            // start of a logical line.
+            if ch == "\n" { atLineStart = true }
+            else if ch != " " && ch != "\t" { atLineStart = false }
 
             let protectedNow = brace > 0 || paren > 0
             if protectedNow != inProtected { flush(); inProtected = protectedNow }

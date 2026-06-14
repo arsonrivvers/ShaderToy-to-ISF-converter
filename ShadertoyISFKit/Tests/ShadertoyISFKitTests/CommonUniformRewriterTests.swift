@@ -50,6 +50,17 @@ final class CommonUniformRewriterTests: XCTestCase {
         XCTAssertEqual(CommonUniformRewriter.rewrite(src), expected)
     }
 
+    /// Regression for ssjyWc: a "header macro" `#define Main …{ …` has an unbalanced `{`. The brace
+    /// must NOT leak scope to the rest of the file, and the uniforms inside the directive body must
+    /// still be rewritten (a #define is file-scope, not a function body).
+    func test_headerMacroWithUnbalancedBrace_rewritesBodyAndDoesNotLeakScope() {
+        let src = "#define Main void mainImage(out vec4 Q){ R = iResolution.xy; I = iFrame;\nfloat g = iTime;"
+        let out = CommonUniformRewriter.rewrite(src)
+        XCTAssertTrue(out.contains("R = vec3(RENDERSIZE, 1.0).xy"), "uniform in #define body must rewrite; got:\n\(out)")
+        XCTAssertTrue(out.contains("I = FRAMEINDEX"))
+        XCTAssertTrue(out.contains("float g = TIME;"), "unbalanced { in #define must not protect the next line")
+    }
+
     /// Mixed: file-scope #define rewritten, helper body left alone, in one pass.
     func test_mixed_defineRewritten_helperUntouched() {
         let src = """
