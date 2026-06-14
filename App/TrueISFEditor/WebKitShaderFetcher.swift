@@ -55,18 +55,30 @@ final class WebKitShaderFetcher: NSObject {
     /// Harvests real public shader IDs from Shadertoy's results page (for the conversion-conformance
     /// corpus). Scrapes `/view/<id>` links from the rendered page — no ID-guessing. Best-effort.
     func harvestShaderIDs(sort: String = "popularity", count: Int = 60) async -> [String] {
-        guard let url = URL(string: "https://www.shadertoy.com/results?sort=\(sort)&from=0&num=\(count)") else { return [] }
+        guard let url = URL(string: "https://www.shadertoy.com/browse") else { return [] }
+        _ = sort; _ = count   // browse SPA renders a default popular grid; params not used on this path
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         defer { window.orderOut(nil) }
         webView.load(URLRequest(url: url))
         try? await waitUntilReady(timeout: 20)
-        try? await Task.sleep(nanoseconds: 2_000_000_000)   // let the results grid render
-        let js = "JSON.stringify(Array.from(new Set((document.body.innerHTML.match(/\\/view\\/[A-Za-z0-9]{6}/g)||[]).map(function(s){return s.slice(6);}))))"
-        guard let raw = (try? await webView.evaluateJavaScript(js)) as? String,
-              let data = raw.data(using: .utf8),
-              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
-        return ids
+        // SPA: the grid loads via AJAX and lazy-loads more on scroll. Scroll to the bottom each poll
+        // to accumulate `/view/<id>` links (clean shader IDs — the `id="…"` pattern matched page
+        // chrome like header/navTop/footer, so only /view/ is used).
+        var ids = Set<String>()
+        for _ in 0..<30 {
+            _ = try? await webView.evaluateJavaScript("window.scrollTo(0, document.body.scrollHeight); document.querySelectorAll('.NextPage,.morePagesButton').forEach(function(b){b.click&&b.click();});")
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            let js = "JSON.stringify(Array.from(new Set((document.body.innerHTML.match(/\\/view\\/[A-Za-z0-9]{6}/g)||[]).map(function(s){return s.slice(6);}))))"
+            if let raw = (try? await webView.evaluateJavaScript(js)) as? String,
+               let data = raw.data(using: .utf8),
+               let got = try? JSONDecoder().decode([String].self, from: data) {
+                ids.formUnion(got)
+            }
+            print("HARVEST poll: ids=\(ids.count)")
+            if ids.count >= count { break }
+        }
+        return Array(ids.prefix(count))
     }
 
     func fetchShader(id: String) async throws -> Shader {
