@@ -11,22 +11,29 @@ public enum GLSLLint {
     /// assignment (O *= / O += / …) before it is ever plainly assigned — relying on
     /// zero-initialization, which GLSL/ISF does not guarantee (common in @XorDev shaders).
     private static func uninitializedOutputAccumulator(_ code: String) -> [ConversionWarning] {
-        var warnings: [ConversionWarning] = []
+        uninitializedAccumulatorOutputs(code).map { name in
+            ConversionWarning(severity: .warning,
+                message: "Output '\(name)' is accumulated (\(name) *= / +=) before being initialized — this relies on zero-initialization, which GLSL/ISF does not guarantee. If the result is black or garbage, add '\(name) = vec4(0.0);' before the loop.",
+                context: "")
+        }
+    }
+
+    /// Names of `out vec4` outputs that are compound-assigned (`O *= / += / …`) before any plain
+    /// assignment — the auto-fixable subset handled by `OutputInitializer`. Shared so the linter and
+    /// the fixer agree on detection.
+    public static func uninitializedAccumulatorOutputs(_ code: String) -> [String] {
         let ns = code as NSString
         let sig = try! NSRegularExpression(pattern: "out\\s+vec4\\s+(\\w+)")
         var checked = Set<String>()
+        var result: [String] = []
         for m in sig.matches(in: code, range: NSRange(location: 0, length: ns.length)) {
             let name = ns.substring(with: m.range(at: 1))
             if !checked.insert(name).inserted { continue }
             guard let compoundIdx = firstMatchIndex(code, "\\b\(name)\\s*[*+/\\-]=") else { continue }
             let plainIdx = firstMatchIndex(code, "(?<![*+/<>=!\\-])\\b\(name)\\s*=(?!=)")
-            if plainIdx == nil || compoundIdx < plainIdx! {
-                warnings.append(ConversionWarning(severity: .warning,
-                    message: "Output '\(name)' is accumulated (\(name) *= / +=) before being initialized — this relies on zero-initialization, which GLSL/ISF does not guarantee. If the result is black or garbage, add '\(name) = vec4(0.0);' before the loop.",
-                    context: ""))
-            }
+            if plainIdx == nil || compoundIdx < plainIdx! { result.append(name) }
         }
-        return warnings
+        return result
     }
 
     private static func firstMatchIndex(_ code: String, _ pattern: String) -> Int? {

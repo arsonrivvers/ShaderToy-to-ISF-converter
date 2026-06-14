@@ -50,9 +50,14 @@ public enum ISFConverter {
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
-        let compat = GLSLCompat.apply(glsl.code)
+        // Auto-initialize outputs accumulated before assignment (XorDev `for(O*=i;…)` pattern) —
+        // undefined on Metal → NaN → black. Runs before lint so the now-fixed case isn't also warned.
+        let initialized = OutputInitializer.apply(glsl.code)
+        warnings.append(contentsOf: initialized.notes)
+
+        let compat = GLSLCompat.apply(initialized.code)
         warnings.append(contentsOf: compat.warnings)
-        warnings.append(contentsOf: GLSLLint.check(glsl.code))
+        warnings.append(contentsOf: GLSLLint.check(initialized.code))
 
         // Reuse the plan's ordered buffer names — the single source of truth shared with the
         // in-body sampler names — so the header PASSES TARGETs can never drift from the GLSL.
