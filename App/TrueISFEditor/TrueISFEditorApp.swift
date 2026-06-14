@@ -44,7 +44,7 @@ struct TrueISFEditorApp: App {
                     let (doc, warnings) = ISFConverter.convert(shader)
                     out = "OK: \(id) — \(shader.info.name) — \(shader.renderpass.count) pass(es), \(warnings.count) warning(s)\n\n" + doc.fileText
                 } catch {
-                    out = "ERROR (\(id)): \(error)\nlastTitle=\(fetcher.lastTitle)\nlastURL=\(fetcher.lastURL)\nbody=\(fetcher.lastBody)"
+                    out = "ERROR (\(id)): \(error)\nlastTitle=\(fetcher.lastTitle)\nlastURL=\(fetcher.lastURL)\nstatus=\(fetcher.lastResponseStatus)\nresp=\(fetcher.lastResponseBody)"
                 }
                 try? out.write(toFile: outPath, atomically: true, encoding: .utf8)
                 print("=== DEBUG FETCH ===\n\(out)\n=== END ===")
@@ -105,6 +105,24 @@ void main() {
                 print("BAD ISF  — compileValid=\(controller.compileValid) compileError=\(controller.compileError ?? "nil")")
 
                 print("=== DEBUG PREVIEW END ===")
+                exit(0)
+            }
+        }
+
+        // Headless debug affordance: `SHADERTOY_DEBUG_ISFMSL=<path-to-.fs>` compiles that ISF
+        // file through the real Metal/ISFMSLKit preview path and prints the compile result —
+        // used to verify GLSL→MSL transpile fixes (e.g. extension/polyfill handling) without UI.
+        if let isfPath = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_ISFMSL"], !isfPath.isEmpty {
+            Task { @MainActor in
+                let src = (try? String(contentsOfFile: isfPath, encoding: .utf8)) ?? ""
+                let controller = MetalPreviewController()
+                controller.load(isf: src)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                print("=== DEBUG ISFMSL ===")
+                print("path=\(isfPath)")
+                print("compileValid=\(controller.compileValid)")
+                print("compileError=\(controller.compileError ?? "nil")")
+                print("=== END ===")
                 exit(0)
             }
         }

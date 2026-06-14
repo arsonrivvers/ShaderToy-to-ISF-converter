@@ -30,6 +30,11 @@ final class WebKitShaderFetcher: NSObject {
     private(set) var lastTitle: String = "(none)"
     private(set) var lastURL: String = "(none)"
     private(set) var lastBody: String = "(none)"
+    /// Raw text returned by the in-page `/shadertoy` POST on the last fetch (the actual payload
+    /// the parser sees). Distinct from `lastBody`, which is the page chrome's innerText.
+    private(set) var lastResponseBody: String = "(none)"
+    /// HTTP status of the last in-page `/shadertoy` POST.
+    private(set) var lastResponseStatus: Int = -1
 
     override init() {
         let frame = NSRect(x: 0, y: 0, width: 480, height: 360)
@@ -123,6 +128,8 @@ final class WebKitShaderFetcher: NSObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let status = obj["status"] as? Int,
               let text = obj["body"] as? String else { throw WebFetchError.noData }
+        lastResponseStatus = status
+        lastResponseBody = text
         guard status == 200 else { throw WebFetchError.httpError(status) }
         guard !text.isEmpty else { throw WebFetchError.noData }
         return text

@@ -25,4 +25,18 @@ final class GLSLCompatTests: XCTestCase {
         let r = GLSLCompat.apply("int x = 1 << 3;")
         XCTAssertTrue(r.warnings.contains { $0.message.lowercased().contains("bit-shift") })
     }
+
+    /// Regression for N323DD: shaders using packHalf2x16/unpackHalf2x16 need the
+    /// GL_ARB_shading_language_packing extension requested, or glslang (the ISFMSLKit preview
+    /// transpiler) rejects them. Inject the directive + warn.
+    func test_packHalf_requestsExtension_andWarns() {
+        let r = GLSLCompat.apply("void main(){ uint u = packHalf2x16(vec2(0.5)); vec2 v = unpackHalf2x16(u); }")
+        XCTAssertTrue(r.code.contains("#extension GL_ARB_shading_language_packing : require"))
+        XCTAssertTrue(r.warnings.contains { $0.message.contains("GL_ARB_shading_language_packing") })
+    }
+
+    func test_noExtension_whenNoPacking() {
+        let r = GLSLCompat.apply("void main(){ gl_FragColor = vec4(1.0); }")
+        XCTAssertFalse(r.code.contains("#extension"))
+    }
 }

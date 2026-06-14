@@ -30,6 +30,18 @@ public enum SamplerRewriter {
                 return "IMG_NORM_PIXEL(\(name), \(args[1].trimmed))"
             }
         }
+
+        // Any bare `iChannelN` identifier that survives the call rewrites above is a value use —
+        // e.g. the sampler passed as a function argument (`ups(..., iChannel0, ...)`), a pattern
+        // some Shadertoy authors use to thread the channel through helper functions. Rewrite it to
+        // the bound sampler name so it isn't left as an undeclared identifier. Runs per-pass with
+        // this pass's bindings; the shared Common code (helper-function bodies whose `sampler2D
+        // iChannelN` *parameters* must stay) is never routed through SamplerRewriter, so those are
+        // untouched. Word boundaries keep `iChannel1` from matching `iChannel1img`/`iChannel10`.
+        for (n, b) in bindings {
+            out = out.replacingOccurrences(of: "\\biChannel\(n)\\b", with: b.glslName,
+                                           options: .regularExpression)
+        }
         return Result(code: out, warnings: warnings)
     }
 

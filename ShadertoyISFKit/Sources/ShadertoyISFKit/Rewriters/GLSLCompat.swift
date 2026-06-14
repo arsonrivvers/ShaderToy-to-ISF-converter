@@ -25,6 +25,17 @@ public enum GLSLCompat {
         ("trunc", "return sign(x) * floor(abs(x));"),
     ]
 
+    /// GLSL ES 3.00 bit-packing builtins. On a desktop-GL/glslang frontend (which the ISFMSLKit
+    /// preview transpiler uses) these require the `GL_ARB_shading_language_packing` extension to be
+    /// explicitly requested, or compilation fails with "required extension not requested".
+    private static let packingFuncs = [
+        "packHalf2x16", "unpackHalf2x16",
+        "packSnorm2x16", "unpackSnorm2x16",
+        "packUnorm2x16", "unpackUnorm2x16",
+        "packUnorm4x8", "unpackUnorm4x8",
+        "packSnorm4x8", "unpackSnorm4x8",
+    ]
+
     public static func apply(_ code: String) -> Result {
         var warnings: [ConversionWarning] = []
         let used = funcs.filter { callsFunction(code, $0.name) }
@@ -38,6 +49,17 @@ public enum GLSLCompat {
             let names = used.map(\.name).joined(separator: ", ")
             warnings.append(ConversionWarning(severity: .info,
                 message: "Added compatibility polyfills for GLSL-ES-3.00 functions not built into older ISF/OpenGL backends: \(names).",
+                context: ""))
+        }
+
+        // Request the packing extension if any pack/unpack builtin is used. Must be the FIRST
+        // line of the shader body (glslang requires #extension before any non-preprocessor token),
+        // so it goes ahead of any polyfill block prepended above.
+        let usesPacking = packingFuncs.contains { callsFunction(code, $0) }
+        if usesPacking {
+            out = "#extension GL_ARB_shading_language_packing : require\n" + out
+            warnings.append(ConversionWarning(severity: .info,
+                message: "Requested GL_ARB_shading_language_packing for pack/unpack builtins (packHalf2x16 etc.) — required by glslang-based ISF hosts.",
                 context: ""))
         }
 

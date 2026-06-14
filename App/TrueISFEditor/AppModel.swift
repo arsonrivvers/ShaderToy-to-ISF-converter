@@ -95,8 +95,12 @@ final class AppModel: ObservableObject {
             statusMessage = "Shadertoy returned no data. Try again in a moment, or paste the code below."
         } catch WebFetchError.challengeTimeout {
             statusMessage = "Couldn't fetch automatically (Cloudflare bot check). Paste the shader's Image-tab code below and use 'Convert pasted code'."
-        } catch is ShadertoyInternalParserError {
+        } catch ShadertoyInternalParserError.shaderNotFound {
             statusMessage = "Shader not found, or it isn't public."
+        } catch ShadertoyInternalParserError.malformed(let detail) {
+            // The shader exists and is public, but its data uses a shape this version can't parse
+            // yet. Say so honestly instead of the misleading "not found" — and let the user paste.
+            statusMessage = "This shader loaded but uses a format this version can't convert yet. Paste the Image-tab code below and use 'Convert pasted code'. (\(detail.prefix(140)))"
         } catch {
             statusMessage = "Fetch/convert failed: \(error.localizedDescription)"
         }
