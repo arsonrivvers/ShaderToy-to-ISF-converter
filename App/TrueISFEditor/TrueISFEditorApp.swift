@@ -126,6 +126,54 @@ void main() {
                 exit(0)
             }
         }
+
+        // Headless conversion-conformance harness: `SHADERTOY_DEBUG_CORPUS=<ids-file>` reads one
+        // Shadertoy ID per line, fetches+converts+transpiles each through the real ISFMSLKit path,
+        // and prints a pass/fail report bucketed by error. With `SHADERTOY_DEBUG_CORPUS_OUT=<dir>`
+        // it also writes each raw /shadertoy JSON to <dir>/<id>.json (to seed regression fixtures).
+        // This is the proactive net that replaces one-shader-at-a-time bug reports.
+        if let idsPath = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_CORPUS"], !idsPath.isEmpty {
+            let outDir = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_CORPUS_OUT"]
+            Task { @MainActor in
+                let ids = ((try? String(contentsOfFile: idsPath, encoding: .utf8)) ?? "")
+                    .split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                let fetcher = WebKitShaderFetcher()
+                let preview = MetalPreviewController()
+                var lines: [String] = []
+                for id in ids {
+                    // Bind the fetched shader via `if let` (its type is inferred — naming the type
+                    // is ambiguous because a second linked module also exports `Shader`).
+                    var line: String? = nil
+                    for _ in 0..<3 {
+                        guard let s = try? await fetcher.fetchShader(id: id) else { continue }
+                        if let outDir { try? fetcher.lastResponseBody.write(toFile: outDir + "/\(id).json", atomically: true, encoding: .utf8) }
+                        let (doc, warnings) = ISFConverter.convert(s)
+                        preview.load(isf: doc.fileText)
+                        var valid = false; var err: String? = nil
+                        for _ in 0..<400 {
+                            if preview.compileValid { valid = true; break }
+                            if let e = preview.compileError { err = e; break }
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                        }
+                        line = valid
+                            ? "\(id)\tOK\twarnings=\(warnings.count)"
+                            : "\(id)\tFAIL\t\((err ?? "timeout").split(separator: "\n").first.map(String.init) ?? "")"
+                        break
+                    }
+                    let resolved = line ?? "\(id)\tFETCH-FAIL"
+                    lines.append(resolved); print(resolved)
+                }
+                let ok = lines.filter { $0.contains("\tOK\t") }.count
+                let report = "=== CORPUS \(ok)/\(ids.count) OK ===\n" + lines.joined(separator: "\n")
+                let outPath = NSTemporaryDirectory() + "conversion-corpus-report.txt"
+                try? report.write(toFile: outPath, atomically: true, encoding: .utf8)
+                print(report)
+                print("report: \(outPath)")
+                exit(0)
+            }
+        }
     }
 
     var body: some Scene {
