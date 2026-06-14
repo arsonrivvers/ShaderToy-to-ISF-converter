@@ -62,9 +62,13 @@ public enum ISFConverter {
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
+        // Remove byte-identical duplicate helpers merged from multiple passes (multipass shaders
+        // with no Common tab copy helpers into each tab → "function already has a body").
+        let deduped = GLSLFunctionDedup.dedup(glsl.code)
+
         // Auto-initialize outputs accumulated before assignment (XorDev `for(O*=i;…)` pattern) —
         // undefined on Metal → NaN → black. Runs before lint so the now-fixed case isn't also warned.
-        let initialized = OutputInitializer.apply(glsl.code)
+        let initialized = OutputInitializer.apply(deduped)
         warnings.append(contentsOf: initialized.notes)
 
         let compat = GLSLCompat.apply(initialized.code)
