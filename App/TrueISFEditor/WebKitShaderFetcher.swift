@@ -52,6 +52,23 @@ final class WebKitShaderFetcher: NSObject {
         // Persistent (default) data store → Cloudflare clearance cookie persists across fetches.
     }
 
+    /// Harvests real public shader IDs from Shadertoy's results page (for the conversion-conformance
+    /// corpus). Scrapes `/view/<id>` links from the rendered page — no ID-guessing. Best-effort.
+    func harvestShaderIDs(sort: String = "popularity", count: Int = 60) async -> [String] {
+        guard let url = URL(string: "https://www.shadertoy.com/results?sort=\(sort)&from=0&num=\(count)") else { return [] }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { window.orderOut(nil) }
+        webView.load(URLRequest(url: url))
+        try? await waitUntilReady(timeout: 20)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)   // let the results grid render
+        let js = "JSON.stringify(Array.from(new Set((document.body.innerHTML.match(/\\/view\\/[A-Za-z0-9]{6}/g)||[]).map(function(s){return s.slice(6);}))))"
+        guard let raw = (try? await webView.evaluateJavaScript(js)) as? String,
+              let data = raw.data(using: .utf8),
+              let ids = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return ids
+    }
+
     func fetchShader(id: String) async throws -> Shader {
         guard let url = URL(string: "https://www.shadertoy.com/view/\(id)") else { throw WebFetchError.badID }
         window.title = "Fetching from Shadertoy… (if a checkbox appears, click it)"

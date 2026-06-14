@@ -135,11 +135,22 @@ void main() {
         if let idsPath = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_CORPUS"], !idsPath.isEmpty {
             let outDir = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_CORPUS_OUT"]
             Task { @MainActor in
-                let ids = ((try? String(contentsOfFile: idsPath, encoding: .utf8)) ?? "")
-                    .split(whereSeparator: \.isNewline)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty && !$0.hasPrefix("#") }
                 let fetcher = WebKitShaderFetcher()
+                // `SHADERTOY_DEBUG_CORPUS=browse:<sort>:<count>` harvests real popular IDs from the
+                // Shadertoy results page instead of reading a file (no ID-guessing).
+                var ids: [String]
+                if idsPath.hasPrefix("browse:") {
+                    let parts = idsPath.split(separator: ":").map(String.init)
+                    let sort = parts.count > 1 ? parts[1] : "popularity"
+                    let count = parts.count > 2 ? (Int(parts[2]) ?? 60) : 60
+                    ids = await fetcher.harvestShaderIDs(sort: sort, count: count)
+                    print("HARVESTED \(ids.count) ids: \(ids.joined(separator: ","))")
+                } else {
+                    ids = ((try? String(contentsOfFile: idsPath, encoding: .utf8)) ?? "")
+                        .split(whereSeparator: \.isNewline)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                }
                 let preview = MetalPreviewController()
                 var lines: [String] = []
                 for id in ids {
