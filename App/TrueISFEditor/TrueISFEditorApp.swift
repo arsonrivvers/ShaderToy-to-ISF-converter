@@ -159,6 +159,7 @@ void main() {
             }
             CommandGroup(after: .windowArrangement) {
                 CrashLogMenuButton()
+                ImportLogMenuButton()
             }
             CommandGroup(after: .sidebar) {
                 EditorCollapseMenuButton()
@@ -166,6 +167,9 @@ void main() {
         }
         Window("Crash Log", id: "crash-log") {
             CrashLogView()
+        }
+        Window("Import Log", id: "import-log") {
+            ImportLogView()
         }
         Window("ISF Remix Studio", id: "remix-studio") {
             RemixStudioView(

@@ -21,6 +21,8 @@ final class AppModel: ObservableObject {
     @Published var pastedCode: String = ""
     /// Default filename offered in the Save panel (derived from the shader name).
     @Published var suggestedFileName: String = "converted.fs"
+    /// The most recent import attempt, for the inline summary in the import sheet.
+    @Published var lastImport: ImportEvent?
 
     private lazy var webFetcher = WebKitShaderFetcher()
 
@@ -61,11 +63,30 @@ final class AppModel: ObservableObject {
     func convert() async {
         warnings = []; isfOutput = ""; importedCode = ""; statusMessage = ""
         guard let id = ShadertoyURL.shaderID(from: urlText) else {
-            statusMessage = "That doesn't look like a Shadertoy URL or ID."; return
+            statusMessage = "That doesn't look like a Shadertoy URL or ID."
+            recordImport(stage: .urlInvalid, outcome: .error, id: nil, source: .webView,
+                         httpStatus: nil, snippet: nil, warnings: 0)
+            return
         }
         isBusy = true; defer { isBusy = false }
 
         let strategy = FetchStrategy.select(hasKey: !apiKey.isEmpty)
+        let source: ImportEvent.FetchSource = strategy == .api ? .api : .webView
+        // Tracked across the do/catch so a single record point at the end captures the outcome.
+        var stage: ImportEvent.Stage = .fetched
+        var outcome: ImportEvent.Outcome = .error
+        var snippet: String? = nil
+        var warningCount = 0
+        defer {
+            // Only touch the (lazy) web fetcher on the webView path, so the API path doesn't
+            // needlessly spin up a WKWebView just to read diagnostics.
+            var httpStatus: Int? = nil
+            if source == .webView, webFetcher.lastResponseStatus != -1 {
+                httpStatus = webFetcher.lastResponseStatus
+            }
+            recordImport(stage: stage, outcome: outcome, id: id, source: source,
+                         httpStatus: httpStatus, snippet: snippet, warnings: warningCount)
+        }
         do {
             let shader: Shader
             switch strategy {
@@ -83,6 +104,7 @@ final class AppModel: ObservableObject {
             warnings = w
             suggestedFileName = Self.safeFileName(shader.info.name)
             statusMessage = w.isEmpty ? "Converted cleanly." : "Converted with \(w.count) warning(s)."
+            stage = .converted; outcome = w.isEmpty ? .success : .warning; warningCount = w.count
         } catch ShadertoyClientError.shaderNotAccessible {
             statusMessage = "API: the shader's author must enable 'public + API'. Remove your key in Settings to use the browser path instead."
         } catch ShadertoyClientError.httpError(let status) {
@@ -101,9 +123,20 @@ final class AppModel: ObservableObject {
             // The shader exists and is public, but its data uses a shape this version can't parse
             // yet. Say so honestly instead of the misleading "not found" — and let the user paste.
             statusMessage = "This shader loaded but uses a format this version can't convert yet. Paste the Image-tab code below and use 'Convert pasted code'. (\(detail.prefix(140)))"
+            snippet = String(webFetcher.lastResponseBody.prefix(300))
         } catch {
             statusMessage = "Fetch/convert failed: \(error.localizedDescription)"
         }
+    }
+
+    private func recordImport(stage: ImportEvent.Stage, outcome: ImportEvent.Outcome,
+                              id: String?, source: ImportEvent.FetchSource,
+                              httpStatus: Int?, snippet: String?, warnings: Int) {
+        let event = ImportEvent(query: urlText, shaderID: id, fetchSource: source,
+                                httpStatus: httpStatus, stage: stage, outcome: outcome,
+                                message: statusMessage, responseSnippet: snippet, warningCount: warnings)
+        lastImport = event
+        ImportLog.shared.record(event)
     }
 
     /// Friendly, actionable copy for an HTTP failure status.

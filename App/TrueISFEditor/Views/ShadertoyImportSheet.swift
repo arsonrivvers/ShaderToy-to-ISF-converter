@@ -7,6 +7,7 @@ struct ShadertoyImportSheet: View {
     var onImport: (_ isf: String, _ warnings: [ConversionWarning], _ suggestedName: String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var model = AppModel()
     @State private var showSettings = false
     @State private var showPasteHelp = false
@@ -76,6 +77,13 @@ struct ShadertoyImportSheet: View {
                 if !model.statusMessage.isEmpty {
                     Text(model.statusMessage).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(2)
+                }
+                if let last = model.lastImport {
+                    Text(last.summaryLine)
+                        .font(.caption).bold()
+                        .foregroundStyle(last.outcome == .error ? .red : .green)
+                    Button("Import Log ▸") { openWindow(id: "import-log") }
+                        .buttonStyle(.link).font(.caption)
                 }
                 Spacer()
                 Button("Convert pasted code") { Task { await model.convertPastedCode(); finishIfConverted() } }
