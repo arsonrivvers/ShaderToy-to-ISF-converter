@@ -1,9 +1,11 @@
 # TrueISFEditor
 
-Native macOS ISF editor — a working replacement for the defunct ISF Editor app. Shadertoy → ISF
-(`.fs`) conversion is the first feature; an ISF file library, live editable preview, full input UI,
-and pass inspection are planned (see `docs/superpowers/specs/`). Output targets VDMX / CoGe and any
-ISF host.
+Native macOS ISF editor — a working replacement for the defunct ISF Editor app. It **renders ISF 2.0
+via ISFMSLKit, the same Metal engine that runs under the hood in VDMX6**, so what you see here matches
+what plays back in VDMX. Features: Shadertoy → ISF (`.fs`) conversion, an ISF file library, live
+editable preview with auto-generated input controls, header authoring (Inputs/Passes), and an
+AI assistant (ShaderAssist). The authoring UI supports all ISF 2.0 input types **except
+`audio`/`audioFFT`, which are on the roadmap.** Output targets VDMX / CoGe and any ISF host.
 
 ## Build
 

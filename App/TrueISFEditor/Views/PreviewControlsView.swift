@@ -22,6 +22,7 @@ struct PreviewControlsView: View {
                     case "point2D": point2DControl(input)
                     case "color":  colorControl(input)
                     case "long":   longControl(input)
+                    case "event":  eventControl(input)
                     case "image":  EmptyView()  // image inputs are routed from the preview toolbar
                     default:
                         Text("\(input.name) (\(input.type))").font(.caption).foregroundStyle(.secondary)
@@ -123,6 +124,22 @@ struct PreviewControlsView: View {
                 Text("\(input.name): \(Int(current))").font(.caption)
             }
         }
+    }
+
+    // MARK: event (momentary trigger)
+
+    @ViewBuilder private func eventControl(_ input: ISFPreviewInput) -> some View {
+        Button {
+            // ISF `event` inputs are true for a single frame. Pulse: set true now, reset false on the
+            // next runloop tick so the engine renders one frame with the event firing.
+            coordinator.setInput(input.name, "true")
+            DispatchQueue.main.async { coordinator.setInput(input.name, "false") }
+        } label: {
+            Label(input.name, systemImage: "bolt.fill")
+        }
+        .controlSize(.small)
+        .font(.caption)
+        .help("Trigger this ISF event input")
     }
 
     // MARK: helpers

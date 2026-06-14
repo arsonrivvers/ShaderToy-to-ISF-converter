@@ -120,6 +120,13 @@ void main() {
                     .keyboardShortcut("n")
                 Button("New from Shadertoy…") { vm.requestImport = true }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
+                Menu("Open Example") {
+                    ForEach(TestPatternCatalog.all) { pattern in
+                        Button(pattern.name) {
+                            vm.loadExample(name: pattern.name, source: pattern.sourceText)
+                        }
+                    }
+                }
                 Divider()
                 RemixMenuButton()
                 Divider()

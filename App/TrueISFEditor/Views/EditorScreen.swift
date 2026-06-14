@@ -1,4 +1,5 @@
 import SwiftUI
+import ShadertoyISFKit
 
 /// The TrueISFEditor main window: library sidebar | editor + warnings | preview + controls.
 struct EditorScreen: View {
@@ -20,6 +21,16 @@ struct EditorScreen: View {
                 // Center: editor over warnings (collapsible — A1).
                 if !editorCollapsed {
                     VStack(spacing: 0) {
+                        if let reportTitle = vm.conversionReportTitle {
+                            ConversionReportPanel(
+                                title: reportTitle,
+                                summary: ConversionReportSummary.line(
+                                    source: "Shader", warnings: vm.conversionWarnings),
+                                warnings: vm.conversionWarnings,
+                                onDismiss: { vm.conversionReportTitle = nil })
+                                .padding(6)
+                            Divider()
+                        }
                         CodeEditorView(controller: vm.editor)
                             .frame(minWidth: 360)
                         Divider()

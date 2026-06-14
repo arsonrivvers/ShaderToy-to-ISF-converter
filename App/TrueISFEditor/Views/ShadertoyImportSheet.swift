@@ -9,6 +9,18 @@ struct ShadertoyImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = AppModel()
     @State private var showSettings = false
+    @State private var showPasteHelp = false
+
+    private static let multipassTemplate = """
+    // [Common]
+    // (optional) shared helper functions used by every tab
+
+    // [Buffer A]
+    // paste Shadertoy "Buffer A" tab code here
+
+    // [Image]
+    // paste Shadertoy "Image" tab code here
+    """
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -28,8 +40,32 @@ struct ShadertoyImportSheet: View {
                     .disabled(model.isBusy)
             }
 
-            Text("Fetching is best-effort (Cloudflare bot check). The reliable path is pasting the Image tab — for multipass, paste each tab under `// [Common]`, `// [Buffer A]`…`// [Image]` markers.")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Fetching is best-effort (Cloudflare bot check). The reliable path is pasting the Image tab — for multipass, use tab markers.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { showPasteHelp = true } label: { Image(systemName: "questionmark.circle") }
+                    .buttonStyle(.borderless)
+                    .help("Show the multipass paste format")
+                    .popover(isPresented: $showPasteHelp, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Multipass paste format").font(.headline)
+                            Text("Paste each Shadertoy tab under a marker line. iChannelN maps to Buffer N.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(Self.multipassTemplate)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+                            Button("Insert template") {
+                                if model.pastedCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    model.pastedCode = Self.multipassTemplate
+                                }
+                                showPasteHelp = false
+                            }
+                        }
+                        .padding(12).frame(width: 360)
+                    }
+            }
 
             TextEditor(text: $model.pastedCode)
                 .font(.system(.body, design: .monospaced))

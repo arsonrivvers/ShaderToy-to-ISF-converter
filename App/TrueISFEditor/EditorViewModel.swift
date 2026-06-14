@@ -8,6 +8,8 @@ import ShadertoyISFKit
 final class EditorViewModel: ObservableObject {
     @Published var file: ISFFile
     @Published var conversionWarnings: [ConversionWarning] = []
+    /// Post-import conversion report (shown once over the editor). nil = no report to show.
+    @Published var conversionReportTitle: String?
     @Published var statusMessage: String = ""
     /// Set by the "New from Shadertoy…" command; the editor screen presents the sheet.
     @Published var requestImport = false
@@ -111,10 +113,22 @@ final class EditorViewModel: ObservableObject {
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
         file = .untitled(source: isf)
         conversionWarnings = warnings
+        conversionReportTitle = "Imported \(suggestedName)"
         statusMessage = "Imported \(suggestedName)"
         editor.setText(isf)
         headerModel.syncFromText(isf)
         applyDiagnostics(error: preview.compileError, line: preview.compileErrorLine, valid: preview.compileValid)
+        recompile(immediate: true)
+    }
+
+    /// Open a bundled example shader as a fresh untitled document (no conversion report).
+    func loadExample(name: String, source: String) {
+        file = .untitled(source: source)
+        conversionWarnings = []
+        conversionReportTitle = nil
+        statusMessage = "Opened example: \(name)"
+        editor.setText(source)
+        headerModel.syncFromText(source)
         recompile(immediate: true)
     }
 

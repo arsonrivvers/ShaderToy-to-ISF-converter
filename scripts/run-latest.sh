@@ -19,6 +19,13 @@ LOG="${DDATA}/build.log"
 
 mkdir -p "${DDATA}" "${HOME}/Applications"
 
+# Regenerate the .xcodeproj from project.yml so newly-added source files are always picked up
+# (the .xcodeproj is gitignored/generated; a stale one silently omits new files).
+if command -v xcodegen >/dev/null 2>&1; then
+  echo "▶ Regenerating project (xcodegen)"
+  ( cd "${REPO}/App" && xcodegen generate > /dev/null )
+fi
+
 echo "▶ Building TrueISFEditor (arm64) → ${DDATA}"
 if ! xcodebuild -project "${PROJECT}" -scheme TrueISFEditor \
       -destination 'platform=macOS,arch=arm64' -derivedDataPath "${DDATA}" \
