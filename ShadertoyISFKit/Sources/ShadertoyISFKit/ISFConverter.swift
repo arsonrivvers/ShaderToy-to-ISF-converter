@@ -16,9 +16,7 @@ public enum ISFConverter {
             warnings.append(contentsOf: resolved.warnings.map {
                 ConversionWarning(severity: $0.severity, message: $0.message, context: pass.name)
             })
-            for (_, b) in resolved.bindings where b.kind != .buffer {
-                imageInputNames.insert(b.glslName)
-            }
+            var bindings = resolved.bindings
 
             // Splice `\` line-continuations first — glslang rejects them and black-screens the
             // shader; downstream rewriters and the transpiler then see clean, single-logical-line code.
@@ -35,7 +33,21 @@ public enum ISFConverter {
                     with: "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)",
                     options: .regularExpression)
             }
-            let sampled = SamplerRewriter.rewrite(code, bindings: resolved.bindings)
+
+            // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
+            // some Shadertoy shaders reference a channel the API/internal response never lists, which
+            // would otherwise leave a bare `iChannelN` / `texture(iChannelN,…)` undeclared.
+            for n in Self.referencedChannelIndices(code) where bindings[n] == nil {
+                bindings[n] = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
+                warnings.append(ConversionWarning(severity: .warning,
+                    message: "iChannel\(n) is used but the renderpass declares no input for it — added a stub image input; supply an image or verify.",
+                    context: pass.name))
+            }
+            for (_, b) in bindings where b.kind != .buffer {
+                imageInputNames.insert(b.glslName)
+            }
+
+            let sampled = SamplerRewriter.rewrite(code, bindings: bindings)
             warnings.append(contentsOf: sampled.warnings.map {
                 ConversionWarning(severity: $0.severity, message: $0.message, context: pass.name)
             })
@@ -71,5 +83,16 @@ public enum ISFConverter {
             bufferNames: bufferNames)
 
         return (ISFDocument(headerJSON: header, glslBody: compat.code), warnings)
+    }
+
+    /// Channel indices referenced as `iChannelN` anywhere in `code`.
+    private static func referencedChannelIndices(_ code: String) -> Set<Int> {
+        let ns = code as NSString
+        let re = try! NSRegularExpression(pattern: "\\biChannel(\\d+)\\b")
+        var found = Set<Int>()
+        for m in re.matches(in: code, range: NSRange(location: 0, length: ns.length)) {
+            if let n = Int(ns.substring(with: m.range(at: 1))) { found.insert(n) }
+        }
+        return found
     }
 }

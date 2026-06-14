@@ -25,6 +25,20 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(warnings.isEmpty)
     }
 
+    /// Regression for Xtf3Rn: a shader samples iChannel0 but the renderpass declares no input for
+    /// it. Without a stub the bare `texture(iChannel0,…)` is left undeclared and the shader won't
+    /// compile. The converter must auto-declare a stub image input and rewrite the call.
+    func test_convert_unboundChannel_autoStubsImageInput() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage( out vec4 O, vec2 I ){ O = texture(iChannel0, I/iResolution.xy); }",
+            name: "Unbound Channel")
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.fileText.contains("\"NAME\" : \"iChannel0img\""), "expected a stub image input")
+        XCTAssertTrue(doc.fileText.contains("IMG_NORM_PIXEL(iChannel0img"), "expected the call rewritten")
+        XCTAssertFalse(doc.fileText.contains("texture(iChannel0"), "raw undeclared call must be gone")
+        XCTAssertTrue(warnings.contains { $0.message.contains("iChannel0 is used but") })
+    }
+
     func test_convert_tanhShader_includesGuardedPolyfill() {
         let shader = ShaderFactory.singlePass(
             imageCode: "void mainImage( out vec4 O, vec2 I ){ O = tanh(vec4(1.0)); }",
