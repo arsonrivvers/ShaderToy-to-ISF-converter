@@ -10,8 +10,11 @@ public enum ISFConverter {
         var includeMouse = false
         var passBodies: [String] = []
         var usesChannelResolution = false
+        // channel index -> (pass index -> the sampler binding for that channel in that pass).
+        // Drives the Common-tab PASSINDEX dispatchers (a channel can bind a different buffer per pass).
+        var perChannelPerPass: [Int: [Int: ChannelBinding.Binding]] = [:]
 
-        for pass in plan.renderPasses {
+        for (passIndex, pass) in plan.renderPasses.enumerated() {
             let resolved = ChannelBinding.resolve(inputs: pass.inputs,
                                                   bufferOutputIDToName: plan.bufferOutputIDToName)
             warnings.append(contentsOf: resolved.warnings.map {
@@ -48,6 +51,7 @@ public enum ISFConverter {
             for (_, b) in bindings where b.kind != .buffer {
                 imageInputNames.insert(b.glslName)
             }
+            for (ch, b) in bindings { perChannelPerPass[ch, default: [:]][passIndex] = b }
 
             let sampled = SamplerRewriter.rewrite(code, bindings: bindings)
             warnings.append(contentsOf: sampled.warnings.map {
@@ -66,7 +70,28 @@ public enum ISFConverter {
             warnings.append(ConversionWarning(severity: .info,
                 message: "iChannelResolution has no ISF equivalent — mapped to vec3(RENDERSIZE, 1.0). Exact for buffer/feedback channels; for image inputs it loses the source's native size, verify if the shader scales by a channel's aspect."))
         }
-        let commonCode = CommonUniformRewriter.rewrite(splicedCommon)
+        // A channel sampled in the Common tab but bound by NO pass → stub it as an image across all
+        // passes so its dispatcher samples something real rather than returning 0.
+        for n in Self.referencedChannelIndices(splicedCommon) where perChannelPerPass[n] == nil {
+            let stub = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
+            for p in 0..<plan.renderPasses.count { perChannelPerPass[n, default: [:]][p] = stub }
+            imageInputNames.insert(stub.glslName)
+            warnings.append(ConversionWarning(severity: .warning,
+                message: "iChannel\(n) is sampled in the Common tab but no pass declares it — added a stub image input; supply an image or verify."))
+        }
+
+        // Route Common-tab `iChannelN` sampling through PASSINDEX dispatchers (Common is shared but a
+        // channel can bind a different buffer per pass). Dispatchers are prepended ahead of Common so
+        // the helpers/macros that call them are defined after.
+        let channelRewrite = CommonChannelRewriter.rewrite(
+            commonCode: splicedCommon, perChannelPerPass: perChannelPerPass,
+            passCount: plan.renderPasses.count)
+        warnings.append(contentsOf: channelRewrite.warnings)
+
+        var commonCode = CommonUniformRewriter.rewrite(channelRewrite.rewrittenCommon)
+        if !channelRewrite.dispatchers.isEmpty {
+            commonCode = channelRewrite.dispatchers + "\n\n" + commonCode
+        }
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
