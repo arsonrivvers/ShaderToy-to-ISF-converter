@@ -26,6 +26,15 @@ public enum UniformRewriter {
             in: out, range: NSRange(out.startIndex..<out.endIndex, in: out),
             withTemplate: NSRegularExpression.escapedTemplate(for: "vec3(RENDERSIZE, 1.0)"))
 
+        // iChannelTime[N] (per-channel playback time in seconds, for video/audio inputs) has no ISF
+        // equivalent — map the whole indexed access to TIME (ISF's global clock). Same index-consuming
+        // reason as iChannelResolution. A close approximation: it loses any per-channel playback offset,
+        // which almost no shader depends on.
+        let chanTime = try! NSRegularExpression(pattern: "iChannelTime\\s*\\[[^\\[\\]]*\\]")
+        out = chanTime.stringByReplacingMatches(
+            in: out, range: NSRange(out.startIndex..<out.endIndex, in: out),
+            withTemplate: NSRegularExpression.escapedTemplate(for: "TIME"))
+
         for (from, to) in rules {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: from) + "\\b"
             let regex = try! NSRegularExpression(pattern: pattern)

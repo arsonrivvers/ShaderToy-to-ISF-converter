@@ -36,4 +36,14 @@ final class UniformRewriterTests: XCTestCase {
         XCTAssertEqual(UniformRewriter.rewrite("iChannelResolution[1] + iResolution.xy"),
                        "vec3(RENDERSIZE, 1.0) + vec3(RENDERSIZE, 1.0).xy")
     }
+
+    /// iChannelTime[N] (per-channel playback time, seconds) has no ISF equivalent — map the whole
+    /// indexed access to TIME (ISF's global clock). Like iChannelResolution, the index must be
+    /// consumed; mapping the bare word would leave a dangling `[N]` indexing a float.
+    func test_iChannelTime_constantIndex() {
+        XCTAssertEqual(UniformRewriter.rewrite("float t = iChannelTime[0];"), "float t = TIME;")
+    }
+    func test_iChannelTime_variableIndexAndWhitespace() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelTime [ ch ]"), "TIME")
+    }
 }
