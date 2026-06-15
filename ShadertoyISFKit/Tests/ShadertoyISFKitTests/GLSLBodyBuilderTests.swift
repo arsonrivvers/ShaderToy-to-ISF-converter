@@ -19,6 +19,18 @@ final class GLSLBodyBuilderTests: XCTestCase {
         XCTAssertEqual(r.code.components(separatedBy: "#define PI").count - 1, 1)
     }
 
+    /// flcSzr-class: two passes define `Po(int,int)` with DIFFERENT bodies. After merge there must be
+    /// no duplicate top-level `Po(` definition (would be "function already has a body"); each pass's
+    /// helper is namespaced and its call site follows.
+    func test_collidingHelperAcrossPasses_isNamespaced() {
+        let pass0 = "vec4 Po(int x, int y){ return vec4(float(x)); }\nvoid mainImage(out vec4 o, in vec2 f){ o = Po(1,2); }"
+        let pass1 = "vec4 Po(int x, int y){ return vec4(float(y)); }\nvoid mainImage(out vec4 o, in vec2 f){ o = Po(3,4); }"
+        let r = GLSLBodyBuilder.build(passBodies: [pass0, pass1], commonCode: "")
+        XCTAssertEqual(r.code.components(separatedBy: " Po(int x, int y)").count - 1, 0)  // no bare collision
+        XCTAssertTrue(r.code.contains("vec4 p0_Po(int x, int y)"))
+        XCTAssertTrue(r.code.contains("vec4 p1_Po(int x, int y)"))
+    }
+
     func test_vectorTernary_warns() {
         let r = GLSLBodyBuilder.build(passBodies: ["void mainImage(out vec4 c, in vec2 f){ vec2 q = a>0.0 ? b : d; c=vec4(q,0,1);}"],
                                       commonCode: "")

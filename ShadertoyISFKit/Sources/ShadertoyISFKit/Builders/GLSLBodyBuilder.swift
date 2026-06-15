@@ -8,7 +8,11 @@ public enum GLSLBodyBuilder {
         var functions: [String] = []
         var dispatch: [String] = []
 
-        for (idx, body) in passBodies.enumerated() {
+        // Rename helpers that collide across passes with differing bodies (Shadertoy compiles passes
+        // separately; the merge into one file would otherwise hit "function already has a body").
+        let namespaced = GLSLPassNamespace.namespace(passBodies)
+
+        for (idx, body) in namespaced.enumerated() {
             let fnName = "pass\(idx)_mainImage"
             functions.append(renameMainImage(body, to: fnName))
             if containsVectorTernary(body) {
