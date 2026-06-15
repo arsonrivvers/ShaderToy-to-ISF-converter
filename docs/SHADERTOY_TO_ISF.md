@@ -102,7 +102,8 @@ Debug hooks (set on the built app binary): `SHADERTOY_DEBUG_FETCH=<id>` (fetch+c
 `SHADERTOY_DEBUG_CORPUS=<ids-file|browse:popular:N>` (batch report).
 
 ### Conformance baseline
-- Curated 78-shader corpus: **54/78 (69%)** before `CommonChannelRewriter` → **57/78 (73%)** after (zero regressions). The Common-tab `iChannelN`-undeclared error is eliminated for 9 of 11; 6 of those then reveal a deeper pre-existing layer (header-macro `mainImage`, see remaining gap #1), and 2 are the bare-identifier case.
+- Curated 78-shader corpus: **54/78 (69%)** → **57/78** (`CommonChannelRewriter`) → **~61/78 (78%)** (`HeaderMacroExpander`), zero regressions. `iChannelN`-undeclared eliminated for 9 of 11 (2 are bare-identifier); header-macro `mainImage` fixed for 4 more.
+- NOTE: the WebKit fetch in the corpus harness is **flaky run-to-run** — a few IDs intermittently `FETCH-FAIL` (network, not conversion). Always re-run the fetch-failures before trusting a headline count; the real OK count excludes them.
 - Popular-plateau corpus: ~10/12 (the 2 fails are deferred `ssjyWc`/`wXdfzj`-class).
 
 ## Folding into the `isf-shader-development` skill

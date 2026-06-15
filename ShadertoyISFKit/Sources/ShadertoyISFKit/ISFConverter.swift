@@ -92,7 +92,12 @@ public enum ISFConverter {
         if !channelRewrite.dispatchers.isEmpty {
             commonCode = channelRewrite.dispatchers + "\n\n" + commonCode
         }
-        let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
+
+        // Expand any Common "header macro" that hides the mainImage signature (`#define Main void
+        // mainImage(…)`) into the pass bodies, so GLSLBodyBuilder's per-pass mainImage rename can make
+        // each unique (otherwise every pass expands to a duplicate `void mainImage`).
+        let expanded = HeaderMacroExpander.expand(commonCode: commonCode, passBodies: passBodies)
+        let glsl = GLSLBodyBuilder.build(passBodies: expanded.passBodies, commonCode: expanded.commonCode)
         warnings.append(contentsOf: glsl.warnings)
 
         // Remove byte-identical duplicate helpers merged from multiple passes (multipass shaders
