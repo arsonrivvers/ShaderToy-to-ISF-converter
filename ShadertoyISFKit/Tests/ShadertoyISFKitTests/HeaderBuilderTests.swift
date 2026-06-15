@@ -32,6 +32,16 @@ final class HeaderBuilderTests: XCTestCase {
         XCTAssertEqual(def, [0.5, 0.5])
     }
 
+    func test_audioInputs_emitAudioFFTandAudioTypes() throws {
+        let json = HeaderBuilder.build(description: "d", credit: "c",
+            imageInputNames: [], includeMouse: false, bufferNames: [],
+            audioFFTNames: ["iChannel0fft"], audioWaveNames: ["iChannel0wave"])
+        let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+        let inputs = obj["INPUTS"] as! [[String: Any]]
+        XCTAssertTrue(inputs.contains { $0["NAME"] as? String == "iChannel0fft" && $0["TYPE"] as? String == "audioFFT" })
+        XCTAssertTrue(inputs.contains { $0["NAME"] as? String == "iChannel0wave" && $0["TYPE"] as? String == "audio" })
+    }
+
     func test_buffers_producePersistentFloatPasses_plusFinalEmpty() throws {
         let json = HeaderBuilder.build(description: "d", credit: "c",
             imageInputNames: [], includeMouse: false, bufferNames: ["bufA", "bufB"])

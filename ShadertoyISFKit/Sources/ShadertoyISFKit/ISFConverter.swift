@@ -7,6 +7,8 @@ public enum ISFConverter {
         warnings.append(contentsOf: plan.warnings)
 
         var imageInputNames: Set<String> = []
+        var audioFFTNames: Set<String> = []
+        var audioWaveNames: Set<String> = []
         var includeMouse = false
         var passBodies: [String] = []
         var usesChannelResolution = false
@@ -48,8 +50,14 @@ public enum ISFConverter {
                     message: "iChannel\(n) is used but the renderpass declares no input for it — added a stub image input; supply an image or verify.",
                     context: pass.name))
             }
-            for (_, b) in bindings where b.kind != .buffer {
-                imageInputNames.insert(b.glslName)
+            for (_, b) in bindings {
+                switch b.kind {
+                case .buffer: break
+                case .audio:
+                    audioFFTNames.insert(b.glslName)
+                    if let wave = b.auxName { audioWaveNames.insert(wave) }
+                default: imageInputNames.insert(b.glslName)
+                }
             }
             for (ch, b) in bindings { perChannelPerPass[ch, default: [:]][passIndex] = b }
 
@@ -122,7 +130,9 @@ public enum ISFConverter {
             credit: "Converted from Shadertoy \(shader.info.id) by \(shader.info.username ?? "unknown")",
             imageInputNames: imageInputNames.sorted(),
             includeMouse: includeMouse,
-            bufferNames: bufferNames)
+            bufferNames: bufferNames,
+            audioFFTNames: audioFFTNames.sorted(),
+            audioWaveNames: audioWaveNames.sorted())
 
         return (ISFDocument(headerJSON: header, glslBody: compat.code), warnings)
     }

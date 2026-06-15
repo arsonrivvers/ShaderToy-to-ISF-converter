@@ -14,7 +14,7 @@ public enum SamplerRewriter {
             warnings.append(ConversionWarning(severity: .info,
                 message: "textureLod LOD argument dropped (\(args[2].trimmed)); ISF has no per-sample LOD.",
                 context: ""))
-            return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
+            return normSample(args[1], b)
         }
 
         // texelFetch(iChannelN, COORD, LOD) -> IMG_PIXEL(name, vec2(COORD))
@@ -27,7 +27,7 @@ public enum SamplerRewriter {
         for fn in ["texture2D", "texture"] {
             out = replaceCall(in: out, fn: fn, arity: 2) { args in
                 guard let b = binding(forChannelArg: args[0], bindings: bindings) else { return nil }
-                return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
+                return normSample(args[1], b)
             }
         }
 
@@ -40,7 +40,7 @@ public enum SamplerRewriter {
                 warnings.append(ConversionWarning(severity: .info,
                     message: "texture() bias argument dropped (\(args[2].trimmed)); ISF has no per-sample bias.",
                     context: ""))
-                return "IMG_NORM_PIXEL(\(b.glslName), \(coord(args[1], b)))"
+                return normSample(args[1], b)
             }
         }
 
@@ -75,6 +75,20 @@ public enum SamplerRewriter {
     /// GLSLCompat when present). All other (2D) channels pass the coordinate through unchanged.
     private static func coord(_ raw: String, _ b: ChannelBinding.Binding) -> String {
         b.kind == .cubemap ? "_dirToEquirect(\(raw.trimmed))" : raw.trimmed
+    }
+
+    /// A normalized (`IMG_NORM_PIXEL`) sample of `b` at `rawCoord`. Audio channels read FFT below the
+    /// halfway row and waveform above it (Shadertoy's 512×2 layout); ISF splits these into two
+    /// samplers, so select between them by the read's y at runtime with `step` (a vector ternary is
+    /// unreliable on Metal). Cubemap projects via `_dirToEquirect`; everything else samples directly.
+    private static func normSample(_ rawCoord: String, _ b: ChannelBinding.Binding) -> String {
+        let c = rawCoord.trimmed
+        if b.kind == .audio, let wave = b.auxName {
+            let fftS  = "IMG_NORM_PIXEL(\(b.glslName), vec2((\(c)).x, 0.5))"
+            let waveS = "IMG_NORM_PIXEL(\(wave), vec2((\(c)).x, 0.5))"
+            return "mix(\(fftS), \(waveS), step(0.5, (\(c)).y))"
+        }
+        return "IMG_NORM_PIXEL(\(b.glslName), \(coord(rawCoord, b)))"
     }
 
     /// Replaces `fn(arg0, arg1, ...)` with `transform(args)`, respecting nested parens.

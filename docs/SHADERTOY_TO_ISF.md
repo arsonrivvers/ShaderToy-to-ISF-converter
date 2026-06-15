@@ -62,7 +62,7 @@ Shared parsing utilities: `GLSLFunctionScanner` (function defs), `GLSLCallParser
 | Buffer A–D | ISF `PASSES` targets bufA… (PERSISTENT+FLOAT) |
 | `iChannelN` in Common (sampling) | `_chN_texel`/`_chN_tex` PASSINDEX dispatcher |
 | webcam / video / keyboard / volume | stubbed as a static `image` input (+warning) |
-| music / mic / musicstream (audio) | **planned**: ISF `audioFFT` + `audio` (row y<0.5 = FFT, y≥0.5 = waveform) |
+| music / mic / musicstream (audio) | ISF `audioFFT` + `audio` (two samplers). A read `texture(iChannelN, C)` → `mix(IMG_NORM_PIXEL(fft, vec2(C.x,.5)), IMG_NORM_PIXEL(wave, vec2(C.x,.5)), step(0.5, C.y))` — FFT below the halfway row, waveform above (Shadertoy's 512×2 layout). Host must supply audio. |
 
 ### Gotchas that black-screen on Metal/ISF (not just Shadertoy quirks)
 - **No ternary on vector types** (`cond ? vecA : vecB`) — unreliable on Metal; use `if/else` or `mix`+`step`.
@@ -78,7 +78,8 @@ internal-endpoint `type` vs REST `ctype`; `\` line-continuations; `packHalf2x16`
 auto-stub; uninitialized output accumulators; cubemap→equirect; Common-tab parameterized uniforms;
 `#define` header-macro brace-scope; byte-identical cross-pass helper dedup; **per-pass same-name
 different-body helper namespacing** (`GLSLPassNamespace`); **`iChannelResolution`/`iChannelTime`**;
-**Common-tab `iChannelN` sampling via PASSINDEX dispatchers** (`CommonChannelRewriter`).
+**Common-tab `iChannelN` sampling via PASSINDEX dispatchers** (`CommonChannelRewriter`); **Common
+header-macro `mainImage`** (`HeaderMacroExpander`); **audio inputs** (music/mic → ISF `audioFFT`+`audio`).
 
 ### Remaining (from the 78-shader discovery corpus — ranked by impact)
 1. **Header-macro `mainImage` + `function already has a body` / `redefinition`** (now the dominant blocker) — a Common `#define Main void mainImage(…)` hides the entry-point signature behind a macro, so the per-pass `mainImage` rename can't see it → every pass expands to a duplicate `void mainImage`. Fix: expand the header macro into pass bodies before renaming. Also covers non-function redefs (`palAppleII` const array) and Common helpers colliding (`textb`).

@@ -5,10 +5,20 @@ public enum HeaderBuilder {
                              credit: String,
                              imageInputNames: [String],
                              includeMouse: Bool,
-                             bufferNames: [String]) -> String {
+                             bufferNames: [String],
+                             audioFFTNames: [String] = [],
+                             audioWaveNames: [String] = []) -> String {
         var inputs: [[String: Any]] = []
         for name in imageInputNames {
             inputs.append(["NAME": name, "TYPE": "image"])
+        }
+        // ISF native audio: an FFT-spectrum sampler and a raw-waveform sampler, each a 1D-ish texture
+        // sampled like an image. MAX is the host's max bins/samples hint.
+        for name in audioFFTNames {
+            inputs.append(["NAME": name, "TYPE": "audioFFT", "MAX": 256])
+        }
+        for name in audioWaveNames {
+            inputs.append(["NAME": name, "TYPE": "audio", "MAX": 256])
         }
         if includeMouse {
             inputs.append([

@@ -11,6 +11,19 @@ final class SamplerRewriterTests: XCTestCase {
         let r = SamplerRewriter.rewrite("texture(iChannel0, uv)", bindings: binding())
         XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")
     }
+
+    /// Audio channel: Shadertoy packs FFT (row y<0.5) + waveform (row y≥0.5) into one texture; ISF
+    /// splits them. Route the read to the FFT or waveform sampler by the read's y coordinate at
+    /// runtime via step (not a vector ternary — Metal-unsafe).
+    func test_audioChannel_routesFftWaveByYCoordinate() {
+        let bindings: [Int: ChannelBinding.Binding] = [
+            0: .init(glslName: "iChannel0fft", kind: .audio, auxName: "iChannel0wave")]
+        let r = SamplerRewriter.rewrite("texture(iChannel0, vec2(f, 0.25))", bindings: bindings)
+        XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(iChannel0fft, vec2((vec2(f, 0.25)).x, 0.5))"), r.code)
+        XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(iChannel0wave, vec2((vec2(f, 0.25)).x, 0.5))"), r.code)
+        XCTAssertTrue(r.code.contains("step(0.5, (vec2(f, 0.25)).y)"), r.code)
+        XCTAssertTrue(r.code.contains("mix("), r.code)
+    }
     func test_texture2D_toNormPixel() {
         let r = SamplerRewriter.rewrite("texture2D(iChannel1, uv)", bindings: binding())
         XCTAssertEqual(r.code, "IMG_NORM_PIXEL(iChannel1img, uv)")
