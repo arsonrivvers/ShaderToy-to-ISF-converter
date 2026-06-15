@@ -112,9 +112,13 @@ public enum ISFConverter {
         // with no Common tab copy helpers into each tab → "function already has a body").
         let deduped = GLSLFunctionDedup.dedup(glsl.code)
 
+        // Rename user identifiers that are MSL/C++ reserved words (`char`, `coord`, …) — legal in
+        // Shadertoy's GLSL ES but rejected by the Metal transpiler the preview compiles against.
+        let reserved = GLSLReservedIdentifierRewriter.rewrite(deduped)
+
         // Auto-initialize outputs accumulated before assignment (XorDev `for(O*=i;…)` pattern) —
         // undefined on Metal → NaN → black. Runs before lint so the now-fixed case isn't also warned.
-        let initialized = OutputInitializer.apply(deduped)
+        let initialized = OutputInitializer.apply(reserved)
         warnings.append(contentsOf: initialized.notes)
 
         let compat = GLSLCompat.apply(initialized.code)
