@@ -1,19 +1,26 @@
 import Foundation
 
-/// Removes byte-identical duplicate top-level function definitions.
+/// Removes byte-identical duplicate top-level definitions — functions AND file-scope globals.
 ///
-/// Why: a multipass Shadertoy shader with no Common tab often copies the same helper into each tab.
-/// Shadertoy compiles passes separately, so that's fine there — but the converter merges every pass
-/// into one GLSL file (PASSINDEX dispatch), so the duplicated helper becomes a redeclaration
-/// ("ERR: 'hash' : function already has a body"). Removing an exact-duplicate definition is
-/// semantically safe; definitions that share a name but differ in body are LEFT alone (the conflict
-/// stays visible rather than silently dropping one).
+/// Why: a multipass Shadertoy shader with no Common tab often copies the same helper (or the same
+/// top-level constant / palette array) into each tab. Shadertoy compiles passes separately, so that's
+/// fine there — but the converter merges every pass into one GLSL file (PASSINDEX dispatch), so the
+/// duplicate becomes a redeclaration ("ERR: 'hash' : function already has a body" /
+/// "'palAppleII' : redeclaration of array with size"). Removing an exact-duplicate definition is
+/// semantically safe — and keeping ONE shared file-scope copy is what lets a pass that merely
+/// references it (without redefining) still resolve. Definitions that share a name but differ in body
+/// are LEFT alone (the conflict stays visible; GLSLPassNamespace renames those per-pass instead).
 public enum GLSLFunctionDedup {
     public static func dedup(_ code: String) -> String {
         let s = code as NSString
         var seen = Set<String>()
         var removals: [(start: Int, end: Int)] = []   // UTF-16 ranges to delete
-        for d in GLSLFunctionScanner.defs(in: code) {
+        // Functions and globals interleave in source — walk them together in source order so the
+        // FIRST occurrence of each is the one kept. Their keys never collide (different syntax).
+        let defs = (GLSLFunctionScanner.defs(in: code).map { (start: $0.start, end: $0.end) }
+                    + GLSLGlobalScanner.defs(in: code).map { (start: $0.start, end: $0.end) })
+            .sorted { $0.start < $1.start }
+        for d in defs {
             let block = s.substring(with: NSRange(location: d.start, length: d.end - d.start))
             let key = GLSLFunctionScanner.normalize(block)
             if seen.contains(key) { removals.append((d.start, d.end)) }

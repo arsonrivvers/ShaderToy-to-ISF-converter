@@ -10,8 +10,15 @@ enum GLSLFunctionScanner {
 
     /// Function-definition header at line start: <return type(+qualifiers)> <name>(<params>) {.
     /// `[^;{}]*` params + requiring two+ words before `(` excludes control flow (`if (`, `for (`).
+    /// `\)[ \t\r\n]*\{` allows the opening brace on its own line (Allman style — WdtXzs, t3ycDR);
+    /// the params class already spans newlines, so multi-line signatures are covered too.
     private static let headerPattern =
-        "(?m)^[ \\t]*[A-Za-z_]\\w*(?:[ \\t]+[A-Za-z_]\\w*)*[ \\t]+[A-Za-z_]\\w*[ \\t]*\\([^;{}]*\\)[ \\t]*\\{"
+        "(?m)^[ \\t]*[A-Za-z_]\\w*(?:[ \\t]+[A-Za-z_]\\w*)*[ \\t]+[A-Za-z_]\\w*[ \\t]*\\([^;{}]*\\)[ \\t\\r\\n]*\\{"
+
+    /// GLSL reserved control-flow keywords. A two-word construct like `else if (...)` would otherwise
+    /// be mis-read as a function whose name is `if` — and (post Allman-brace support) renaming or
+    /// deduping that "function" would corrupt the keyword. None are valid function names.
+    private static let controlKeywords: Set<String> = ["if", "for", "while", "switch", "do", "else", "return"]
 
     /// All top-level function definitions in `code`, in source order.
     static func defs(in code: String) -> [Def] {
@@ -23,6 +30,7 @@ enum GLSLFunctionScanner {
             guard let end = braceMatchEnd(s, openBrace: bracePos) else { continue }
             let header = s.substring(with: m.range)
             guard let name = lastIdentifierBeforeParen(header) else { continue }
+            if controlKeywords.contains(name) { continue }   // `else if (...)` etc. — not a function
             out.append(Def(name: name, start: m.range.location, end: end))
         }
         return out

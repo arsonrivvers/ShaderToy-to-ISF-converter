@@ -71,4 +71,83 @@ final class GLSLPassNamespaceTests: XCTestCase {
         XCTAssertTrue(out[0].contains("vec4 Point = p0_Po(1)"))   // `Point` untouched, `Po(` renamed
         XCTAssertTrue(out[0].contains("vec4 Point ="))
     }
+
+    /// Regression for tXlfzr / 7l3yz4: `map` differs across passes (so it's namespaced), and
+    /// `calcNormal` is BYTE-IDENTICAL across passes but CALLS `map`. Once `map` is renamed per-pass,
+    /// the two calcNormal copies diverge — so calcNormal must ALSO be namespaced (transitive), else
+    /// dedup can no longer collapse the now-differing duplicates → "function already has a body".
+    func test_namespacesIdenticalHelperThatCallsNamespacedCallee() {
+        let p0 = "float map(vec3 p){ return p.x; }\nvec3 calcNormal(vec3 p){ return vec3(map(p)); }\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(calcNormal(vec3(f,0.0)),1.0); }"
+        let p1 = "float map(vec3 p){ return p.y; }\nvec3 calcNormal(vec3 p){ return vec3(map(p)); }\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(calcNormal(vec3(f,0.0)),1.0); }"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertTrue(out[0].contains("float p0_map"))         // seed: differing body
+        XCTAssertTrue(out[1].contains("float p1_map"))
+        XCTAssertTrue(out[0].contains("vec3 p0_calcNormal"))   // transitive: identical but calls map
+        XCTAssertTrue(out[1].contains("vec3 p1_calcNormal"))
+        XCTAssertNil(out[0].range(of: #"\bcalcNormal\("#, options: .regularExpression))
+        XCTAssertNil(out[1].range(of: #"\bmap\("#, options: .regularExpression))
+    }
+
+    /// The transitive rule must NOT over-reach: an identical helper that does NOT reference any
+    /// namespaced name stays untouched (dedup collapses it) even when OTHER names are namespaced.
+    func test_leavesIdenticalHelperAloneWhenItCallsNoNamespacedCallee() {
+        let p0 = "vec4 Po(int x){ return vec4(0.0); }\nfloat hash(float n){ return fract(n); }\nvoid mainImage(out vec4 o, in vec2 f){ o = Po(1)*hash(f.x); }"
+        let p1 = "vec4 Po(int x){ return vec4(1.0); }\nfloat hash(float n){ return fract(n); }\nvoid mainImage(out vec4 o, in vec2 f){ o = Po(2)*hash(f.x); }"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertTrue(out[0].contains("p0_Po"))
+        XCTAssertTrue(out[1].contains("p1_Po"))
+        XCTAssertTrue(out[0].contains("float hash(float n)"))   // untouched — dedup's job
+        XCTAssertFalse(out[0].contains("p0_hash"))
+    }
+
+    /// Regression for 4tfBRB / wXffDH: a top-level GLOBAL (`float f = 0.025;`) defined with a DIFFERENT
+    /// value per pass collides at file scope after the merge ("redefinition"). Namespace it per-pass —
+    /// definition AND every reference in the same pass — exactly like a colliding function.
+    func test_namespacesDistinctGlobalAcrossPasses() {
+        let p0 = "float f = 0.025;\nvoid mainImage(out vec4 o, in vec2 fc){ o = vec4(f); }"
+        let p1 = "float f = 0.035;\nvoid mainImage(out vec4 o, in vec2 fc){ o = vec4(f); }"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertTrue(out[0].contains("float p0_f = 0.025;"))
+        XCTAssertTrue(out[1].contains("float p1_f = 0.035;"))
+        XCTAssertTrue(out[0].contains("vec4(p0_f)"))
+        XCTAssertTrue(out[1].contains("vec4(p1_f)"))
+    }
+
+    /// `const` vs non-`const` counts as a differing body (wXffDH's `pi`) — still namespaced per pass.
+    func test_namespacesGlobalDifferingOnlyInConstQualifier() {
+        let p0 = "float pi = 3.14159;\nvoid mainImage(out vec4 o, in vec2 fc){ o = vec4(pi); }"
+        let p1 = "const float pi = 3.14159;\nvoid mainImage(out vec4 o, in vec2 fc){ o = vec4(pi); }"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertTrue(out[0].contains("float p0_pi = 3.14159;"))
+        XCTAssertTrue(out[1].contains("const float p1_pi = 3.14159;"))
+    }
+
+    /// An IDENTICAL global across passes is left untouched — GLSLFunctionDedup keeps one shared
+    /// file-scope copy (namespacing it would break passes that reference it without redefining it).
+    func test_leavesIdenticalGlobalAloneForDedup() {
+        let p = "const float TAU = 6.2831;\nvoid mainImage(out vec4 o, in vec2 fc){ o = vec4(TAU); }"
+        let out = GLSLPassNamespace.namespace([p, p])
+        XCTAssertEqual(out, [p, p])
+    }
+
+    /// A LOCAL variable (inside a function body, depth > 0) must never be treated as a top-level
+    /// global — even with the same name and a differing initializer across passes.
+    func test_doesNotNamespaceLocalVariable() {
+        let p0 = "void mainImage(out vec4 o, in vec2 fc){ float f = 0.025; o = vec4(f); }"
+        let p1 = "void mainImage(out vec4 o, in vec2 fc){ float f = 0.035; o = vec4(f); }"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertEqual(out, [p0, p1])
+    }
+
+    /// `else if (...)` has two words before `(`, so the header regex can mis-read it as a function
+    /// named `if` — and with Allman braces (`{` on the next line) the misread is live. Control
+    /// keywords are never function names: the scanner must exclude them so `if` is NEVER renamed.
+    func test_doesNotNamespaceElseIfKeyword() {
+        let p0 = "void mainImage(out vec4 o, in vec2 fc)\n{\n    if (fc.x > 0.0)\n    {\n        o = vec4(1.0);\n    }\n    else if (fc.y > 0.0)\n    {\n        o = vec4(2.0);\n    }\n}"
+        let p1 = "void mainImage(out vec4 o, in vec2 fc)\n{\n    if (fc.x > 0.0)\n    {\n        o = vec4(3.0);\n    }\n    else if (fc.y > 0.0)\n    {\n        o = vec4(4.0);\n    }\n}"
+        let out = GLSLPassNamespace.namespace([p0, p1])
+        XCTAssertFalse(out[0].contains("p0_if"))
+        XCTAssertFalse(out[1].contains("p1_if"))
+        XCTAssertFalse(out[0].contains("else p0_if"))
+    }
 }
