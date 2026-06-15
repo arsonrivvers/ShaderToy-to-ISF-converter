@@ -61,6 +61,14 @@ final class CommonUniformRewriterTests: XCTestCase {
         XCTAssertTrue(out.contains("float g = TIME;"), "unbalanced { in #define must not protect the next line")
     }
 
+    /// Regression for mslGRX: a Common `#define Res iChannelResolution[0]` left `iChannelResolution`
+    /// undeclared when `Res` expanded at pass scope. The file-scope #define must map the whole indexed
+    /// access to vec3(RENDERSIZE, 1.0).
+    func test_iChannelResolutionDefine_rewritten() {
+        let r = CommonUniformRewriter.rewrite("#define Res iChannelResolution[0]\n")
+        XCTAssertEqual(r, "#define Res vec3(RENDERSIZE, 1.0)\n")
+    }
+
     /// Mixed: file-scope #define rewritten, helper body left alone, in one pass.
     func test_mixed_defineRewritten_helperUntouched() {
         let src = """

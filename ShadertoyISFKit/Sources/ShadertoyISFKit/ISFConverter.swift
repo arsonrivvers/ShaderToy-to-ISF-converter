@@ -9,6 +9,7 @@ public enum ISFConverter {
         var imageInputNames: Set<String> = []
         var includeMouse = false
         var passBodies: [String] = []
+        var usesChannelResolution = false
 
         for pass in plan.renderPasses {
             let resolved = ChannelBinding.resolve(inputs: pass.inputs,
@@ -22,6 +23,7 @@ public enum ISFConverter {
             // shader; downstream rewriters and the transpiler then see clean, single-logical-line code.
             var code = GLSLLineContinuation.splice(pass.code)
             if code.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
+            if code.contains("iChannelResolution") { usesChannelResolution = true }
 
             code = UniformRewriter.rewrite(code)
             if includeMouse {
@@ -58,7 +60,13 @@ public enum ISFConverter {
         // (e.g. `#define res iResolution.xy`) while leaving helper-function parameters/bodies alone —
         // some shaders thread the uniforms through helpers as parameters, which the per-pass
         // whole-string rewriter would corrupt.
-        let commonCode = CommonUniformRewriter.rewrite(GLSLLineContinuation.splice(plan.commonCode))
+        let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
+        if splicedCommon.contains("iChannelResolution") { usesChannelResolution = true }
+        if usesChannelResolution {
+            warnings.append(ConversionWarning(severity: .info,
+                message: "iChannelResolution has no ISF equivalent — mapped to vec3(RENDERSIZE, 1.0). Exact for buffer/feedback channels; for image inputs it loses the source's native size, verify if the shader scales by a channel's aspect."))
+        }
+        let commonCode = CommonUniformRewriter.rewrite(splicedCommon)
         let glsl = GLSLBodyBuilder.build(passBodies: passBodies, commonCode: commonCode)
         warnings.append(contentsOf: glsl.warnings)
 

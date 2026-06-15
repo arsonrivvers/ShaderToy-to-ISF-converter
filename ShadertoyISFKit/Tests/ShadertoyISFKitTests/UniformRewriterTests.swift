@@ -19,4 +19,21 @@ final class UniformRewriterTests: XCTestCase {
     func test_wordBoundary_doesNotTouchSubstrings() {
         XCTAssertEqual(UniformRewriter.rewrite("miTime myiFrame"), "miTime myiFrame")
     }
+
+    /// iChannelResolution[N] has no ISF equivalent (ISF has no per-channel resolution uniform).
+    /// Map the whole indexed access — index included — to vec3(RENDERSIZE, 1.0); mapping the bare
+    /// word would leave a dangling `[N]` that mis-indexes the constructor. Exact for buffer channels
+    /// (ISF buffers are RENDERSIZE), approximate for image inputs.
+    func test_iChannelResolution_constantIndex() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelResolution[0].xy"),
+                       "vec3(RENDERSIZE, 1.0).xy")
+    }
+    func test_iChannelResolution_variableIndexAndWhitespace() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelResolution [ i ].x"),
+                       "vec3(RENDERSIZE, 1.0).x")
+    }
+    func test_iChannelResolution_doesNotClobberPlainIResolution() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelResolution[1] + iResolution.xy"),
+                       "vec3(RENDERSIZE, 1.0) + vec3(RENDERSIZE, 1.0).xy")
+    }
 }
