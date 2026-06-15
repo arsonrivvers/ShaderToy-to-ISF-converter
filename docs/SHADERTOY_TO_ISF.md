@@ -79,14 +79,20 @@ auto-stub; uninitialized output accumulators; cubemap→equirect; Common-tab par
 `#define` header-macro brace-scope; byte-identical cross-pass helper dedup; **per-pass same-name
 different-body helper namespacing** (`GLSLPassNamespace`); **`iChannelResolution`/`iChannelTime`**;
 **Common-tab `iChannelN` sampling via PASSINDEX dispatchers** (`CommonChannelRewriter`); **Common
-header-macro `mainImage`** (`HeaderMacroExpander`); **audio inputs** (music/mic → ISF `audioFFT`+`audio`).
+header-macro `mainImage`** (`HeaderMacroExpander`); **audio inputs** (music/mic → ISF `audioFFT`+`audio`);
+**Allman-brace / multi-line / array-param function-header detection** (`GLSLFunctionScanner` — `)` then
+newline `{`; excludes `else if`-style control keywords); **transitive helper namespacing** (an identical
+helper that calls a per-pass-differing callee, e.g. `calcNormal`→`map`, is namespaced too so dedup can't
+strand the now-diverged copies); **file-scope global / const / array collisions** (`GLSLGlobalScanner` +
+`GLSLPassNamespace`/`GLSLFunctionDedup` — distinct-value globals like per-pass `float f` namespaced,
+byte-identical ones like `palAppleII` deduped to one shared copy); **MSL-reserved user identifiers**
+(`GLSLReservedIdentifierRewriter` — `char`/`coord`/C++ keywords renamed; legal GLSL, rejected by Metal).
 
 ### Remaining (from the 78-shader discovery corpus — ranked by impact)
-1. **Header-macro `mainImage` + `function already has a body` / `redefinition`** (now the dominant blocker) — a Common `#define Main void mainImage(…)` hides the entry-point signature behind a macro, so the per-pass `mainImage` rename can't see it → every pass expands to a duplicate `void mainImage`. Fix: expand the header macro into pass bodies before renaming. Also covers non-function redefs (`palAppleII` const array) and Common helpers colliding (`textb`).
-2. **`syntax error, unexpected FLOATCONSTANT`** (~4) — source-GLSL (e.g. `step` used as a variable name shadowing the builtin); NOT our rewriters.
-3. **Macro redefined across passes** (~2) — two passes `#define` the same macro differently.
-4. **Bare `iChannelN` in Common** (~2) — a sampler threaded as a value; GLSL can't return a sampler from a dispatcher.
-5. **Misc** — `sampler` struct-tag, generic "Shader failed to compile".
+1. **`syntax error, unexpected FLOATCONSTANT`** (~4: `4ldGDB`/`4XXGDl`/`ftGXzz`/`Ndc3zj`) — source-GLSL (e.g. `step` used as a variable name shadowing the builtin); NOT our rewriters.
+2. **Bare `iChannelN` in Common** (~2: `3cyGWG`/`tcKGWD`) — a sampler threaded as a value; GLSL can't return a sampler from a dispatcher.
+3. **Macro redefined across passes** (~2: `M3cGW2` `bb`, `tlX3zs` `A`) — two passes `#define` the same macro differently.
+4. **Misc** (~2) — `t3tyDM` (`sampler` struct-tag, surfaces as `unused variable 'v'`), `w3GGRy` (generic "Shader failed to compile").
 
 ## Discovery harness
 
@@ -103,7 +109,7 @@ Debug hooks (set on the built app binary): `SHADERTOY_DEBUG_FETCH=<id>` (fetch+c
 `SHADERTOY_DEBUG_CORPUS=<ids-file|browse:popular:N>` (batch report).
 
 ### Conformance baseline
-- Curated 78-shader corpus: **54/78 (69%)** → **57/78** (`CommonChannelRewriter`) → **~61/78 (78%)** (`HeaderMacroExpander`), zero regressions. `iChannelN`-undeclared eliminated for 9 of 11 (2 are bare-identifier); header-macro `mainImage` fixed for 4 more.
+- Curated 78-shader corpus: **54/78 (69%)** → **57/78** (`CommonChannelRewriter`) → **61/78 (78%)** (`HeaderMacroExpander`) → **68/78 (87%)** (function/global-redefinition cluster + MSL-reserved identifiers), zero regressions throughout. The +7 step closed: Allman/multi-line function-header detection (`gather8FromB`/`B`), transitive helper namespacing (`calcNormal`/`textb`), file-scope global collisions (`f`/`pi`/`palAppleII`), and MSL-reserved identifiers (`char`/`coord`).
 - NOTE: the WebKit fetch in the corpus harness is **flaky run-to-run** — a few IDs intermittently `FETCH-FAIL` (network, not conversion). Always re-run the fetch-failures before trusting a headline count; the real OK count excludes them.
 - Popular-plateau corpus: ~10/12 (the 2 fails are deferred `ssjyWc`/`wXdfzj`-class).
 
