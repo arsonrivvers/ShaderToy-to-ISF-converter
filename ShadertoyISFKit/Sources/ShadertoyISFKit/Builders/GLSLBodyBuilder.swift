@@ -12,7 +12,13 @@ public enum GLSLBodyBuilder {
         // separately; the merge into one file would otherwise hit "function already has a body").
         let namespaced = GLSLPassNamespace.namespace(passBodies)
 
-        for (idx, body) in namespaced.enumerated() {
+        // Scope each pass's `#define`s with a trailing `#undef` — preprocessor macros are file-global
+        // once passes are concatenated, so a pass macro otherwise leaks into later passes (rewriting a
+        // same-named declaration → FLOATCONSTANT, or colliding as a redefinition). Restores Shadertoy's
+        // per-pass isolation.
+        let scoped = GLSLPassMacroScoper.scope(namespaced)
+
+        for (idx, body) in scoped.enumerated() {
             let fnName = "pass\(idx)_mainImage"
             functions.append(renameMainImage(body, to: fnName))
             if containsVectorTernary(body) {
