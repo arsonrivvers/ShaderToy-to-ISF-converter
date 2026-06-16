@@ -89,10 +89,12 @@ byte-identical ones like `palAppleII` deduped to one shared copy); **MSL-reserve
 (`GLSLReservedIdentifierRewriter` — `char`/`coord`/C++ keywords renamed; legal GLSL, rejected by Metal).
 
 ### Remaining (from the 78-shader discovery corpus — ranked by impact)
-1. **`syntax error, unexpected FLOATCONSTANT`** (~4: `4ldGDB`/`4XXGDl`/`ftGXzz`/`Ndc3zj`) — source-GLSL (e.g. `step` used as a variable name shadowing the builtin); NOT our rewriters.
-2. **Bare `iChannelN` in Common** (~2: `3cyGWG`/`tcKGWD`) — a sampler threaded as a value; GLSL can't return a sampler from a dispatcher.
-3. **Macro redefined across passes** (~2: `M3cGW2` `bb`, `tlX3zs` `A`) — two passes `#define` the same macro differently.
-4. **Misc** (~2) — `t3tyDM` (`sampler` struct-tag, surfaces as `unused variable 'v'`), `w3GGRy` (generic "Shader failed to compile").
+1. **Bare `iChannelN` in Common** (~2: `3cyGWG`/`tcKGWD`) — a sampler threaded as a value; GLSL can't return a sampler from a dispatcher.
+2. **Misc** (~2) — `t3tyDM` (`sampler` struct-tag, surfaces as `unused variable 'v'`), `w3GGRy` (generic "Shader failed to compile").
+
+**Closed in the 74/78 step (per-pass macro scoping):**
+- ~~`syntax error, unexpected FLOATCONSTANT`~~ (`4ldGDB`/`4XXGDl`/`ftGXzz`/`Ndc3zj`) — NOT `step`-as-variable as previously guessed. Root cause: one pass `#define`s an object macro (`_G0`) and another pass declares a same-named identifier (`const float _G0 = 0.25;`); the file-global macro rewrites the declaration into `const float 0.25 = …`. Fixed by `GLSLPassMacroScoper`.
+- ~~Macro redefined across passes~~ (`M3cGW2` `bb`, `tlX3zs` `A`) — two passes `#define` the same function-like macro; `SamplerRewriter` rewrites each `iChannelN` to a per-pass sampler so glslang sees "different substitutions". Same fix — a trailing `#undef` per defining pass makes the redefinition clean.
 
 ## Discovery harness
 
@@ -109,7 +111,7 @@ Debug hooks (set on the built app binary): `SHADERTOY_DEBUG_FETCH=<id>` (fetch+c
 `SHADERTOY_DEBUG_CORPUS=<ids-file|browse:popular:N>` (batch report).
 
 ### Conformance baseline
-- Curated 78-shader corpus: **54/78 (69%)** → **57/78** (`CommonChannelRewriter`) → **61/78 (78%)** (`HeaderMacroExpander`) → **68/78 (87%)** (function/global-redefinition cluster + MSL-reserved identifiers), zero regressions throughout. The +7 step closed: Allman/multi-line function-header detection (`gather8FromB`/`B`), transitive helper namespacing (`calcNormal`/`textb`), file-scope global collisions (`f`/`pi`/`palAppleII`), and MSL-reserved identifiers (`char`/`coord`).
+- Curated 78-shader corpus: **54/78 (69%)** → **57/78** (`CommonChannelRewriter`) → **61/78 (78%)** (`HeaderMacroExpander`) → **68/78 (87%)** (function/global-redefinition cluster + MSL-reserved identifiers) → **74/78 (95%)** (`GLSLPassMacroScoper` — per-pass `#undef`), zero regressions throughout. The +6 step closed BOTH the FLOATCONSTANT class (object macro vs same-named declaration across passes) and the macro-redefinition class (function-like macro `#define`d in 2+ passes, made distinct by per-pass sampler rewriting) — one root cause: Shadertoy's per-pass preprocessor isolation is lost when passes are concatenated into one ISF file. The +7 step before it closed: Allman/multi-line function-header detection (`gather8FromB`/`B`), transitive helper namespacing (`calcNormal`/`textb`), file-scope global collisions (`f`/`pi`/`palAppleII`), and MSL-reserved identifiers (`char`/`coord`).
 - NOTE: the WebKit fetch in the corpus harness is **flaky run-to-run** — a few IDs intermittently `FETCH-FAIL` (network, not conversion). Always re-run the fetch-failures before trusting a headline count; the real OK count excludes them.
 - Popular-plateau corpus: ~10/12 (the 2 fails are deferred `ssjyWc`/`wXdfzj`-class).
 
