@@ -8,8 +8,13 @@ enum AssistProviderFactory {
     static func make(kind: AssistProviderKind, defaults: UserDefaults = .standard) -> AssistProvider {
         switch kind {
         case .claude:
-            return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(
-                override: defaults.string(forKey: "claudeBinaryPath")))
+            let bin = ClaudeCodeRunner.locateBinary(override: defaults.string(forKey: "claudeBinaryPath"))
+            // Best-effort `claude --version` probe so the runner can warn on a version that predates
+            // the verified tool-restriction flags (M12). nil when no binary resolved.
+            let probe: (@Sendable () -> String?)? = bin.map { b in
+                { try? RealProcess().run(executable: b, args: ["--version"], timeout: 5, onLine: { _ in }).stdout }
+            }
+            return ClaudeCodeRunner(binary: bin, versionOutput: probe)
         case .codex:
             return CodexRunner(binary: CodexRunner.locateBinary(
                 override: defaults.string(forKey: "codexBinaryPath")))

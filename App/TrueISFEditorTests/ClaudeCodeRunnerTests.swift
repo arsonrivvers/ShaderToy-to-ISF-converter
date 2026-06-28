@@ -79,6 +79,43 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         catch { XCTFail("wrong error") }
     }
 
+    // MARK: M12 — CLI version floor for the tool-restriction flags
+
+    func testParseVersionExtractsTriple() {
+        XCTAssertTrue(ClaudeCodeRunner.parseVersion("2.1.175 (Claude Code)").map { $0 == (2,1,175) } ?? false)
+        XCTAssertTrue(ClaudeCodeRunner.parseVersion("claude 10.2.3").map { $0 == (10,2,3) } ?? false)
+        XCTAssertNil(ClaudeCodeRunner.parseVersion("no version here"))
+    }
+
+    func testIsBelowVerifiedFloor() {
+        XCTAssertTrue(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "2.1.174"))   // patch below
+        XCTAssertTrue(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "2.0.999"))   // minor below
+        XCTAssertTrue(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "1.9.9"))     // major below
+        XCTAssertFalse(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "2.1.175"))  // exactly floor
+        XCTAssertFalse(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "2.2.0"))    // above
+        XCTAssertFalse(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: "weird"))    // unknown → no warning
+        XCTAssertFalse(ClaudeCodeRunner.isBelowVerifiedFloor(versionOutput: nil))
+    }
+
+    func testRunWarnsWhenCLIBelowVerifiedFloor() async throws {
+        let fake = FakeProcess(stdout: "{\"type\":\"result\",\"result\":\"ok\"}", exitCode: 0, stderr: "")
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { fake }, versionOutput: { "2.1.100" })
+        let box = EventBox()
+        _ = try await runner.run(prompt: "P", system: "S", model: "m") { box.append($0) }
+        XCTAssertTrue(box.lines.contains { $0.contains("SECURITY") && $0.contains("tool-restriction") },
+                      "expected a version warning, got: \(box.lines)")
+    }
+
+    func testRunDoesNotWarnWhenCLIAtOrAboveFloor() async throws {
+        let fake = FakeProcess(stdout: "{\"type\":\"result\",\"result\":\"ok\"}", exitCode: 0, stderr: "")
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { fake }, versionOutput: { "2.1.175" })
+        let box = EventBox()
+        _ = try await runner.run(prompt: "P", system: "S", model: "m") { box.append($0) }
+        XCTAssertFalse(box.lines.contains { $0.contains("SECURITY") }, "should not warn at/above floor")
+    }
+
     /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
     /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
     /// the main actor that the @MainActor runner body needs to execute.

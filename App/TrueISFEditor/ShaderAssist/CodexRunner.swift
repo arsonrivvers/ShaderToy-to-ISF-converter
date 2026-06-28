@@ -17,13 +17,24 @@ final class CodexRunner: AssistProvider {
         BinaryLocator.locate(name: "codex", override: override)
     }
 
+    /// The ONLY sandbox mode this runner may launch under. SECURITY (CSO M11): the shader source fed
+    /// into the prompt is untrusted (opened from the web/others), so Codex is a prompt-injection sink.
+    /// Unlike the Claude runner — which removes tool capability entirely (`--tools ""`) — Codex has no
+    /// equivalent, so `read-only` is the strongest available. IMPORTANT: read-only constrains *writes*,
+    /// not *reads* — an injected shader could still make Codex run shell that reads `~/.ssh`, `.env`,
+    /// etc. The only thing preventing exfiltration of those reads is that Codex disables network in
+    /// `read-only` by default. So this value must NEVER be raised to `workspace-write`/`danger-full-access`
+    /// (which also enable network); doing so opens a live lethal-trifecta path. Pinned here as an
+    /// invariant, asserted by AssistRunnersTests.
+    static let sandboxMode = "read-only"
+
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval = 180,
              onEvent: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
         guard let binary else { throw AssistRunError.binaryNotFound }
-        // read-only sandbox: the assist analyzes + proposes a diff; the app applies edits. Codex never
-        // writes files. --ignore-user-config keeps the user's global hooks/config out of the run.
+        // --ignore-user-config keeps the user's global hooks/config out of the run. RealProcess also
+        // pins the working directory to a throwaway temp dir, narrowing Codex's default file scope.
         var args = ["exec", "--json", "--color", "never",
-                    "-s", "read-only", "--skip-git-repo-check", "--ignore-user-config"]
+                    "-s", Self.sandboxMode, "--skip-git-repo-check", "--ignore-user-config"]
         if let model, !model.isEmpty { args += ["-m", model] }
         // Codex has no --append-system-prompt; prepend the preamble to the prompt.
         let full = system.isEmpty ? prompt : system + "\n\n---\n\n" + prompt

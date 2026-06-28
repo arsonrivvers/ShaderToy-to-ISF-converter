@@ -33,11 +33,39 @@ enum AssistErrorMapper {
 final class ClaudeCodeRunner: AssistProvider {
     private let binary: URL?
     private let makeProcess: () -> ProcessRunning
+    private let versionOutput: (@Sendable () -> String?)?
     private(set) var lastArgsForTest: [String] = []
 
-    init(binary: URL?, process: @escaping () -> ProcessRunning = { RealProcess() }) {
+    init(binary: URL?, process: @escaping () -> ProcessRunning = { RealProcess() },
+         versionOutput: (@Sendable () -> String?)? = nil) {
         self.binary = binary
         self.makeProcess = process
+        self.versionOutput = versionOutput
+    }
+
+    // CSO M12: the tool-restriction flags below (`--tools ""`, `--disallowedTools LSP`, …) are only
+    // known to remove tool capability on claude CLI ≥ this version (the `--tools ""`-alone-leaks-LSP
+    // fix landed in 2.1.175). The user's CLI auto-updates outside our control, so a future flag-
+    // semantics change could silently re-arm tools. We can't pin the user's binary, but we can warn
+    // when it's CONFIDENTLY older than the verified floor.
+    static let minVerifiedVersion = (major: 2, minor: 1, patch: 175)
+
+    /// First `MAJOR.MINOR.PATCH` triple in `claude --version` output, or nil if none.
+    static func parseVersion(_ output: String) -> (major: Int, minor: Int, patch: Int)? {
+        guard let r = output.range(of: #"(\d+)\.(\d+)\.(\d+)"#, options: .regularExpression) else { return nil }
+        let parts = output[r].split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }
+
+    /// True only when the version parses AND is below the verified floor — so an unrecognized format
+    /// never produces a spurious warning (this drives a non-gating notice, not a hard block).
+    static func isBelowVerifiedFloor(versionOutput: String?) -> Bool {
+        guard let out = versionOutput, let v = parseVersion(out) else { return false }
+        let m = minVerifiedVersion
+        if v.major != m.major { return v.major < m.major }
+        if v.minor != m.minor { return v.minor < m.minor }
+        return v.patch < m.patch
     }
 
     /// Resolve the claude binary: explicit override → known paths → login-shell `command -v`.
@@ -74,6 +102,17 @@ final class ClaudeCodeRunner: AssistProvider {
         if !system.isEmpty { args += ["--append-system-prompt", system] }
         args.append(prompt)
         lastArgsForTest = args
+        // M12: warn (once, non-blocking) if the CLI is confidently older than the version where the
+        // tool-restriction flags were verified — the safety above silently weakens otherwise.
+        if let versionOutput {
+            let v = await Task.detached(priority: .utility) { versionOutput() }.value
+            if Self.isBelowVerifiedFloor(versionOutput: v) {
+                let m = Self.minVerifiedVersion
+                onEvent("⚠️ SECURITY: your `claude` CLI is older than v\(m.major).\(m.minor).\(m.patch), " +
+                        "where ShaderAssist's tool-restriction flags were verified. Tool-blocking may be " +
+                        "ineffective on this version — update the `claude` CLI.")
+            }
+        }
         let proc = makeProcess()
         let out: ProcessOutput
         do {

@@ -20,6 +20,22 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertTrue(args.last?.contains("S") == true && args.last?.contains("P") == true)
     }
 
+    // CSO M11 invariant: the Codex sandbox must stay `read-only` and never escalate to a
+    // write/network-enabling mode — a higher mode would open a live prompt-injection exfil path
+    // (read-only ≠ no-file-read; only the network-off default stops exfiltration).
+    func testCodexSandboxIsPinnedReadOnlyAndNeverEscalated() async throws {
+        XCTAssertEqual(CodexRunner.sandboxMode, "read-only")
+        let fake = ClaudeCodeRunnerTests.FakeProcess(stdout: "{}", exitCode: 0, stderr: "")
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })
+        _ = try await runner.run(prompt: "P", system: "S", model: nil)
+        let args = runner.lastArgsForTest
+        let sIdx = try XCTUnwrap(args.firstIndex(of: "-s"))
+        XCTAssertEqual(args[sIdx + 1], "read-only")
+        for forbidden in ["workspace-write", "danger-full-access", "--dangerously-bypass-approvals-and-sandbox"] {
+            XCTAssertFalse(args.contains(forbidden), "must never launch with \(forbidden)")
+        }
+    }
+
     func testCodexDefaultModelOmitsDashM() async throws {
         let fake = ClaudeCodeRunnerTests.FakeProcess(stdout: "{}", exitCode: 0, stderr: "")
         let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })
