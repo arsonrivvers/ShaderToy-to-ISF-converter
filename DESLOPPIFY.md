@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-06-27 · branch: master · 16 open / 11 done (M8 staged) · remaining mediums M1/M2/M3 need a corpus run_
+_Last scan: 2026-06-27 · branch: desloppify-cleanup · 14 open / 13 done (M8 + M12-probe staged) · remaining mediums M1/M2/M3 need a corpus run; rest are N-tier_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -118,14 +118,16 @@ _Last scan: 2026-06-27 · branch: master · 16 open / 11 done (M8 staged) · rem
 - **Safe to fix now?** wait — `SettingsView` and `TrueISFEditorApp` both bind to it; do as a focused refactor.
 
 ### M11 — Codex runner retains the file-read leg; trifecta held open by network-default alone
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Pinned the Codex sandbox as a named invariant `CodexRunner.sandboxMode = "read-only"` with an in-code note that read-only constrains writes not reads (an injected shader can still read `~/.ssh`/`.env`; only the network-off default stops exfil), so it must never be raised to `workspace-write`/`danger-full-access` (which also enable network). Added `testCodexSandboxIsPinnedReadOnlyAndNeverEscalated` asserting the run never emits a write/network-enabling sandbox flag. (Dropping Codex as a provider remains a product call, not taken here.) 171 tests green.
 - **Where:** `App/TrueISFEditor/ShaderAssist/CodexRunner.swift:25-26`
 - **Why it matters:** `-s read-only` constrains *writes*, not *reads* — the model can still execute shell that reads any user-readable file (`~/.ssh/id_*`, `~/.aws/credentials`, `.env`). The only thing stopping exfil of an injected shader's read is that Codex disables network in `read-only` by default. The whole defense rests on one un-asserted external default; if a future Codex changes it, or the user runs a network-enabled profile, an injected shader comment becomes a live trifecta. (The Claude path has no such exposure — it removes execution entirely.)
 - **Recommend:** Fail-closed invariant: never allow a Codex sandbox above `read-only`, assert network is off, document in code that read-only ≠ no-file-read; consider pinning `--cd` to a throwaway temp dir. Or drop Codex as a provider (product call).
 - **Safe to fix now?** yes — a comment + assertion (provider removal is a product decision). Close before public launch.
 
 ### M12 — Tool-restriction defense depends on un-pinned external CLI flag semantics (fail-open on update)
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Added `ClaudeCodeRunner.minVerifiedVersion = (2,1,175)`, `parseVersion`, and `isBelowVerifiedFloor` (true only when the version parses AND is below floor — unknown format never cries wolf). `run()` does an off-main best-effort `claude --version` probe (injectable; the app factory wires the real probe, tests inject nil/stub) and emits a one-time non-gating "SECURITY: CLI older than verified" transcript warning when confidently below floor. 5 tests cover the parser + below/at-floor wiring. **Minor STAGED note:** the exact real `claude --version` output format is assumed `…M.N.P…`; confirm once on-device that a genuinely-old CLI triggers the warning (low risk — non-gating, silent on unrecognized format). A hard version-gate or capability self-test was deliberately NOT taken (would block runs + needs a UX decision).
 - **Where:** `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift:62-64` (see the v2.1.175 note at `:49-51`)
 - **Why it matters:** The trifecta is broken today only because `--tools ""`/`--disallowedTools LSP` do what was verified on claude CLI **v2.1.175** — the code comment itself records that `--tools ""` alone left LSP exposed until patched, proving semantics shift between versions. The app runs the *user's* auto-updating CLI, so a future flag rename/default change would silently re-arm the removed legs with zero code change and no signal.
 - **Recommend:** Fail-closed — detect CLI version (`claude --version`) and refuse/warn outside a known-good range, or run a one-shot capability self-test confirming a tool invocation is actually rejected before enabling assist.
