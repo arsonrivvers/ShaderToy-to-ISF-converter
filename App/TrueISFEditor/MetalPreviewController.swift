@@ -252,6 +252,19 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         return try? device.makeRenderPipelineState(descriptor: desc)
     }
 
+    /// Pause/resume the live render loop. A paused view stops driving `draw(in:)` entirely (the
+    /// MTKView is created with `enableSetNeedsDisplay = false`), so this is what actually halts GPU
+    /// work for off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.
+    func setPaused(_ paused: Bool) {
+        mtkView.isPaused = paused
+    }
+
+    /// Force one on-screen frame through the normal `draw(in:)` path. Used to show a single frozen
+    /// frame on a paused preview (e.g. after its shader finishes compiling) without resuming the loop.
+    func drawOneFrame() {
+        mtkView.draw()
+    }
+
     /// Test hook: render one frame into an offscreen texture and return it. No drawable involved.
     @discardableResult
     func renderOnce() -> MTLTexture? {

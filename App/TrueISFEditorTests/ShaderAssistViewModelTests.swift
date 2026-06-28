@@ -15,7 +15,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
 
     func testSuggestionGoalsTransition() async {
         let provider = FakeAssistProvider([.success(#"{"goals":[{"id":"motion","title":"Add motion","detail":"Animate it","kind":"design","whyThisShader":"Static shader"}]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.requestSuggestionGoals(source: "/*{}*/\nvoid main(){}", diagnostics: [])
         await settle()
         if case .suggestionGoals(let result) = vm.state {
@@ -27,7 +27,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
 
     func testChoosingGoalRunsScopedSuggestionsAndStoresFingerprint() async {
         let provider = FakeAssistProvider([.success(#"{"goal":"Expose controls","ideas":[{"id":"speed","title":"Speed","detail":"Expose speed","kind":"make-interactive","lines":[3],"impact":"Playable"}]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.chooseSuggestionGoal("Expose controls", source: "/*{}*/\nvoid main(){}", diagnostics: [])
         await settle()
         XCTAssertEqual(vm.activeSuggestionGoal, "Expose controls")
@@ -49,7 +49,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
 
     func testChoosingMultipleGoalsCombinesIntoOneSuggestionCall() async {
         let provider = FakeAssistProvider([.success(#"{"goal":"Add color; Expose speed","ideas":[{"id":"a","title":"A","detail":"d","kind":"creative","lines":[1],"impact":"x"}]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.chooseSuggestionGoals(["Add color", "  ", "Expose speed"],
                                  source: "/*{}*/\nvoid main(){}", diagnostics: [])
         await settle()
@@ -58,7 +58,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
     }
 
     func testChoosingNoValidGoalsIsNoOp() async {
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
+        let vm = ShaderAssistViewModel(providerOverride: nil)
         vm.chooseSuggestionGoals(["   ", ""], source: "/*{}*/\nvoid main(){}", diagnostics: [])
         await settle()
         XCTAssertNil(vm.activeSuggestionGoal)
@@ -66,7 +66,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
     }
 
     func testToggleSelectionByIdeaID() {
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
+        let vm = ShaderAssistViewModel(providerOverride: nil)
         vm.toggleIdeaSelection("speed")
         XCTAssertEqual(vm.selectedIdeaIDs, ["speed"])
         vm.toggleIdeaSelection("speed")
@@ -77,7 +77,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
         let idea = AIIdea(id: "speed", title: "Speed", detail: "Expose speed",
                           kind: "make-interactive", lines: [3], impact: "Playable")
         let provider = FakeAssistProvider([.success(#"{"goal":"Expose controls","ideas":[{"id":"speed","title":"Speed","detail":"Expose speed","kind":"make-interactive","lines":[3],"impact":"Playable"}]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.activeSuggestionGoal = "Expose controls"
         vm.lastSuggestions = AISuggestionsResult(goal: "Expose controls", ideas: [idea])
         vm.suggestionSourceFingerprint = ShaderAssistViewModel.sourceFingerprint("original")
@@ -94,7 +94,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
     func testApplySelectedGoalsGoesStraightToApplyPreview() async {
         let source = "/*{}*/\nvoid main(){}"
         let provider = FakeAssistProvider([.success(#"{"explanation":"Done","replacementSource":"/*{}*/\nvoid main(){ gl_FragColor = vec4(1.0); }","changedLines":[2]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         let ideas = [AIIdea(id: "g1", title: "Add motion", detail: "animate it",
                             kind: "design", lines: nil, impact: nil)]
         vm.applySelectedGoals(ideas, source: source, diagnostics: [])
@@ -109,7 +109,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
     }
 
     func testApplySelectedGoalsNoOpWhenEmpty() async {
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: nil)
+        let vm = ShaderAssistViewModel(providerOverride: nil)
         vm.applySelectedGoals([], source: "/*{}*/\nvoid main(){}", diagnostics: [])
         await settle()
         if case .idle = vm.state {} else { XCTFail("expected idle, got \(vm.state)") }
@@ -120,7 +120,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
                           kind: "make-interactive", lines: [3], impact: "Playable")
         let source = "/*{}*/\nvoid main(){}"
         let provider = FakeAssistProvider([.success(#"{"explanation":"Added speed","replacementSource":"/*{}*/\nvoid main(){ gl_FragColor = vec4(1.0); }","changedLines":[2]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.activeSuggestionGoal = "Expose controls"
         vm.lastSuggestions = AISuggestionsResult(goal: "Expose controls", ideas: [idea])
         vm.suggestionSourceFingerprint = ShaderAssistViewModel.sourceFingerprint(source)
@@ -140,7 +140,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
                           kind: "make-interactive", lines: [3], impact: "Playable")
         let source = "/*{}*/\nvoid main(){}"
         let provider = FakeAssistProvider([.success(#"{"explanation":"Bad","replacementSource":"void main(){}","changedLines":[1]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.activeSuggestionGoal = "Expose controls"
         vm.lastSuggestions = AISuggestionsResult(goal: "Expose controls", ideas: [idea])
         vm.suggestionSourceFingerprint = ShaderAssistViewModel.sourceFingerprint(source)
@@ -159,7 +159,7 @@ final class ShaderAssistViewModelTests: XCTestCase {
                           kind: "make-interactive", lines: [3], impact: "Playable")
         let source = "/*{}*/\nvoid main(){}"
         let provider = FakeAssistProvider([.success(#"{"explanation":"Bad","replacementSource":"/*{bad}*/\nvoid main(){}","changedLines":[1]}"#)])
-        let vm = ShaderAssistViewModel(binaryOverride: { nil }, providerOverride: provider)
+        let vm = ShaderAssistViewModel(providerOverride: provider)
         vm.activeSuggestionGoal = "Expose controls"
         vm.lastSuggestions = AISuggestionsResult(goal: "Expose controls", ideas: [idea])
         vm.suggestionSourceFingerprint = ShaderAssistViewModel.sourceFingerprint(source)

@@ -7,6 +7,14 @@ struct ProcessOutput: Sendable { let stdout: String; let stderr: String; let exi
 protocol ProcessRunning: Sendable {
     func run(executable: URL, args: [String], timeout: TimeInterval,
              onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput
+    /// Terminate the in-flight process (if any). Called when the owning Swift Task is cancelled so a
+    /// user "Stop" actually kills the CLI instead of orphaning it. Safe to call from any thread.
+    func cancel()
+}
+
+extension ProcessRunning {
+    /// Default no-op: synchronous test doubles complete instantly and have nothing to terminate.
+    func cancel() {}
 }
 
 /// Maps a non-zero CLI exit to an AssistRunError (auth vs generic failure).
@@ -69,12 +77,18 @@ final class ClaudeCodeRunner: AssistProvider {
         let proc = makeProcess()
         let out: ProcessOutput
         do {
-            out = try await Task.detached(priority: .userInitiated) {
-                try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
-            }.value
+            // withTaskCancellationHandler so a parent-Task cancel (user Stop) terminates the CLI —
+            // a detached task is otherwise immune to cancellation and would orphan the process.
+            out = try await withTaskCancellationHandler {
+                try await Task.detached(priority: .userInitiated) {
+                    try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
+                }.value
+            } onCancel: { proc.cancel() }
         }
         catch let e as AssistRunError { throw e }
         catch { throw AssistRunError.processFailed("\(error)") }
+        // A cancel-terminated process exits non-zero; don't surface that as a real failure.
+        if Task.isCancelled { throw CancellationError() }
         if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
         return Self.finalMessage(fromStreamJSON: out.stdout)
     }
@@ -123,8 +137,23 @@ enum BinaryLocator {
 }
 
 /// Real streaming Process implementation (not exercised in unit tests).
-struct RealProcess: ProcessRunning {
+final class RealProcess: ProcessRunning, @unchecked Sendable {
     private final class Box: @unchecked Sendable { var value = Data() }
+
+    // Live-process tracking so `cancel()` (called off the run thread, from the Task cancellation
+    // handler) can terminate a CLI that's still running.
+    private let liveLock = NSLock()
+    private var liveProcess: Process?
+    private var cancelled = false
+
+    func cancel() {
+        liveLock.lock(); cancelled = true; let p = liveProcess; liveLock.unlock()
+        guard let p else { return }
+        p.terminate()                                   // SIGTERM
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if p.isRunning { kill(p.processIdentifier, SIGKILL) }   // escalate if it ignores SIGTERM
+        }
+    }
 
     static func assistLaunchEnvironment(executable: URL,
                                         base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
@@ -166,7 +195,13 @@ struct RealProcess: ProcessRunning {
         p.standardOutput = outPipe
         p.standardError = errPipe
         p.standardInput = FileHandle.nullDevice   // never block waiting on stdin
+
+        // Publish the process for cancel(); if a cancel already arrived in the launch window,
+        // terminate immediately after starting so it can't outlive the Stop.
+        liveLock.lock(); liveProcess = p; let alreadyCancelled = cancelled; liveLock.unlock()
         try p.run()
+        if alreadyCancelled { p.terminate() }
+        defer { liveLock.lock(); liveProcess = nil; liveLock.unlock() }
 
         let outBox = Box(); let errBox = Box()
         let group = DispatchGroup()

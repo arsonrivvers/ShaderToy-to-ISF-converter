@@ -6,8 +6,7 @@ struct EditorScreen: View {
     @ObservedObject var library: LibraryModel
     @ObservedObject var vm: EditorViewModel
     @StateObject private var output = OutputWindowManager()
-    @StateObject private var shaderAssist = ShaderAssistViewModel(
-        binaryOverride: { UserDefaults.standard.string(forKey: "claudeBinaryPath") })
+    @StateObject private var shaderAssist = ShaderAssistViewModel()
     @AppStorage("editorCollapsed") private var editorCollapsed = false
     @State private var showTerminal = true
     @State private var showSuggestionGoalSheet = false

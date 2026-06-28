@@ -78,6 +78,43 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         catch let e as AssistRunError { XCTAssertEqual(e, .binaryNotFound) }
         catch { XCTFail("wrong error") }
     }
+
+    /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
+    /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
+    /// the main actor that the @MainActor runner body needs to execute.
+    final class BlockingProcess: ProcessRunning, @unchecked Sendable {
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var _started = false
+        private var _cancelCalled = false
+        var hasStarted: Bool { lock.lock(); defer { lock.unlock() }; return _started }
+        var cancelCalled: Bool { lock.lock(); defer { lock.unlock() }; return _cancelCalled }
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            lock.lock(); _started = true; lock.unlock()
+            release.wait()   // unblocked only by cancel(); simulates the CLI being terminated
+            return ProcessOutput(stdout: "", stderr: "", exitCode: 15)   // SIGTERM-style nonzero exit
+        }
+        func cancel() { lock.lock(); _cancelCalled = true; lock.unlock(); release.signal() }
+    }
+
+    /// M6: cancelling the surrounding Task must terminate the CLI (proc.cancel()) and surface as a
+    /// CancellationError — NOT as a processFailed from the nonzero exit of the killed process.
+    func testCancellationTerminatesProcessAndDoesNotReportFailure() async throws {
+        let proc = BlockingProcess()
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/usr/bin/true"), process: { proc })
+        let task = Task { try await runner.run(prompt: "P", system: "S", model: nil) }
+        var waited = 0
+        while !proc.hasStarted && waited < 300 {      // await (not block) so run()'s main-actor body runs
+            try await Task.sleep(nanoseconds: 10_000_000); waited += 1
+        }
+        XCTAssertTrue(proc.hasStarted, "run() never started")
+        task.cancel()
+        do { _ = try await task.value; XCTFail("expected the cancelled run to throw") }
+        catch is CancellationError { /* expected */ }
+        catch { XCTFail("expected CancellationError, got \(error)") }
+        XCTAssertTrue(proc.cancelCalled, "cancel() must reach the process")
+    }
 }
 
 /// Thread-safe collector for streamed event lines.

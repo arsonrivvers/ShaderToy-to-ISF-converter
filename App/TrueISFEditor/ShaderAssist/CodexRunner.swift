@@ -32,12 +32,17 @@ final class CodexRunner: AssistProvider {
         let proc = makeProcess()
         let out: ProcessOutput
         do {
-            out = try await Task.detached(priority: .userInitiated) {
-                try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
-            }.value
+            // withTaskCancellationHandler so a parent-Task cancel (user Stop) terminates the CLI —
+            // a detached task is otherwise immune to cancellation and would orphan the process.
+            out = try await withTaskCancellationHandler {
+                try await Task.detached(priority: .userInitiated) {
+                    try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
+                }.value
+            } onCancel: { proc.cancel() }
         }
         catch let e as AssistRunError { throw e }
         catch { throw AssistRunError.processFailed("\(error)") }
+        if Task.isCancelled { throw CancellationError() }   // cancel-terminated exit isn't a real failure
         if out.exitCode != 0 {
             // Codex reports real failures as JSON events on STDOUT (`error` / `turn.failed`); STDERR only
             // carries the benign "Reading additional input from stdin..." status line (codex always reads

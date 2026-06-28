@@ -62,6 +62,7 @@ targets:
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
       - TrueISFEditor/ShaderAssist/AssistProvider.swift
+      - TrueISFEditor/ShaderAssist/AssistProviderFactory.swift
       - TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift
       - TrueISFEditor/ShaderAssist/CodexRunner.swift
       - TrueISFEditor/ShaderAssist/SkillPreamble.swift

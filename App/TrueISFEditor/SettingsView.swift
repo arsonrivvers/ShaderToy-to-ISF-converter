@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var store: SettingsStore
     @Environment(\.dismiss) private var dismiss
     @State private var draftKey: String = ""
     @State private var draftClaudePath: String = ""
@@ -26,7 +26,7 @@ struct SettingsView: View {
                     Picker("Claude model", selection: $draftClaudeModel) {
                         ForEach(claudeModels, id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    statusRow(found: AppModel.claudeCLIFound(override: draftClaudePath),
+                    statusRow(found: SettingsStore.claudeCLIFound(override: draftClaudePath),
                               cli: "claude", hint: "Run `claude` once in Terminal to sign in.")
                     TextField("/path/to/claude (blank = auto-detect)", text: $draftClaudePath)
                 } else {
@@ -35,7 +35,7 @@ struct SettingsView: View {
                         TextField("default (recommended)", text: $draftCodexModel).frame(width: 200)
                     }
                     Text("Leave blank to use your Codex default model.").font(.caption2).foregroundStyle(.secondary)
-                    statusRow(found: AppModel.codexCLIFound(override: draftCodexPath),
+                    statusRow(found: SettingsStore.codexCLIFound(override: draftCodexPath),
                               cli: "codex", hint: "Run `codex login` in Terminal to sign in with ChatGPT.")
                     TextField("/path/to/codex (blank = auto-detect)", text: $draftCodexPath)
                 }
@@ -52,9 +52,9 @@ struct SettingsView: View {
                     Spacer()
                     Button("Cancel") { dismiss() }
                     Button("Save") {
-                        model.saveKey(draftKey)
-                        model.saveClaudeBinaryPath(draftClaudePath.trimmingCharacters(in: .whitespaces))
-                        model.saveAssistSettings(
+                        store.saveKey(draftKey)
+                        store.saveClaudeBinaryPath(draftClaudePath.trimmingCharacters(in: .whitespaces))
+                        store.saveAssistSettings(
                             provider: draftProvider,
                             claudeModel: draftClaudeModel,
                             codexModel: draftCodexModel.trimmingCharacters(in: .whitespaces),
@@ -67,12 +67,12 @@ struct SettingsView: View {
         }
         .frame(width: 480, height: 520)
         .onAppear {
-            draftKey = model.apiKey
-            draftClaudePath = model.claudeBinaryPath
-            draftCodexPath = model.codexBinaryPath
-            draftProvider = model.assistProvider
-            draftClaudeModel = model.assistClaudeModel.isEmpty ? "sonnet" : model.assistClaudeModel
-            draftCodexModel = model.assistCodexModel
+            draftKey = store.apiKey
+            draftClaudePath = store.claudeBinaryPath
+            draftCodexPath = store.codexBinaryPath
+            draftProvider = store.assistProvider
+            draftClaudeModel = store.assistClaudeModel.isEmpty ? "sonnet" : store.assistClaudeModel
+            draftCodexModel = store.assistCodexModel
         }
     }
 

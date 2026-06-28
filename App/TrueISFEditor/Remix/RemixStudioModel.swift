@@ -29,6 +29,7 @@ final class RemixStudioModel: ObservableObject {
     @Published var crossoverSettings = RemixCrossoverSettings() { didSet { persistSettings() } }
 
     private let generator: RemixGenerator
+    private var generationTask: Task<Void, Never>?
     private var round = 0
     private var seedCounter = 0
     private var history: [(String?, String?)] = []   // parent (A,B) configs for step-back
@@ -76,6 +77,19 @@ final class RemixStudioModel: ObservableObject {
     }
 
     // MARK: generation
+
+    /// Start a round as an owned, cancellable task so the UI can stop it. Cancelling the task
+    /// propagates through the generator's task group to terminate every in-flight provider CLI.
+    func startGeneration() {
+        guard canGenerate, generationTask == nil else { return }
+        generationTask = Task { [weak self] in
+            await self?.generate()
+            self?.generationTask = nil
+        }
+    }
+
+    /// Stop an in-flight batch. Children that were mid-generation resolve as `.failed("cancelled")`.
+    func cancelGeneration() { generationTask?.cancel() }
 
     func generate() async {
         guard canGenerate else { return }

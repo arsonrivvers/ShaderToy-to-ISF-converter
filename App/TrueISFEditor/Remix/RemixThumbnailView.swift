@@ -30,8 +30,10 @@ struct RemixThumbnailView: NSViewRepresentable {
             context.coordinator.loadedISF = isf
             controller.load(isf: isf)
         }
-        // Freeze when not animating: render one frame and stop driving updates.
-        if !animating { controller.renderOnce() }
+        // Freeze when not animating: PAUSE the loop (so GPU work actually stops) and show one frame.
+        context.coordinator.animating = animating
+        controller.setPaused(!animating)
+        if !animating { controller.drawOneFrame() }
     }
 
     @MainActor
@@ -40,6 +42,7 @@ struct RemixThumbnailView: NSViewRepresentable {
         let onCompile: (Bool, String?) -> Void
         let onSnapshot: ((CGImage) -> Void)?
         var loadedISF: String?
+        var animating = true
         private var bag = Set<AnyCancellable>()
         private var reported = false
 
@@ -57,6 +60,9 @@ struct RemixThumbnailView: NSViewRepresentable {
                     if valid {
                         self.reported = true
                         self.onCompile(true, nil)
+                        // A frozen (paused) card won't redraw on its own — push one on-screen frame so
+                        // it shows the compiled result rather than the pre-compile black frame.
+                        if !self.animating { self.controller.drawOneFrame() }
                         // renderOnce() commits without waiting for GPU completion — intentional:
                         // CoreImage on the same MTLDevice serializes against it, and a blocking
                         // wait here would stall the main thread for a cosmetic 24×16 swatch.

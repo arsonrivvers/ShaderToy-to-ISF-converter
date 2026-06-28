@@ -9,15 +9,6 @@ final class AppModel: ObservableObject {
     @Published var warnings: [ConversionWarning] = []
     @Published var statusMessage: String = ""
     @Published var isBusy: Bool = false
-    @Published var apiKey: String = KeychainStore.load() ?? ""
-    /// Optional explicit path to the `claude` CLI for the ShaderAssist AI feature (blank = auto-detect).
-    @Published var claudeBinaryPath: String = UserDefaults.standard.string(forKey: "claudeBinaryPath") ?? ""
-    /// Optional explicit path to the `codex` CLI (blank = auto-detect).
-    @Published var codexBinaryPath: String = UserDefaults.standard.string(forKey: "codexBinaryPath") ?? ""
-    /// ShaderAssist provider + per-provider model selection (B2).
-    @Published var assistProvider: String = UserDefaults.standard.string(forKey: "assistProvider") ?? "claude"
-    @Published var assistClaudeModel: String = UserDefaults.standard.string(forKey: "assistClaudeModel") ?? "sonnet"
-    @Published var assistCodexModel: String = UserDefaults.standard.string(forKey: "assistCodexModel") ?? ""
     @Published var pastedCode: String = ""
     /// Default filename offered in the Save panel (derived from the shader name).
     @Published var suggestedFileName: String = "converted.fs"
@@ -34,32 +25,6 @@ final class AppModel: ObservableObject {
         return (cleaned.isEmpty ? "shader" : cleaned) + ".fs"
     }
 
-    func saveKey(_ key: String) {
-        apiKey = key
-        KeychainStore.save(key)
-    }
-
-    func saveClaudeBinaryPath(_ p: String) {
-        claudeBinaryPath = p
-        UserDefaults.standard.set(p, forKey: "claudeBinaryPath")
-    }
-
-    /// Persist the ShaderAssist provider/model/path settings (B2).
-    func saveAssistSettings(provider: String, claudeModel: String, codexModel: String, codexPath: String) {
-        assistProvider = provider; assistClaudeModel = claudeModel
-        assistCodexModel = codexModel; codexBinaryPath = codexPath
-        let d = UserDefaults.standard
-        d.set(provider, forKey: "assistProvider")
-        d.set(claudeModel, forKey: "assistClaudeModel")
-        d.set(codexModel, forKey: "assistCodexModel")
-        d.set(codexPath, forKey: "codexBinaryPath")
-    }
-
-    /// Whether each provider's CLI is resolvable on this machine (honest "CLI found" status — actual
-    /// login is verified by running the CLI, which the live terminal will surface).
-    static func claudeCLIFound(override: String?) -> Bool { ClaudeCodeRunner.locateBinary(override: override) != nil }
-    static func codexCLIFound(override: String?) -> Bool { CodexRunner.locateBinary(override: override) != nil }
-
     func convert() async {
         warnings = []; isfOutput = ""; importedCode = ""; statusMessage = ""
         guard let id = ShadertoyURL.shaderID(from: urlText) else {
@@ -70,6 +35,9 @@ final class AppModel: ObservableObject {
         }
         isBusy = true; defer { isBusy = false }
 
+        // Read the key fresh from the Keychain (the source of truth set in Settings) rather than
+        // caching it — see SettingsStore. Empty key → the WebKit fetch path.
+        let apiKey = KeychainStore.load() ?? ""
         let strategy = FetchStrategy.select(hasKey: !apiKey.isEmpty)
         let source: ImportEvent.FetchSource = strategy == .api ? .api : .webView
         // Tracked across the do/catch so a single record point at the end captures the outcome.

@@ -139,10 +139,15 @@ struct RemixStudioView: View {
             HStack {
                 Stepper("Batch: \(model.batchSize)", value: $model.batchSize, in: 1...8).frame(width: 160)
                 Button {
-                    Task { await model.generate() }
+                    model.startGeneration()
                 } label: { Label("Generate", systemImage: "bolt.fill") }
                 .keyboardShortcut(.return, modifiers: [])
                 .disabled(!model.canGenerate)
+                if model.isGenerating {
+                    Button(role: .destructive) {
+                        model.cancelGeneration()
+                    } label: { Label("Stop", systemImage: "stop.fill") }
+                }
                 Button { showCrossoverSettings.toggle() } label: { Label("Crossover", systemImage: "gearshape") }
                     .popover(isPresented: $showCrossoverSettings, arrowEdge: .bottom) {
                         RemixCrossoverPopover(model: model)

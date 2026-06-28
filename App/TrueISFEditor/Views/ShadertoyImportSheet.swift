@@ -9,6 +9,7 @@ struct ShadertoyImportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @StateObject private var model = AppModel()
+    @StateObject private var settings = SettingsStore()
     @State private var showSettings = false
     @State private var showPasteHelp = false
 
@@ -92,7 +93,7 @@ struct ShadertoyImportSheet: View {
         }
         .padding(16)
         .frame(width: 640, height: 440)
-        .sheet(isPresented: $showSettings) { SettingsView(model: model) }
+        .sheet(isPresented: $showSettings) { SettingsView(store: settings) }
     }
 
     private func finishIfConverted() {

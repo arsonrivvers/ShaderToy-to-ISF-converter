@@ -26,15 +26,12 @@ final class ShaderAssistViewModel: ObservableObject {
     @Published var selectedIdeaIDs: Set<String> = []
     @Published var lastSuggestions: AISuggestionsResult?
 
-    private let binaryOverride: () -> String?
     private let defaults: UserDefaults
     private let providerOverride: AssistProvider?
     private var task: Task<Void, Never>?
 
-    init(binaryOverride: @escaping () -> String?,
-         defaults: UserDefaults = .standard,
+    init(defaults: UserDefaults = .standard,
          providerOverride: AssistProvider? = nil) {
-        self.binaryOverride = binaryOverride
         self.defaults = defaults
         self.providerOverride = providerOverride
     }
@@ -45,14 +42,7 @@ final class ShaderAssistViewModel: ObservableObject {
         AssistProviderSelection.current(defaults: defaults)
     }
     private func makeProvider(kind: AssistProviderKind) -> AssistProvider {
-        if let providerOverride { return providerOverride }
-        switch kind {
-        case .claude:
-            return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(override: binaryOverride()))
-        case .codex:
-            return CodexRunner(binary: CodexRunner.locateBinary(
-                override: defaults.string(forKey: "codexBinaryPath")))
-        }
+        providerOverride ?? AssistProviderFactory.make(kind: kind, defaults: defaults)
     }
 
     nonisolated static func sourceFingerprint(_ source: String) -> String {
@@ -232,8 +222,12 @@ final class ShaderAssistViewModel: ObservableObject {
                     } else { self?.state = .rawAnswer(final) }
                 }
             } catch let e as AssistRunError {
+                if Task.isCancelled { return }
                 self?.state = .error(Self.message(for: e, provider: kind))
-            } catch { self?.state = .error("\(error)") }
+            } catch {
+                if Task.isCancelled { return }
+                self?.state = .error("\(error)")
+            }
         }
     }
 

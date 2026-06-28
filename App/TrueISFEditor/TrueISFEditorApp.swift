@@ -6,19 +6,10 @@ import UniformTypeIdentifiers
 struct TrueISFEditorApp: App {
     @StateObject private var library = LibraryModel()
     @StateObject private var vm = EditorViewModel()
-    @StateObject private var settingsModel = AppModel()
+    @StateObject private var settings = SettingsStore()
     @StateObject private var remixModel = RemixStudioModel(
         generator: RemixGenerator(
-            makeProvider: {
-                switch AssistProviderSelection.current().kind {
-                case .claude:
-                    return ClaudeCodeRunner(binary: ClaudeCodeRunner.locateBinary(
-                        override: UserDefaults.standard.string(forKey: "claudeBinaryPath")))
-                case .codex:
-                    return CodexRunner(binary: CodexRunner.locateBinary(
-                        override: UserDefaults.standard.string(forKey: "codexBinaryPath")))
-                }
-            },
+            makeProvider: { AssistProviderFactory.make(kind: AssistProviderSelection.current().kind) },
             modelProvider: { AssistProviderSelection.current().model }
         )
     )
@@ -244,7 +235,7 @@ void main() {
                 libraryEntries: library.filtered(query: "")
             )
         }
-        Settings { SettingsView(model: settingsModel) }
+        Settings { SettingsView(store: settings) }
     }
 
     @MainActor private func saveCurrent() {

@@ -77,8 +77,9 @@ final class RemixGenerator {
                         return RemixNode(id: id, isfSource: out, parents: [], mode: mode, steer: steer,
                                          directive: directive, round: round, status: .failed("No ISF in reply"))
                     } catch {
+                        let reason = (error is CancellationError) ? "cancelled" : "\(error)"
                         return RemixNode(id: id, isfSource: "", parents: [], mode: mode, steer: steer,
-                                         directive: directive, round: round, status: .failed("\(error)"))
+                                         directive: directive, round: round, status: .failed(reason))
                     }
                 }
             }
