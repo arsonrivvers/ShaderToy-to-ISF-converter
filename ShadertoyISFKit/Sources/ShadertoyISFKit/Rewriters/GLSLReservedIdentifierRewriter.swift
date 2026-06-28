@@ -20,7 +20,9 @@ public enum GLSLReservedIdentifierRewriter {
         "private", "public", "protected", "union", "enum",
         "signed", "unsigned", "short", "long", "register", "goto",
     ]
-    private static let prefix = "usr_"
+    /// The alias prefix for a renamed reserved word. Internal so the interactive FixRuleEngine
+    /// suggestion uses the SAME convention as this batch rewriter (was divergent: `name_` suffix).
+    static let prefix = "usr_"
 
     public static func rewrite(_ code: String) -> String {
         var out = code

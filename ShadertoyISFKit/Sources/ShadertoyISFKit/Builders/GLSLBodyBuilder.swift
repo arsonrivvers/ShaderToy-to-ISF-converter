@@ -3,6 +3,10 @@ import Foundation
 public enum GLSLBodyBuilder {
     public struct Result { public let code: String; public let warnings: [ConversionWarning] }
 
+    /// Stage 10 of the `ISFConverter` pipeline (see its header comment for the full ordered list).
+    /// NOTE: two ordered conversion stages live HERE rather than in `ISFConverter`, so they aren't
+    /// visible in that function's body: 10a `GLSLPassNamespace.namespace`, then 10b
+    /// `GLSLPassMacroScoper.scope`, then 10c the per-pass `mainImage` rename + PASSINDEX dispatch.
     public static func build(passBodies: [String], commonCode: String) -> Result {
         var warnings: [ConversionWarning] = []
         var functions: [String] = []

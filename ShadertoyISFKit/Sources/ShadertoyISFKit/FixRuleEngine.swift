@@ -12,10 +12,13 @@ public enum FixRuleEngine {
 
     private static func texture2DRule(_ d: Diagnostic, _ src: String?) -> [FixSuggestion] {
         guard let src, src.contains("texture2D("), let line = d.line else { return [] }
-        let fixed = src.replacingOccurrences(of: "texture2D(", with: "IMG_PIXEL(")
+        // Use IMG_NORM_PIXEL (normalized coords) to match the batch SamplerRewriter — Shadertoy's
+        // texture2D takes normalized UV. (Was IMG_PIXEL, i.e. pixel coords — the opposite space,
+        // which sampled wrong vs. what the converter itself emits.)
+        let fixed = src.replacingOccurrences(of: "texture2D(", with: "IMG_NORM_PIXEL(")
         return [FixSuggestion(
-            title: "Replace texture2D with IMG_PIXEL",
-            explanation: "ISF (and the Metal/VDMX engine) don't provide GLSL ES 1.00 'texture2D'. Use the ISF image sampler IMG_PIXEL(image, pixelCoord) (or IMG_NORM_PIXEL for normalized coords).",
+            title: "Replace texture2D with IMG_NORM_PIXEL",
+            explanation: "ISF (and the Metal/VDMX engine) don't provide GLSL ES 1.00 'texture2D'. Use the ISF image sampler IMG_NORM_PIXEL(image, normalizedCoord) — Shadertoy's texture2D uses normalized UV. (Use IMG_PIXEL only if the coordinate is in pixels.)",
             edit: TextEdit(fromLine: line, toLine: line, replacement: fixed, expectedContains: "texture2D("))]
     }
 
@@ -23,13 +26,23 @@ public enum FixRuleEngine {
         guard let r = d.message.range(of: #"'([A-Za-z_][A-Za-z0-9_]*)' : Reserved word"#, options: .regularExpression) else { return [] }
         let name = String(d.message[r].drop(while: { $0 != "'" }).dropFirst().prefix(while: { $0 != "'" }))
         guard let line = d.line, let src else { return [] }
-        let renamed = src.replacingOccurrences(of: name, with: name + "_")
+        // Word-boundary rename to the SAME alias the batch GLSLReservedIdentifierRewriter uses
+        // (`usr_<name>`). The old unbounded `replacingOccurrences(of: name)` rewrote the word inside
+        // other identifiers (`inside` → `_inside`) for short reserved words, corrupting the line.
+        let alias = GLSLReservedIdentifierRewriter.prefix + name
+        let re = try! NSRegularExpression(pattern: "\\b" + NSRegularExpression.escapedPattern(for: name) + "\\b")
+        let renamed = re.stringByReplacingMatches(in: src, range: NSRange(src.startIndex..<src.endIndex, in: src),
+            withTemplate: NSRegularExpression.escapedTemplate(for: alias))
         return [FixSuggestion(
             title: "Rename reserved word '\(name)'",
-            explanation: "'\(name)' is reserved in Metal Shading Language, so the shader won't compile. Rename it (e.g. '\(name)_'). Check other lines that use '\(name)' too — this fix only edits the reported line.",
+            explanation: "'\(name)' is reserved in Metal Shading Language, so the shader won't compile. Rename it to '\(alias)'. Check other lines that use '\(name)' too — this fix only edits the reported line.",
             edit: TextEdit(fromLine: line, toLine: line, replacement: renamed, expectedContains: name))]
     }
 
+    // NOTE: this interactive rule intentionally differs from the batch GLSLCompat tanh handling.
+    // GLSLCompat prepends a `#if __VERSION__`-guarded global `tanh` overload set; here we offer a
+    // single-line, self-contained `tanh_` polyfill + call rewrite so the quick-fix stays a one-line
+    // edit the user can review in place (no whole-file preamble injection from a diagnostic click).
     private static func tanhRule(_ d: Diagnostic, _ src: String?) -> [FixSuggestion] {
         guard d.message.contains("'tanh'"), let line = d.line, let src else { return [] }
         let polyfill = "float tanh_(float x){ float e=exp(2.0*x); return (e-1.0)/(e+1.0); }"

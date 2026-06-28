@@ -1,6 +1,24 @@
 import Foundation
 
 public enum ISFConverter {
+    /// The conversion is an ORDERED pipeline; order is correctness-critical and a wrong order usually
+    /// fails silently as a black shader rather than loudly. The authoritative stage list (some stages
+    /// live in `GLSLBodyBuilder`, so they aren't visible in this function's body — see stage 10):
+    ///
+    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter   3. iMouse rewrite (cond.)
+    ///              4. channel auto-stub             5. SamplerRewriter
+    ///   Common:    6. GLSLLineContinuation.splice   7. CommonChannelRewriter (PASSINDEX dispatch)
+    ///              8. CommonUniformRewriter          9. HeaderMacroExpander
+    ///             10. GLSLBodyBuilder.build, which internally runs, IN ORDER:
+    ///                   10a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
+    ///                   10b. GLSLPassMacroScoper  (#undef per-pass #defines — restores isolation)
+    ///                   10c. per-pass mainImage rename + PASSINDEX dispatch assembly
+    ///             11. GLSLFunctionDedup   12. GLSLReservedIdentifierRewriter   13. OutputInitializer
+    ///             14. GLSLCompat (+ GLSLLint)   15. HeaderBuilder
+    ///
+    /// Key invariants: line-continuation splice precedes everything; macro-expand (9) precedes the
+    /// per-pass mainImage rename (10c); dedup (11) follows namespacing (10a); compat polyfills (14)
+    /// are prepended last. Preserve this order when refactoring.
     public static func convert(_ shader: Shader) -> (ISFDocument, [ConversionWarning]) {
         var warnings: [ConversionWarning] = []
         let plan = PassBuilder.build(passes: shader.renderpass)
