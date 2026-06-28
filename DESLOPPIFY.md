@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-06-27 · branch: desloppify-cleanup · 14 open / 13 done (M8 + M12-probe staged) · remaining mediums M1/M2/M3 need a corpus run; rest are N-tier_
+_Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + M12-probe staged) · remaining: M1/M2/M3 (corpus) + 8 N-tier_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -172,7 +172,8 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 14 open / 13 done (M8 + 
 - **Safe to fix now?** yes.
 
 ### N5 — RemixGenerator has a duplicate, production-unused initializer
-- **Status:** todo
+- **Status:** done
+- **Resolved:** The `model:` init (used by tests) is now a `convenience` init delegating to the `modelProvider:` designated init instead of duplicating the 5-field body. API unchanged; 171 tests green.
 - **Where:** `App/TrueISFEditor/Remix/RemixGenerator.swift:26-44` (two near-identical inits `model:` vs `modelProvider:`; only `modelProvider:` is used in production at `TrueISFEditorApp.swift:11`)
 - **Why it matters:** Two constructors to keep in sync; a reader can't tell which is canonical.
 - **Recommend:** Keep only `modelProvider:`; have the test-only `model:` convenience (if needed) delegate to it.
@@ -185,7 +186,8 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 14 open / 13 done (M8 + 
 - **Safe to fix now?** yes.
 
 ### N7 — Duplicated renderpass-to-comment formatting in AppModel
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Extracted `AppModel.annotatedSource(_:)`; both `convert()` and `convertPastedCode()` call it instead of repeating the `renderpass.map { … }.joined(...)` banner formatting.
 - **Where:** `App/TrueISFEditor/AppModel.swift:99-101` and `:161-163` — identical `renderpass.map { "// ===== …" }.joined(...)`
 - **Recommend:** Extract `static func annotatedSource(_ shader:) -> String`.
 - **Safe to fix now?** yes.
@@ -205,7 +207,8 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 14 open / 13 done (M8 + 
 - **Safe to fix now?** yes.
 
 ### N10 — Keychain item missing kSecAttrAccessible / device scoping
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `KeychainStore.save` now sets `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and checks the `SecItemAdd` `OSStatus` (asserts on failure instead of silently swallowing it).
 - **Where:** `App/TrueISFEditor/KeychainStore.swift:10-18`
 - **Why it matters:** The Shadertoy key is correctly in the Keychain but `SecItemAdd` omits `kSecAttrAccessible`, inheriting the default rather than declaring intent, and isn't pinned to this device. Low blast radius (Silver-tier read-only key) but explicit is better.
 - **Recommend:** Set `kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; optionally check the `OSStatus` so a silent save failure is visible.

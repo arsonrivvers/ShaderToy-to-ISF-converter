@@ -17,6 +17,13 @@ final class AppModel: ObservableObject {
 
     private lazy var webFetcher = WebKitShaderFetcher()
 
+    /// The imported GLSL with each render pass prefixed by a `// ===== name (type) =====` banner.
+    static func annotatedSource(_ shader: Shader) -> String {
+        shader.renderpass
+            .map { "// ===== \($0.name) (\($0.type.rawValue)) =====\n\($0.code)" }
+            .joined(separator: "\n\n")
+    }
+
     /// Turns a shader name into a safe `.fs` filename.
     static func safeFileName(_ name: String) -> String {
         let illegal = CharacterSet(charactersIn: "/\\:?%*|\"<>").union(.newlines)
@@ -64,9 +71,7 @@ final class AppModel: ObservableObject {
                 statusMessage = "Fetching via browser (clearing Cloudflare)…"
                 shader = try await webFetcher.fetchShader(id: id)
             }
-            importedCode = shader.renderpass
-                .map { "// ===== \($0.name) (\($0.type.rawValue)) =====\n\($0.code)" }
-                .joined(separator: "\n\n")
+            importedCode = Self.annotatedSource(shader)
             let (doc, w) = ISFConverter.convert(shader)
             isfOutput = doc.fileText
             warnings = w
@@ -126,9 +131,7 @@ final class AppModel: ObservableObject {
         let isMultipass = ShaderFactory.pasteContainsBuffers(code)
         let shader = ShaderFactory.fromPaste(
             code, name: isMultipass ? "Pasted Multipass Shader" : "Pasted Shader")
-        importedCode = shader.renderpass
-            .map { "// ===== \($0.name) (\($0.type.rawValue)) =====\n\($0.code)" }
-            .joined(separator: "\n\n")
+        importedCode = Self.annotatedSource(shader)
 
         let (doc, baseWarnings) = ISFConverter.convert(shader)
         var w = baseWarnings

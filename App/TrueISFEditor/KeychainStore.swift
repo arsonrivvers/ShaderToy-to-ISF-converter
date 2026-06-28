@@ -15,7 +15,13 @@ enum KeychainStore {
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = data
-        SecItemAdd(add as CFDictionary, nil)
+        // Scope the key to this device and only while unlocked (declare intent rather than inherit
+        // the default); surface a silent save failure instead of swallowing the OSStatus.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess {
+            assertionFailure("KeychainStore.save failed: OSStatus \(status)")
+        }
     }
 
     static func load() -> String? {

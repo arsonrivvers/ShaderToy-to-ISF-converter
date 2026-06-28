@@ -23,14 +23,13 @@ final class RemixGenerator {
     /// `maxConcurrent` defaults to 2: each provider call spawns a full Claude/Codex CLI environment, so
     /// 4+ at once thrash the machine and individually blow past the timeout (a single call is ~37s).
     /// `timeout` is per child (from-scratch generation is heavier than an edit — 420s with margin).
-    init(makeProvider: @escaping () -> AssistProvider, model: String?,
-         maxConcurrent: Int = 2, timeout: TimeInterval = 420,
-         systemProvider: @escaping () -> String = RemixPrompt.system) {
-        self.makeProvider = makeProvider
-        self.modelProvider = { model }
-        self.systemProvider = systemProvider
-        self.maxConcurrent = maxConcurrent
-        self.timeout = timeout
+    /// Convenience for a fixed model string — delegates to the `modelProvider:` designated init
+    /// (was a duplicated body). Used by tests; production uses `modelProvider:` for live selection.
+    convenience init(makeProvider: @escaping () -> AssistProvider, model: String?,
+                     maxConcurrent: Int = 2, timeout: TimeInterval = 420,
+                     systemProvider: @escaping () -> String = RemixPrompt.system) {
+        self.init(makeProvider: makeProvider, modelProvider: { model },
+                  maxConcurrent: maxConcurrent, timeout: timeout, systemProvider: systemProvider)
     }
 
     init(makeProvider: @escaping () -> AssistProvider, modelProvider: @escaping () -> String?,
