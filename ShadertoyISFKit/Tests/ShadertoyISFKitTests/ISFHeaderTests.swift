@@ -36,6 +36,33 @@ final class ISFHeaderTests: XCTestCase {
         XCTAssertNil(h.extra["PASSES"])
     }
 
+    // C3 — a leading license/credit block comment before the ISF header must not defeat detection.
+    private let sampleWithLeadingComment = """
+    /* MIT License (c) 2021 someone
+       see https://example.com (terms apply) */
+    /*{
+      "ISFVSN": "2.0",
+      "INPUTS": [ { "NAME": "speed", "TYPE": "float", "DEFAULT": 0.5 } ]
+    }*/
+
+    void main() { gl_FragColor = vec4(1.0); }
+    """
+
+    func test_parse_skipsLeadingNonHeaderComment() throws {
+        let h = try ISFHeader.parse(sampleWithLeadingComment)
+        XCTAssertEqual(h.inputs.map(\.name), ["speed"])
+    }
+
+    func test_write_replacesRealHeader_doesNotPrependDuplicate() throws {
+        let h = try ISFHeader.parse(sampleWithLeadingComment)
+        let out = h.write(into: sampleWithLeadingComment)
+        // Exactly one ISF header object (`{` after a `/*`), not two.
+        let headerBlocks = out.components(separatedBy: "INPUTS").count - 1
+        XCTAssertEqual(headerBlocks, 1, out)
+        // The leading license comment is preserved.
+        XCTAssertTrue(out.contains("MIT License"), out)
+    }
+
     func test_parse_noHeader_throwsNoHeader() {
         XCTAssertThrowsError(try ISFHeader.parse("void main(){}")) { e in
             XCTAssertEqual(e as? ISFHeaderError, .noHeader)

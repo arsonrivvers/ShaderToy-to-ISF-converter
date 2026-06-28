@@ -18,6 +18,7 @@ public enum ShadertoyClientError: Error, Equatable {
     case shaderNotAccessible   // private, or not "public + API"
     case httpError(Int)
     case decodingFailed
+    case invalidShaderID       // id not a well-formed Shadertoy id (alphanumeric)
 }
 
 private struct ShadertoyAPIError: Decodable { let error: String
@@ -32,10 +33,18 @@ public struct ShadertoyClient {
         self.fetcher = fetcher
     }
 
-    public static func apiURL(id: String, key: String) -> URL {
-        var c = URLComponents(string: "https://www.shadertoy.com/api/v1/shaders/\(id)")!
+    /// Builds the shader-fetch URL. `id` is untrusted (pasted URL / manual entry); Shadertoy ids are
+    /// alphanumeric, so reject anything else rather than force-unwrapping a URL built from arbitrary
+    /// text (a malformed paste used to crash here). The key is carried as a query item, which
+    /// percent-encodes its value safely.
+    public static func apiURL(id: String, key: String) throws -> URL {
+        guard !id.isEmpty, id.allSatisfy({ $0.isLetter || $0.isNumber }),
+              var c = URLComponents(string: "https://www.shadertoy.com/api/v1/shaders/\(id)") else {
+            throw ShadertoyClientError.invalidShaderID
+        }
         c.queryItems = [URLQueryItem(name: "key", value: key)]
-        return c.url!
+        guard let url = c.url else { throw ShadertoyClientError.invalidShaderID }
+        return url
     }
 
     /// Fetches a shader, retrying once on a *transient* failure (network error, HTTP 429, or 5xx).
@@ -55,7 +64,7 @@ public struct ShadertoyClient {
     }
 
     private func attemptFetch(id: String) async throws -> Shader {
-        let (data, status) = try await fetcher.fetch(Self.apiURL(id: id, key: key))
+        let (data, status) = try await fetcher.fetch(Self.apiURL(id: id, key: key))   // throws .invalidShaderID
         guard status == 200 else { throw ShadertoyClientError.httpError(status) }
         // Shadertoy returns {"Error": "..."} (HTTP 200) for inaccessible shaders.
         if (try? JSONDecoder().decode(ShadertoyAPIError.self, from: data)) != nil {

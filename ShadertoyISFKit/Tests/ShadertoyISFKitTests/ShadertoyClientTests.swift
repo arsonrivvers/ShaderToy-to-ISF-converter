@@ -28,9 +28,16 @@ final class ShadertoyClientTests: XCTestCase {
         return try Data(contentsOf: try XCTUnwrap(url))
     }
 
-    func test_buildsRequestURL_withIDAndKey() {
-        let url = ShadertoyClient.apiURL(id: "Ms2SD1", key: "ABC123")
+    func test_buildsRequestURL_withIDAndKey() throws {
+        let url = try ShadertoyClient.apiURL(id: "Ms2SD1", key: "ABC123")
         XCTAssertEqual(url.absoluteString, "https://www.shadertoy.com/api/v1/shaders/Ms2SD1?key=ABC123")
+    }
+
+    // C2 — a malformed id must surface as a handled error, not crash on force-unwrap.
+    func test_apiURL_malformedID_throwsInsteadOfCrashing() {
+        XCTAssertThrowsError(try ShadertoyClient.apiURL(id: "bad id#frag", key: "k")) { e in
+            XCTAssertEqual(e as? ShadertoyClientError, .invalidShaderID)
+        }
     }
 
     func test_fetch_decodesShader() async throws {

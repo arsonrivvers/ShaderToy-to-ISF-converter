@@ -65,8 +65,15 @@ public enum SamplerRewriter {
 
     private static func binding(forChannelArg arg: String,
                                 bindings: [Int: ChannelBinding.Binding]) -> ChannelBinding.Binding? {
+        // The arg may carry a trailing comment (`iChannel0 /* src */`); match the leading
+        // `iChannelN` identifier rather than requiring the whole token to be exactly the channel.
         let t = arg.trimmed
-        guard t.hasPrefix("iChannel"), let n = Int(t.dropFirst("iChannel".count)) else { return nil }
+        guard t.hasPrefix("iChannel") else { return nil }
+        let rest = t.dropFirst("iChannel".count)
+        let digits = rest.prefix { $0.isNumber }
+        guard !digits.isEmpty, let n = Int(digits) else { return nil }
+        // The digits must end the identifier — don't match `iChannel0img` as channel 0.
+        if let after = rest.dropFirst(digits.count).first, after.isLetter || after == "_" { return nil }
         return bindings[n]
     }
 

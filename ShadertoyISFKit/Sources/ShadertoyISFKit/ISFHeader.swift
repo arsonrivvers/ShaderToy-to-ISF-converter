@@ -109,14 +109,22 @@ public struct ISFHeader: Equatable {
     // MARK: locate / parse
 
     /// The character range of the whole `/*{ … }*/` block (delimiters included), or nil if absent.
-    /// Robust to whitespace variants (`/*{`, `/* {`, `/*\n{ …`): a leading comment counts as the ISF
-    /// header only when its body is a JSON object.
+    /// Robust to whitespace variants (`/*{`, `/* {`, `/*\n{ …`): a block comment counts as the ISF
+    /// header only when its body is a JSON object. Scans forward past any leading non-header comments
+    /// (e.g. a license/credit block common in shared `.fs` files) to find the real header — otherwise
+    /// detection would fail and `write` would prepend a duplicate header.
     public static func blockRange(in source: String) -> Range<String.Index>? {
-        guard let open = source.range(of: "/*"),
-              let close = source.range(of: "*/", range: open.upperBound..<source.endIndex) else { return nil }
-        let inner = source[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard inner.hasPrefix("{"), inner.hasSuffix("}") else { return nil }
-        return open.lowerBound..<close.upperBound
+        var searchStart = source.startIndex
+        while let open = source.range(of: "/*", range: searchStart..<source.endIndex),
+              let close = source.range(of: "*/", range: open.upperBound..<source.endIndex) {
+            let inner = source[open.upperBound..<close.lowerBound]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if inner.hasPrefix("{"), inner.hasSuffix("}") {
+                return open.lowerBound..<close.upperBound
+            }
+            searchStart = close.upperBound
+        }
+        return nil
     }
 
     public static func parse(_ source: String) throws -> ISFHeader {

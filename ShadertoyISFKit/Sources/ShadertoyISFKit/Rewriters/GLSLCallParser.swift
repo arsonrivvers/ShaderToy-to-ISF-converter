@@ -12,7 +12,20 @@ enum GLSLCallParser {
         let chars = Array(code)
         var i = 0
         let fnChars = Array(fn)
+        var inLine = false, inBlock = false   // never match/rewrite a call sitting inside a comment
         while i < chars.count {
+            let c = chars[i]
+            let next = i + 1 < chars.count ? chars[i + 1] : " "
+            if inLine {
+                result.append(c); if c == "\n" { inLine = false }; i += 1; continue
+            }
+            if inBlock {
+                result.append(c)
+                if c == "*" && next == "/" { result.append(next); inBlock = false; i += 2; continue }
+                i += 1; continue
+            }
+            if c == "/" && next == "/" { inLine = true; result.append(c); i += 1; continue }
+            if c == "/" && next == "*" { inBlock = true; result.append(c); i += 1; continue }
             if matchesIdentifier(chars, at: i, fn: fnChars) {
                 let openIdx = i + fnChars.count
                 if openIdx < chars.count, chars[openIdx] == "(" {
@@ -45,8 +58,20 @@ enum GLSLCallParser {
     static func parseArgs(_ chars: [Character], openParen: Int) -> (args: [String], end: Int)? {
         var depth = 0, i = openParen
         var current = "", args: [String] = []
+        var inLine = false, inBlock = false   // parens/commas inside comments are not arg structure
         while i < chars.count {
             let c = chars[i]
+            let next = i + 1 < chars.count ? chars[i + 1] : " "
+            if inLine {
+                current.append(c); if c == "\n" { inLine = false }; i += 1; continue
+            }
+            if inBlock {
+                current.append(c)
+                if c == "*" && next == "/" { current.append(next); inBlock = false; i += 2; continue }
+                i += 1; continue
+            }
+            if c == "/" && next == "/" { inLine = true; current.append(c); i += 1; continue }
+            if c == "/" && next == "*" { inBlock = true; current.append(c); i += 1; continue }
             if c == "(" { depth += 1; if depth == 1 { i += 1; continue } }
             if c == ")" { depth -= 1; if depth == 0 { args.append(current); return (args, i) } }
             if c == "," && depth == 1 { args.append(current); current = ""; i += 1; continue }
