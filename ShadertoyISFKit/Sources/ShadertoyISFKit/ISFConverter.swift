@@ -5,19 +5,19 @@ public enum ISFConverter {
     /// fails silently as a black shader rather than loudly. The authoritative stage list (some stages
     /// live in `GLSLBodyBuilder`, so they aren't visible in this function's body — see stage 10):
     ///
-    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter   3. iMouse rewrite (cond.)
-    ///              4. channel auto-stub             5. SamplerRewriter
-    ///   Common:    6. GLSLLineContinuation.splice   7. CommonChannelRewriter (PASSINDEX dispatch)
-    ///              8. CommonUniformRewriter          9. HeaderMacroExpander
-    ///             10. GLSLBodyBuilder.build, which internally runs, IN ORDER:
-    ///                   10a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
-    ///                   10b. GLSLPassMacroScoper  (#undef per-pass #defines — restores isolation)
-    ///                   10c. per-pass mainImage rename + PASSINDEX dispatch assembly
-    ///             11. GLSLFunctionDedup   12. GLSLReservedIdentifierRewriter   13. OutputInitializer
-    ///             14. GLSLCompat (+ GLSLLint)   15. HeaderBuilder
+    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter (incl. iMouse mirror)
+    ///              3. channel auto-stub             4. SamplerRewriter
+    ///   Common:    5. GLSLLineContinuation.splice   6. CommonChannelRewriter (PASSINDEX dispatch)
+    ///              7. CommonUniformRewriter          8. HeaderMacroExpander
+    ///              9. GLSLBodyBuilder.build, which internally runs, IN ORDER:
+    ///                   9a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
+    ///                   9b. GLSLPassMacroScoper  (#undef per-pass #defines — restores isolation)
+    ///                   9c. per-pass mainImage rename + PASSINDEX dispatch assembly
+    ///             10. GLSLFunctionDedup   11. GLSLReservedIdentifierRewriter   12. OutputInitializer
+    ///             13. GLSLCompat (+ GLSLLint)   14. HeaderBuilder
     ///
-    /// Key invariants: line-continuation splice precedes everything; macro-expand (9) precedes the
-    /// per-pass mainImage rename (10c); dedup (11) follows namespacing (10a); compat polyfills (14)
+    /// Key invariants: line-continuation splice precedes everything; macro-expand (8) precedes the
+    /// per-pass mainImage rename (9c); dedup (10) follows namespacing (9a); compat polyfills (13)
     /// are prepended last. Preserve this order when refactoring.
     public static func convert(_ shader: Shader) -> (ISFDocument, [ConversionWarning]) {
         var warnings: [ConversionWarning] = []
@@ -48,16 +48,9 @@ public enum ISFConverter {
             if code.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
             if code.contains("iChannelResolution") { usesChannelResolution = true }
 
+            // iMouse is one of UniformRewriter's standard rules (mirrors xy into zw, "pressed");
+            // `includeMouse` above only gates declaring the `mouse` input in the header.
             code = UniformRewriter.rewrite(code)
-            if includeMouse {
-                // iMouse.xy is in pixels; ISF point2D `mouse` is normalized [0,1].
-                // iMouse.zw is the click position with sign signalling button-down on Shadertoy;
-                // many shaders gate interaction on it (`if (iMouse.z < 0.01) ...`). Mirror xy into
-                // zw (non-zero, "pressed") so the mouse slider actually drives those shaders.
-                code = code.replacingOccurrences(of: #"\biMouse\b"#,
-                    with: "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)",
-                    options: .regularExpression)
-            }
 
             // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
             // some Shadertoy shaders reference a channel the API/internal response never lists, which
@@ -92,6 +85,11 @@ public enum ISFConverter {
         // whole-string rewriter would corrupt.
         let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
         if splicedCommon.contains("iChannelResolution") { usesChannelResolution = true }
+        // iMouse referenced only in the Common tab must still declare the mouse input — the
+        // file-scope rewrite happens in CommonUniformRewriter below, but the header flag is set here.
+        if splicedCommon.range(of: #"\biMouse\b"#, options: .regularExpression) != nil {
+            includeMouse = true
+        }
         if usesChannelResolution {
             warnings.append(ConversionWarning(severity: .info,
                 message: "iChannelResolution has no ISF equivalent — mapped to vec3(RENDERSIZE, 1.0). Exact for buffer/feedback channels; for image inputs it loses the source's native size, verify if the shader scales by a channel's aspect."))

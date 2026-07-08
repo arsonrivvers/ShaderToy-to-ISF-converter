@@ -3,10 +3,10 @@ import Foundation
 public enum GLSLBodyBuilder {
     public struct Result { public let code: String; public let warnings: [ConversionWarning] }
 
-    /// Stage 10 of the `ISFConverter` pipeline (see its header comment for the full ordered list).
+    /// Stage 9 of the `ISFConverter` pipeline (see its header comment for the full ordered list).
     /// NOTE: two ordered conversion stages live HERE rather than in `ISFConverter`, so they aren't
-    /// visible in that function's body: 10a `GLSLPassNamespace.namespace`, then 10b
-    /// `GLSLPassMacroScoper.scope`, then 10c the per-pass `mainImage` rename + PASSINDEX dispatch.
+    /// visible in that function's body: 9a `GLSLPassNamespace.namespace`, then 9b
+    /// `GLSLPassMacroScoper.scope`, then 9c the per-pass `mainImage` rename + PASSINDEX dispatch.
     public static func build(passBodies: [String], commonCode: String) -> Result {
         var warnings: [ConversionWarning] = []
         var functions: [String] = []
@@ -30,11 +30,13 @@ public enum GLSLBodyBuilder {
                     message: "Possible vector ternary (a ? b : c) — unreliable on Metal/macOS ISF; rewrite as if/else.",
                     context: "pass \(idx)"))
             }
+            // The dispatch temp is deliberately not a short name like `c`: a golfed pass's
+            // object-like `#define c ...` stays live at main() and would expand the declaration.
             let isLast = idx == passBodies.count - 1
             if isLast {
-                dispatch.append("    if (PASSINDEX == \(idx)) { vec4 c; \(fnName)(c, gl_FragCoord.xy); gl_FragColor = c; }")
+                dispatch.append("    if (PASSINDEX == \(idx)) { vec4 _isf_passColor; \(fnName)(_isf_passColor, gl_FragCoord.xy); gl_FragColor = _isf_passColor; }")
             } else {
-                dispatch.append("    if (PASSINDEX == \(idx)) { vec4 c; \(fnName)(c, gl_FragCoord.xy); gl_FragColor = c; return; }")
+                dispatch.append("    if (PASSINDEX == \(idx)) { vec4 _isf_passColor; \(fnName)(_isf_passColor, gl_FragCoord.xy); gl_FragColor = _isf_passColor; return; }")
             }
         }
 

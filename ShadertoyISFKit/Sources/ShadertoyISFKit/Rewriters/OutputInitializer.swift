@@ -18,7 +18,9 @@ public enum OutputInitializer {
         for name in GLSLLint.uninitializedAccumulatorOutputs(code) {
             // Match the function signature declaring this output through its opening brace, and
             // insert the initializer right after the brace. `[^)]*` spans the rest of the params.
-            let pattern = "(out\\s+vec4\\s+\(name)\\b[^)]*\\)\\s*\\{)"
+            // `\b` keeps `inout vec4` signatures out: injecting `= vec4(0.0)` into an inout
+            // function would wipe the value the caller passed in.
+            let pattern = "(\\bout\\s+vec4\\s+\(name)\\b[^)]*\\)\\s*\\{)"
             guard let re = try? NSRegularExpression(pattern: pattern) else { continue }
             let ns = out as NSString
             let range = NSRange(location: 0, length: ns.length)

@@ -23,7 +23,9 @@ public enum GLSLLint {
     /// the fixer agree on detection.
     public static func uninitializedAccumulatorOutputs(_ code: String) -> [String] {
         let ns = code as NSString
-        let sig = try! NSRegularExpression(pattern: "out\\s+vec4\\s+(\\w+)")
+        // `\b` so `inout vec4` never matches as `out vec4` — compound-assign-first is the normal
+        // idiom for an inout accumulator, not an uninitialized output.
+        let sig = try! NSRegularExpression(pattern: "\\bout\\s+vec4\\s+(\\w+)")
         var checked = Set<String>()
         var result: [String] = []
         for m in sig.matches(in: code, range: NSRange(location: 0, length: ns.length)) {

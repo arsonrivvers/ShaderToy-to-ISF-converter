@@ -80,6 +80,24 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(doc.fileText.contains("vec4(mouse * RENDERSIZE, mouse * RENDERSIZE).x"))
     }
 
+    /// C6 — iMouse referenced ONLY in the Common tab must still declare the mouse input in the
+    /// header and be rewritten at Common file scope (it previously reached the transpiler as an
+    /// undeclared `iMouse` → black import).
+    func test_iMouse_inCommonOnly_declaresMouseInputAndRewrites() {
+        let common = RenderPass(inputs: [], outputs: [], code: "#define M iMouse",
+                                name: "Common", type: .common)
+        let image = RenderPass(inputs: [], outputs: [PassOutput(id: "out0", channel: 0)],
+                               code: "void mainImage(out vec4 O, vec2 I){ O = vec4(M.xy, 0.0, 1.0); }",
+                               name: "Image", type: .image)
+        let shader = Shader(info: Info(id: "", name: "CommonMouse", username: nil, description: nil),
+                            renderpass: [image, common])
+        let (doc, _) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.fileText.contains("\"NAME\" : \"mouse\""),
+                      "Common-only iMouse must declare the mouse input; got header:\n\(doc.headerJSON)")
+        XCTAssertNil(doc.fileText.range(of: #"\biMouse\b"#, options: .regularExpression),
+                     "no raw iMouse may survive conversion")
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText

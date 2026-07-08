@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + M12-probe staged) · remaining: M1/M2/M3 (corpus) + 8 N-tier_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open / 20 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; C4/C6/C7/M17 fixed same day (plan Task 1.1 — 209 tests green, corpus 74/78 no-change) · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -37,11 +37,70 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + 
 - **Recommend:** If the first block isn't a JSON object, scan forward for the next `/* { … } */` rather than giving up.
 - **Safe to fix now?** yes — isolated, covered by header round-trip tests.
 
+### C4 — GLSLLint/OutputInitializer treat `inout vec4` as `out vec4` → injected zero wipes carried state
+- **Status:** done
+- **Resolved:** `\bout` word boundary in both patterns (`\b` correctly fails inside `inout`); 3 new tests incl. mixed out+inout same-name case proving only the `out` signature is injected. 209 tests green, corpus 74/78 (no change).
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLLint.swift:26`, `Rewriters/OutputInitializer.swift:21`
+- **Why it matters:** Both patterns start `out\s+vec4` with no left word boundary, so `inout vec4 col` helper params match as `out vec4`. An `inout` accumulator (`void addGlow(inout vec4 col){ col += g; }`) is mis-detected as uninitialized, and OutputInitializer's injection regex replaces **all** matching signatures — `col = vec4(0.0);` lands at the top of the inout function, wiping the caller's value. Silent wrong/black render, zero diagnostics: the engine's #1 bug class.
+- **Recommend:** `\bout\s+vec4` in both patterns (`\b` correctly fails between `in` and `out`) + regression test.
+- **Safe to fix now?** yes — one line each, no ordering implications.
+
+### C5 — Common helper bodies never receive uniform rewrites → `iTime` inside a Common function ships raw
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/CommonUniformRewriter.swift:27`
+- **Why it matters:** The param-shadow protection is indiscriminate — **all** brace-depth>0 code is skipped, not just shadowed names. `float n(vec2 p){ return sin(p.x + iTime); }` — extremely common in real Common tabs — reaches the final `.fs` with `iTime` intact → transpile fail → black import. Tests only cover the param-shadow case. Likely a real slice of remaining corpus failures.
+- **Recommend:** Protect a uniform name inside a body **only when that function's parameter list declares it**; rewrite otherwise. Needs the function scanner (ties into M3).
+- **Safe to fix now?** wait — designed change with corpus validation (ideally after the pixel-truth render gate exists).
+
+### C6 — `iMouse` in Common code is handled nowhere → undeclared identifier
+- **Status:** done
+- **Resolved:** iMouse is now a standard `UniformRewriter` rule (xy mirrored into zw, "pressed") instead of an ISFConverter special case — the scope-aware `CommonUniformRewriter` picks it up at Common file scope for free, param-threaded `iMouse` stays protected; `includeMouse` detection now also scans `splicedCommon`; the inline conditional rewrite block in ISFConverter is gone and the pipeline stage doc renumbered (15→14). Body-scope Common iMouse inherits C5's design (unchanged). 3 new tests; corpus 74/78 (no change).
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ISFConverter.swift:48` (detection scans pass code only), `:93-120` (Common path has no iMouse step); `Rewriters/UniformRewriter.swift` has no iMouse rule
+- **Why it matters:** A Common tab with `#define M iMouse` or file-scope `vec4 m = iMouse;` never gets rewritten and never sets `includeMouse` → undeclared `iMouse` → transpile fail → black import, even when a pass also uses iMouse.
+- **Recommend:** Check `splicedCommon` for `\biMouse\b` when setting `includeMouse`; apply the vec4-mirror rewrite to Common file-scope runs (via CommonUniformRewriter so param-threaded `iMouse` stays protected).
+- **Safe to fix now?** yes for detection + file-scope; body-scope inherits C5's design.
+
+### C7 — Nested sampler calls are never rewritten (texture-inside-texture)
+- **Status:** done
+- **Resolved:** `GLSLCallParser.replaceCall` now recursively rewrites each parsed arg before invoking the transform, so calls nested inside a matched call's args (the distortion/feedback idiom) are converted too; bounded by nesting depth, transform-nil path unchanged. 2 new tests incl. end-to-end `texture(iCh0, uv + texture(iCh1, uv).xy)` → both `IMG_NORM_PIXEL`. Corpus 74/78 (no change).
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLCallParser.swift:29-41` (`i = endIdx + 1` skips the whole matched call; args never re-scanned)
+- **Why it matters:** `texture(iChannel0, uv + texture(iChannel1, uv).xy)` — the standard distortion/feedback idiom — leaves the inner call raw; the bare-identifier fallback then emits `texture(iChannel1img, uv)`. Host-dependent wrong sampling or transpile failure; audio/cubemap special handling (FFT/wave split, `_dirToEquirect`) silently lost.
+- **Recommend:** Run each `replaceCall` to a fixpoint (re-scan output until no change) or rewrite `args` recursively before `transform`. Bounded — replacements never reintroduce the function names.
+- **Safe to fix now?** yes, with tests.
+
+### C8 — No dirty-document guard anywhere → one stray click destroys unsaved work
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Models/ISFFile.swift` (`isDirty` tracked, never consulted); `Views/LibraryView.swift:39-42`; `EditorViewModel.swift:91,103,113,127`; `Remix/RemixStudioView.swift:242`
+- **Why it matters:** The library list is selection-driven — a single click replaces the document. Open/new/example/import/remix-open all silently discard unsaved edits with zero confirmation. Straight data loss.
+- **Recommend:** One choke-point guard in `EditorViewModel` (`guard !file.isDirty || userConfirms()`) before any document replacement.
+- **Safe to fix now?** yes — additive, small, testable.
+
+### C9 — CameraSource releases the previous CVMetalTexture while the GPU may still read it
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/CameraSource.swift:51-54` (vs `MetalPreviewController.swift:304-309` binding it in-flight)
+- **Why it matters:** Each new frame overwrites `retained` — the only strong ref to the previous `CVMetalTexture` — while a command buffer may still be reading its `MTLTexture`. Apple requires holding the CVMetalTexture until GPU completion; the cache can recycle the IOSurface mid-read → tearing/corruption.
+- **Recommend:** Small ring of recent CVMetalTextures, or release via `commandBuffer.addCompletedHandler`.
+- **Safe to fix now?** yes — isolated to `CameraFrameProvider`.
+
+### C10 — Camera permission denied → silent black forever; capture session never stops
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/CameraSource.swift:70-73` (init only fails on texture-cache alloc); `SourceRouter.swift:84-85` (fallback never triggers); no `stopRunning()` exists anywhere
+- **Why it matters:** On permission-denied the "camera unavailable ⇒ default pattern, never black" fallback never fires — the input renders black forever, the exact class this app's doctrine forbids. And once `SharedCamera` starts, the camera (and indicator light) stays on for the app's lifetime even after every input switches away — privacy + energy.
+- **Recommend:** Authorization-aware state (fallback to pattern + "camera denied" hint) now; stop-the-session-when-unused via a small refcount design after.
+- **Safe to fix now?** yes for the denied path; wait for session-stop (needs design).
+
+### C11 — `EditorViewModel.open()` skips header sync → old header spliced into the new file
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/EditorViewModel.swift:91-101` (no `headerModel.syncFromText`, unlike `newUntitled`/`loadImported`/`loadExample`); `HeaderAuthoringModel.swift:45-47` (writes from its own cached `currentSource`); `conversionReportTitle` not cleared in `open()`/`newUntitled()`
+- **Why it matters:** The Inputs/Passes tabs keep the **previous** document's header after opening from the library; a GUI edit there splices the old header into the new file — real file corruption. Plus a stale "Imported X" report banner floats over unrelated documents.
+- **Recommend:** `headerModel.syncFromText(file.source)` + `conversionReportTitle = nil` in both paths; regression test.
+- **Safe to fix now?** yes.
+
 ## Medium
 
 ### M1 — OutputInitializer runs on the merged multi-pass file → cross-pass false negative → NaN/black pass
 - **Status:** todo
-- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLLint.swift:24-37` (consumed by `OutputInitializer.swift:18`, invoked at `ISFConverter.swift:121,126`)
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLLint.swift:24-37` (consumed by `OutputInitializer.swift:18`, invoked at `ISFConverter.swift:139,144` — line refs drifted; re-verified 2026-07-08, still reproduces; C4 compounds this same code)
 - **Why it matters:** Uninitialized-accumulator detection scans the whole concatenated file and dedups output names. Multipass shaders almost always name the output `O`/`fragColor` in every pass; if pass 0 plainly assigns `O` and pass 1 accumulates into `O` before assigning, the global "first plain `=` before first compound" test sees pass 0's plain assignment first → pass 1 is **not** flagged or auto-initialized → it stays NaN/black. Silent, and exactly the bug this file exists to fix.
 - **Recommend:** Run the detector per-pass body (before `GLSLBodyBuilder` concatenation, while each pass's `mainImage` is isolated).
 - **Safe to fix now?** wait — depends on reordering relative to `GLSLBodyBuilder`; validate against the corpus.
@@ -49,14 +108,14 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + 
 ### M2 — GLSLGlobalScanner misses comma-separated / multi-line globals → silent cross-pass collision
 - **Status:** todo
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLGlobalScanner.swift:22-23`
-- **Why it matters:** The header pattern needs `TYPE NAME (=|;)` on one line. `float a, b, c;` matches only up to `a`, sees `,`, and **fails entirely** → the declaration is invisible to `GLSLFunctionDedup` and `GLSLPassNamespace`. If two passes both declare `float a, b;`, the cross-pass collision those rewriters exist to prevent slips through to the transpiler as a redefinition error.
+- **Why it matters:** The header pattern needs `TYPE NAME (=|;)` on one line. `float a, b, c;` matches only up to `a`, sees `,`, and **fails entirely** → the declaration is invisible to `GLSLFunctionDedup` and `GLSLPassNamespace`. If two passes both declare `float a, b;`, the cross-pass collision those rewriters exist to prevent slips through to the transpiler as a redefinition error. (Re-verified 2026-07-08: additionally, `float a = 1., b = 2.;` matches as a single Def named `a` — namespacing renames `a` and leaves `b` colliding.)
 - **Recommend:** Handle multi-declarator lists in the scanner, or emit a conversion warning when a depth-0 comma-list declaration is detected so the failure isn't silent.
 - **Safe to fix now?** wait — changing the scanner shifts dedup/namespace behavior; validate against the corpus.
 
 ### M3 — Five duplicate hand-rolled GLSL char-scanners (comment/brace/paren) that disagree
 - **Status:** todo
 - **Where:** `Rewriters/GLSLGlobalScanner.swift:40,63`, `Rewriters/GLSLFunctionScanner.swift:57`, `Rewriters/CommonUniformRewriter.swift:42-84`, `Rewriters/GLSLCallParser.swift:45`, `ShaderAssist/ShaderAssistResponseParser.swift:17`
-- **Why it matters:** Five separate state machines each walk characters tracking "in `//` / `/* */` / paren depth / brace depth," and they don't agree on what they handle (some skip comments, `GLSLCallParser.parseArgs` ignores them — see C1). A fix to comment-handling has to be made in up to five places and they silently diverge — the accumulation pattern that already produces this engine's bugs.
+- **Why it matters:** Five separate state machines each walk characters tracking "in `//` / `/* */` / paren depth / brace depth," and they don't agree on what they handle (some skip comments, `GLSLCallParser.parseArgs` ignores them — see C1). A fix to comment-handling has to be made in up to five places and they silently diverge — the accumulation pattern that already produces this engine's bugs. (Re-verified 2026-07-08: **divergence has grown since the C1 fix** — CallParser is now comment-aware but Global/Function scanners still accept match positions inside block comments (M14); `CommonChannelRewriter.chan` vs `SamplerRewriter.binding` disagree on trailing-comment args (M16); only ShaderAssistResponseParser handles string literals. A shared scanner structurally absorbs C5's design, M14, M18, M19, and N2.)
 - **Recommend:** Extract one `GLSLScanner` primitive (a cursor yielding chars with `inLineComment`/`inBlockComment`/`braceDepth`/`parenDepth` flags) and build all five consumers on it. C1 and N2 fold into this.
 - **Safe to fix now?** wait — touches the parsing core of every rewriter; do it behind `scripts/corpus-run.sh`.
 
@@ -141,6 +200,189 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + 
 - **Recommend:** Lift namespacing/macro-scoping into the visible `ISFConverter` sequence (or document the full ordered stage list in one header comment); consider modelling stages as an explicit array of transforms.
 - **Safe to fix now?** wait — pure refactor but must preserve exact order; do under the corpus.
 
+### M14 — Global/Function scanners accept regex matches inside block comments → phantom defs
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLGlobalScanner.swift:30-36`, `Rewriters/GLSLFunctionScanner.swift:28-36`
+- **Why it matters:** `depth()`/`braceMatchEnd()` skip comments when counting, but nothing checks whether the match position itself sits inside `/* … */`. A commented-out helper/global becomes a Def → spurious cross-pass renames; worst case `GLSLFunctionDedup` deletes the **real** definition and keeps the commented text. Commented-out variants are common in Shadertoy source.
+- **Recommend:** "In-comment at position" check from the shared scanner.
+- **Safe to fix now?** wait — fold into M3.
+
+### M15 — Common-tab audio/cubemap dispatchers degrade incorrectly
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/CommonChannelRewriter.swift:84-85` (vs `SamplerRewriter.swift:91-99`)
+- **Why it matters:** The dispatcher samples `IMG_NORM_PIXEL(b.glslName, uv)` flat: for audio that's the FFT sampler at raw uv with no FFT/wave y-split — waveform reads silently return spectrum data; for cubemaps the call site passes a `vec3` direction into a `vec2` param → type-mismatch compile error.
+- **Recommend:** Replicate `normSample`'s audio split in the dispatcher; add a vec3-param `_chN_tex` overload using `_dirToEquirect` for cubemap channels.
+- **Safe to fix now?** yes.
+
+### M16 — `CommonChannelRewriter.chan()` diverged from `SamplerRewriter.binding(forChannelArg:)`
+- **Status:** todo
+- **Where:** `CommonChannelRewriter.swift:31-35` vs `SamplerRewriter.swift:66-77`
+- **Why it matters:** The per-pass parser tolerates a trailing comment in the channel arg (`iChannel0 /* src */`); the Common one requires the whole trimmed token to `Int`-parse — same input, undeclared `iChannel0` in Common. M3's divergence claim, live and growing.
+- **Recommend:** Extract and share one channel-arg parser (SamplerRewriter's version).
+- **Safe to fix now?** yes.
+
+### M17 — Synthesized `main()`'s `vec4 c` temp is exposed to leaked pass macros
+- **Status:** done
+- **Resolved:** Dispatch temp renamed `c` → `_isf_passColor` in `GLSLBodyBuilder` (in-code note on why it must not be a short macro-capturable name); dispatch assertions updated + 1 new test. Corpus 74/78 (no change).
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/GLSLBodyBuilder.swift:35-37`; `Rewriters/GLSLPassMacroScoper.swift:42-53` never scans the generated `main()`
+- **Why it matters:** A pass's object-like `#define c …` (routine in golfed Shadertoy code) stays live at `main()` → `vec4 c;` expands to garbage → compile fail.
+- **Recommend:** Rename the temp to `_isf_passColor` (one line) and/or treat the synthesized `main()` as a pass when the scoper computes mentions.
+- **Safe to fix now?** yes.
+
+### M18 — Pass-vs-Common macro collisions unscoped
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLPassMacroScoper.swift:22` (takes only `passBodies`)
+- **Why it matters:** Common `#define A …` + a pass `#define A …` → "macro redefined; different substitutions" — the exact class the scoper exists to fix, across a boundary it can't see.
+- **Recommend:** Plumb `commonCode` into the scoper.
+- **Safe to fix now?** wait — fold into a scoper revision (with M3/M14).
+
+### M19 — iChannel/iMouse/iResolution detection matches inside comments → junk header inputs
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ISFConverter.swift:48-49,65,101,163-171`
+- **Why it matters:** `// TODO try iChannel2 here` yields a phantom stub image input + warning in the published `.fs`; a commented `iMouse` adds a mouse input and triggers the rewrite pass. Users see inputs that don't exist.
+- **Recommend:** Comment-strip before the detection scans (shared scanner; or an interim detection-only strip).
+- **Safe to fix now?** wait — fold into M3 (interim strip acceptable earlier).
+
+### M20 — Paste path routes helper params through the unprotected whole-string UniformRewriter
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderFactory.swift:33-38` (markerless paste = whole blob as one Image pass) + `ISFConverter.swift:51`; assumption documented at `ISFConverter.swift:89-92`
+- **Why it matters:** The "pass bodies don't declare uniform-named parameters" assumption only holds when helpers live in Common. A full shader pasted as one blob with a `vec2 iResolution`-style helper param emits `vec2 vec3(RENDERSIZE, 1.0)` → syntax error. Loud, but it's the fallback path users hit when Cloudflare blocks the fetch.
+- **Recommend:** Use the scope-aware rewriter for pass bodies too (with C5's redesign).
+- **Safe to fix now?** wait — same design change as C5.
+
+### M21 — `texture (iChannel0, uv)` — space before paren — is not rewritten
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLCallParser.swift:29-31` (requires `(` immediately after the identifier)
+- **Why it matters:** Valid GLSL, occasionally seen; falls through to the bare-identifier rename with the same host-dependent consequences as C7.
+- **Recommend:** Skip whitespace between identifier and `(`.
+- **Safe to fix now?** yes.
+
+### M22 — `textureSize`/`texelFetchOffset`/`textureGrad`/`textureProj` pass through silently
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/SamplerRewriter.swift` (no handling)
+- **Why it matters:** `textureSize(bufA, 0)` survives conversion; whether it compiles depends entirely on the host's sampler declaration — and the failure is silent.
+- **Recommend:** Emit a conversion warning at minimum.
+- **Safe to fix now?** yes (warning only).
+
+### M23 — `FixRuleEngine.tanhRule` quick-fix emits a nested function definition → can never compile
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/FixRuleEngine.swift:46-54`
+- **Why it matters:** The fix replaces the diagnostic line — by definition inside a function body — with `float tanh_(float x){…}` + the rewritten line: a nested function definition, invalid GLSL, guaranteed second compile error presented to the user as a "fix".
+- **Recommend:** Two-part edit (polyfill prepended at file top + line rewrite), or reuse GLSLCompat's prepend.
+- **Safe to fix now?** yes — interactive path only.
+
+### M24 — Zero convertible passes converts "successfully" to a black shader
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/PassBuilder.swift:36-42` + `ISFConverter.swift:37` → emits `void main() {\n\n}`
+- **Why it matters:** A shader with only sound/common passes (sound-only shaders exist on Shadertoy) yields a valid-looking `.fs` that renders black, with only a per-pass "skipped" note.
+- **Recommend:** Hard error-severity warning ("nothing convertible") or throw.
+- **Safe to fix now?** yes.
+
+### M25 — Stale compile results race in `MetalPreviewController.load` (no generation token)
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/MetalPreviewController.swift:60-81`
+- **Why it matters:** `load(B)` resets state synchronously, but a still-in-flight `applyCompile` for A (posted from `transpileQueue`) can land after — A's scene/inputs/diagnostics briefly published as valid for B, and `imageSources.updateInputs` gets the wrong input set. Self-correcting but visible.
+- **Recommend:** Monotonic load ID captured per compile; `applyCompile` drops results whose ID ≠ current.
+- **Safe to fix now?** yes.
+
+### M26 — Deactivated Metal engine and closed output window keep rendering forever
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/PreviewCoordinator.swift:56-62` (`switchEngine` never pauses Metal); `OutputWindow.swift` (no `willClose` handling; `isReleasedWhenClosed = false`)
+- **Why it matters:** `setPaused`/`drawOneFrame` are only called by `RemixThumbnailView` — switching to WebKit or closing the pop-out leaves an MTKView (internal timer; doesn't reliably stop when detached) driving `draw(in:)` with a loaded scene indefinitely. Invisible GPU/battery burn.
+- **Recommend:** Pause the deactivated engine in `switchEngine`; observe `NSWindow.willCloseNotification` in `OutputWindowManager` to pause/unload. **Bundle with M8's still-pending on-device verification** (same `setPaused` API).
+- **Safe to fix now?** yes — render-path change: one change, observe on-device, revert if black.
+
+### M27 — SettingsView can run a blocking login-shell CLI probe on the main thread per keystroke
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/SettingsView.swift:29,38` → `BinaryLocator.locate` (`ShaderAssist/ClaudeCodeRunner.swift:167-173`: `/bin/zsh -lc "command -v …"`, 5s timeout) inside SwiftUI `body`
+- **Why it matters:** When the CLI isn't at a known path, every keystroke in the path field re-runs a synchronous login shell — slow shells (nvm etc.) freeze Settings.
+- **Recommend:** Compute found-status async on appear + debounced path changes into `@State`.
+- **Safe to fix now?** yes.
+
+### M28 — `RemixThumbnailView.Coordinator.reported` never resets on source change
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Remix/RemixThumbnailView.swift:29-31,59` (+ identity reuse at `RemixLineageTreeView.swift:117`)
+- **Why it matters:** A recycled coordinator never delivers the new shader's compile result or snapshot — a newly promoted parent keeps the old tree swatch, and a bad replacement is reported as the previous result.
+- **Recommend:** Reset `reported = false` (and re-arm the snapshot) when `loadedISF` changes in `updateNSView`.
+- **Safe to fix now?** yes.
+
+### M29 — One forced GPU frame per paused Remix card per transcript line
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Remix/RemixThumbnailView.swift:34-36`
+- **Why it matters:** `updateNSView` calls `drawOneFrame()` whenever `!animating`; during generation every transcript append republishes the model → one forced frame per paused card per line, thousands of times per batch — quietly undoing M8's thermal win.
+- **Recommend:** `drawOneFrame()` only on an actual `animating` true→false transition (track previous value in the coordinator).
+- **Safe to fix now?** yes.
+
+### M30 — PreviewControlsView state dictionaries survive document changes
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Views/PreviewControlsView.swift:6-10`
+- **Why it matters:** `floats/bools/points/colors/longs` are keyed by input name and never cleared — load shader 2 with an input named like shader 1's and the slider shows the stale value; first drag jumps.
+- **Recommend:** Clear the dictionaries when `coordinator.inputs` identity changes.
+- **Safe to fix now?** yes.
+
+### M31 — Pop-out output window recompiles on every keystroke
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Views/EditorScreen.swift:96` → `OutputWindow.swift:30-33` (no debounce; the inline preview debounces 300ms at `EditorViewModel.swift:186`)
+- **Why it matters:** With the pop-out open, typing runs a full GLSL→SPIRV→MSL transpile per keystroke.
+- **Recommend:** Route both consumers through one debounced compiled-source event from `EditorViewModel`.
+- **Safe to fix now?** yes.
+
+### M32 — WebKit runtime errors are swallowed by the diagnostics pipeline
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/WebKitPreviewController.swift:87-88` (`"runtime"` message sets `compileError` but leaves `compileValid == true`); `EditorViewModel.swift:193-195`
+- **Why it matters:** Runtime errors never reach the diagnostics panel or gutter — the user sees a broken render with "No diagnostics". The exact silent-failure UX this app exists to prevent.
+- **Recommend:** Set `compileValid = false` on runtime error, or publish runtime errors on their own channel.
+- **Safe to fix now?** yes.
+
+### M33 — SuggestionGoalSheet burns a ~30s LLM run on every open and can't be cancelled by dismissal
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Views/SuggestionGoalSheet.swift:64-66`
+- **Why it matters:** `onAppear` unconditionally calls `requestSuggestionGoals` — reopening via "Change Goal"/"Start Over" discards prior goals and spends a subscription CLI run even if immediately cancelled; `dismiss()` leaves `state == .running`, keeping main-screen buttons disabled until the CLI finishes on its own.
+- **Recommend:** Cancel the run on dismiss now; cache goals per source fingerprint (wait — interacts with the fingerprint flow).
+- **Safe to fix now?** cancel-on-dismiss yes; caching wait.
+
+### M34 — Event-input pulse can be dropped before a frame renders
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Views/PreviewControlsView.swift:131-137`
+- **Why it matters:** Sets `"true"` then `"false"` on the next main-queue turn; nothing guarantees a `draw(in:)` between the two — on a paused/slow view the event never fires.
+- **Recommend:** Engine-level auto-clear after one rendered frame (or reset via a draw-count hook).
+- **Safe to fix now?** wait — needs engine support; document meanwhile.
+
+### M35 — `WindowGroup` + app-singleton NSViews breaks "New Window"
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/TrueISFEditorApp.swift:182`; `ISFPreviewView.swift:10-14`
+- **Why it matters:** macOS offers ⌘N "New Window" on WindowGroups by default; `vm.editor.webView` / `vm.preview.nsView` can only live in one hierarchy, so two windows steal the views back and forth.
+- **Recommend:** `Window` scene instead of `WindowGroup` (one line) unless multi-window is actually planned.
+- **Safe to fix now?** yes.
+
+### M36 — CrashLog rewrites the whole pretty-printed file on the main thread per event
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/CrashLog.swift:29-36,50-53`
+- **Why it matters:** Consecutive-identical dedup doesn't cover alternating errors — two different compile errors while typing defeat it, rewriting a 500-event JSON file on every debounce tick.
+- **Recommend:** Debounce persistence; write on termination + periodic flush.
+- **Safe to fix now?** yes.
+
+### M37 — ISFSceneSource blocks the main thread with synchronous transpile + `waitUntilCompleted`
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/ISFSceneSource.swift:57-61` (and `defaultPatternTexture` `:82-86`), via `SourceRouter.makeSource`
+- **Why it matters:** Selecting a heavy library shader as an input source stalls the UI for the full transpile + probe render + GPU wait.
+- **Recommend:** Move probe validation to the background like `MetalPreviewController.load` does.
+- **Safe to fix now?** wait — touches the router's synchronous fallback contract; do deliberately.
+
+### M38 — ISFMSLSafeRender drops the VVMTLTextureImage wrapper immediately (possible pool recycle mid-read)
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/ISFMSLSafeBridge.mm:56-57`
+- **Why it matters:** Returns the bare `MTLTexture` and releases the wrapper; if VVMTLPool recycles backing textures on wrapper dealloc, an in-flight read can see next-frame reuse — same family as C9.
+- **Recommend:** Verify VVMetalKit's pool semantics first; if real, retain the wrapper until command-buffer completion.
+- **Safe to fix now?** wait — investigate before changing.
+
+### M39 — ShaderAssist/Remix skill preambles read maker-machine-only paths → public users silently get a degraded AI
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/ShaderAssist/SkillPreamble.swift` (`defaultPaths` → `~/.claude/skills/isf-shader-development/` etc.), `Remix/RemixPrompt.swift` (`system()`)
+- **Why it matters:** Those paths exist only on this machine. Every public user silently falls back to the ~10-line primer — ShaderAssist and Remix ship materially dumber than tested, with no signal. **Launch-critical.**
+- **Recommend:** Bundle the skill texts as app resources (user path as override). Also fold in open action item `trueisf-skillpreamble-12k-cap-20260708`: fix the 12,000-char skill-preamble cap in `SkillPreamble` so the bundled texts (incl. the new 964-shader technique catalog) aren't silently truncated.
+- **Safe to fix now?** yes.
+
 ## Nice-to-have
 
 ### N1 — Rewriters share no protocol; return shapes are ad hoc
@@ -160,8 +402,8 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + 
 ### N3 — ShaderAssistResponseParser.decode discards the underlying DecodingError
 - **Status:** todo
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift:48-53`
-- **Why it matters:** `try? JSONDecoder().decode(...)` collapses any failure into `unparseable(raw:)`, losing the field-level reason — so when Claude returns almost-valid JSON (one missing key), debugging means re-reading the raw blob by hand. `ShadertoyInternalParser.malformed(detail:)` already shows the better pattern.
-- **Recommend:** Capture and attach the `DecodingError` detail.
+- **Why it matters:** `try? JSONDecoder().decode(...)` collapses any failure into `unparseable(raw:)`, losing the field-level reason — so when Claude returns almost-valid JSON (one missing key), debugging means re-reading the raw blob by hand. `ShadertoyInternalParser.malformed(detail:)` already shows the better pattern. (Re-verified 2026-07-08, plus a sibling: `ShaderAssistResponseParser.swift:12` — an `is_error == true` envelope returns `""`, so the eventual `unparseable(raw: "")` throws away the CLI's actual error message (quota/auth/timeout) that was sitting in `result`.)
+- **Recommend:** Capture and attach the `DecodingError` detail; preserve the `is_error` envelope's `result` text in the thrown error.
 - **Safe to fix now?** yes.
 
 ### N4 — SamplerRewriter bare-identifier audio rewrite drops the waveform sampler
@@ -219,4 +461,112 @@ _Last scan: 2026-06-27 · branch: desloppify-cleanup · 11 open / 16 done (M8 + 
 - **Where:** `App/TrueISFEditor/TrueISFEditorApp.swift:34-43` (`SHADERTOY_DEBUG_FETCH` / `--debug-fetch` → `fetchShader(id:)` with no validation)
 - **Why it matters:** Normal paths validate the id through `ShadertoyURL.shaderID(from:)` (alphanumeric 3–16) before the fetcher; this debug door doesn't. Real exploitability is low (literal host, parameterized in-page JS, requires launch-env control) but it's an inconsistency.
 - **Recommend:** Route the debug id through `ShadertoyURL.shaderID(from:)`, or compile the debug affordances out with `#if DEBUG`.
+- **Safe to fix now?** yes. (2026-07-08 CSO rescan: `#if DEBUG`-gating the four debug env blocks is the **single named pre-public-launch item** — it resolves N11 and most of N9 in one ~10-minute change.)
+
+### N12 — TestPatternCatalog crashes if bundle resources are missing entirely
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/TestPatternCatalog.swift:39` (`default` falls back to `all[0]`)
+- **Why it matters:** An empty resource bundle (broken packaging) turns a fallback into an index-out-of-range crash.
+- **Recommend:** Return an inline hardcoded pattern instead.
+- **Safe to fix now?** yes.
+
+### N13 — GLSLCompat adds a duplicate tanh polyfill when the shader defines its own
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLCompat.swift:41`
+- **Why it matters:** A shader already carrying a `float tanh(` polyfill gets a second one inside the `#if __VERSION__ < 130` block → redefinition on old GL backends.
+- **Recommend:** Check for a user definition before adding.
+- **Safe to fix now?** yes.
+
+### N14 — UniformRewriter: nested-bracket `iChannelResolution[idx[0]]` survives → loud undeclared identifier
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/UniformRewriter.swift:24` (`[^\[\]]*` can't match nested brackets)
+- **Why it matters:** Rare, but the miss is silent at conversion time and only surfaces as a transpile error.
+- **Recommend:** Handle one nesting level or emit a warning on `iChannelResolution[` with unmatched inner brackets.
+- **Safe to fix now?** yes.
+
+### N15 — HeaderBuilder audio `MAX: 256` vs Shadertoy's 512-wide audio texture
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/HeaderBuilder.swift:18-21`
+- **Why it matters:** If hosts honor MAX as bin count this halves FFT resolution vs the shader's original sampling assumptions.
+- **Recommend:** Verify intended bin count against ISF hosts (VDMX) and align.
+- **Safe to fix now?** yes — RESOLVED BY SKILL (2026-07-08): the isf-shader-development spec documents `MAX: 256` as the house convention, and all sampling is normalized (`IMG_NORM_PIXEL(audio, vec2(uv.x,…))`) so bin count affects resolution only, never coordinates. For *converted Shadertoy* shaders, bump to 512 to match Shadertoy's texture width — free fidelity, positions unaffected.
+
+### N16 — ShadertoyClient retries a 429 with zero backoff
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyClient.swift:52-64`
+- **Why it matters:** The immediate retry almost certainly 429s again; the retry is dead weight.
+- **Recommend:** Small delay (e.g. 1–2s) before the single retry.
+- **Safe to fix now?** yes.
+
+### N17 — Conversion warning order is nondeterministic run-to-run
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ISFConverter.swift:65,101` (iterating a `Set`/`Dictionary`)
+- **Why it matters:** Noisy diffs in corpus logs; makes regression comparison harder than it needs to be.
+- **Recommend:** Sort before emitting.
+- **Safe to fix now?** yes.
+
+### N18 — Mouse `point2D` normalization assumption unverified against real hosts
+- **Status:** todo
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/HeaderBuilder.swift:24-29` + `ISFConverter.swift:57-59` (`mouse * RENDERSIZE` assumes hosts deliver 0–1-normalized point2D)
+- **Why it matters:** Several hosts treat point2D as pixel-space — mouse-driven shaders would be wrong by a factor of RENDERSIZE in VDMX.
+- **Recommend:** One live VDMX check; branch on the verified behavior.
+- **Safe to fix now?** wait — needs an on-host observation first. (2026-07-08: the updated isf-shader-development spec confirms point2D "units depend on host" — the risk is real, the VDMX check is the only way to close it.)
+
+### N19 — Engine doc/dead-code cluster
+- **Status:** todo
+- **Where:** `Builders/GLSLBodyBuilder.swift:50` (comment says "first occurrence"; `renameMainImage` replaces all — behavior fine, comment wrong); `ShadertoyISFKit.swift` (`version` unused); `Rewriters/SamplerRewriter.swift:103-106` (trivial pass-through `replaceCall` wrapper)
+- **Recommend:** Fix the comment; delete/inline the rest.
+- **Safe to fix now?** yes.
+
+### N20 — App dead-code cluster
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/Views/SuggestionsPanel.swift:14-23` (two-arg init, zero call sites); empty `WKNavigationDelegate` conformances (`WebKitPreviewController.swift:8`, `CodeEditorView.swift:14`); `TrueISFEditorApp.swift:77-84` (no-op "poll up to 5s" loop that always breaks at 5); `WebKitShaderFetcher.swift:59` (`harvestShaderIDs(sort:count:)` ignores `sort` — misleading signature)
+- **Recommend:** Delete / fix signatures.
+- **Safe to fix now?** yes.
+
+### N21 — WK message-handler retain cycles (latent leak)
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/WebKitPreviewController.swift:33`, `CodeEditorView.swift:29` — `ucc.add(self)` with no `removeScriptMessageHandler` anywhere
+- **Why it matters:** Objects are app-lifetime today so nothing leaks yet, but any future per-document/preview instantiation leaks a WKWebView each.
+- **Recommend:** `WKScriptMessageHandler` weak-proxy pattern.
+- **Safe to fix now?** yes.
+
+### N22 — App duplicated-logic cluster
+- **Status:** todo
+- **Where:** VVMTLPool/ISFMSLCache bootstrap (`MetalPreviewController.swift:41-47` vs `ISFSceneSource.swift:32-38`); `jsStringLiteral` (`WebKitPreviewController.swift:62` vs `CodeEditorView.swift:85`); add-folder NSOpenPanel (`TrueISFEditorApp.swift:254-261` vs `EditorScreen.swift:270-277`); JSON encode/persist logic (`CrashLog` vs `ImportLog` — extends N6)
+- **Recommend:** Extract shared helpers as each area is next touched (don't do a dedicated sweep).
+- **Safe to fix now?** yes, opportunistically.
+
+### N23 — Import log attributes the previous fetch's HTTP status to the current failure
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/AppModel.swift:59` (reads `webFetcher.lastResponseStatus`, which persists from the prior fetch)
+- **Why it matters:** A challenge-timeout on fetch N+1 logs fetch N's status — actively misleading when debugging Cloudflare issues.
+- **Recommend:** Clear `lastResponseStatus` at fetch start (or scope it per-fetch).
+- **Safe to fix now?** yes.
+
+### N24 — KeychainStore save failure is silent in release builds
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/KeychainStore.swift:22-24` (`assertionFailure` is a no-op in release)
+- **Why it matters:** A failed save silently drops the API key for shipped users; they'll re-enter it and lose it again.
+- **Recommend:** Return the `OSStatus` and surface failure in Settings.
+- **Safe to fix now?** yes.
+
+### N25 — Remix cosmetics cluster
+- **Status:** todo
+- **Where:** `Remix/RemixStudioModel.swift:64,132` (placeholders + seed nodes hardcode `mode: .crossover` — mutate-mode lineage records the wrong mode); `snapshots`/`history` grow unbounded; `RemixStudioView.swift:68` (transcript `ForEach(id: \.offset)` breaks row identity once the 2000-line bound starts dropping from the front); `RemixGenerator.swift:86-89` (on cancel, not-yet-launched slots still spawn a CLI process just to kill it — check `Task.isCancelled` before launching)
+- **Recommend:** Fix as one small Remix-polish pass.
+- **Safe to fix now?** yes.
+
+### N26 — blitPipeline built once for the first colorPixelFormat, never invalidated
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/MetalPreviewController.swift:330`
+- **Why it matters:** A view whose pixel format changes after first build renders through a mismatched pipeline.
+- **Recommend:** Rebuild when `colorPixelFormat` differs from the cached one.
+- **Safe to fix now?** yes.
+
+### N27 — Two SettingsStore instances can show diverged drafts
+- **Status:** todo
+- **Where:** app-level store + `ShadertoyImportSheet.swift:12`
+- **Why it matters:** UI-only (values re-read from UserDefaults/Keychain at point of use), but two open settings surfaces can show different unsaved text.
+- **Recommend:** Share one instance via environment.
 - **Safe to fix now?** yes.

@@ -46,4 +46,11 @@ final class UniformRewriterTests: XCTestCase {
     func test_iChannelTime_variableIndexAndWhitespace() {
         XCTAssertEqual(UniformRewriter.rewrite("iChannelTime [ ch ]"), "TIME")
     }
+
+    /// C6 — iMouse is a standard rule (not a converter special case) so the Common path picks it
+    /// up too. xy is mirrored into zw ("pressed") so mouse-gated shaders stay responsive.
+    func test_iMouse_mappedToEngagedMouseExpression() {
+        XCTAssertEqual(UniformRewriter.rewrite("iMouse.xy"),
+                       "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE).xy")
+    }
 }

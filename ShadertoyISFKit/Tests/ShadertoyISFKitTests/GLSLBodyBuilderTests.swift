@@ -8,8 +8,8 @@ final class GLSLBodyBuilderTests: XCTestCase {
         XCTAssertTrue(r.code.contains("void pass0_mainImage("))
         XCTAssertTrue(r.code.contains("void main()"))
         XCTAssertTrue(r.code.contains("if (PASSINDEX == 0)"))
-        XCTAssertTrue(r.code.contains("pass0_mainImage(c, gl_FragCoord.xy)"))
-        XCTAssertTrue(r.code.contains("gl_FragColor = c;"))
+        XCTAssertTrue(r.code.contains("pass0_mainImage(_isf_passColor, gl_FragCoord.xy)"))
+        XCTAssertTrue(r.code.contains("gl_FragColor = _isf_passColor;"))
     }
 
     func test_common_prependedOnce() {
@@ -29,6 +29,16 @@ final class GLSLBodyBuilderTests: XCTestCase {
         XCTAssertEqual(r.code.components(separatedBy: " Po(int x, int y)").count - 1, 0)  // no bare collision
         XCTAssertTrue(r.code.contains("vec4 p0_Po(int x, int y)"))
         XCTAssertTrue(r.code.contains("vec4 p1_Po(int x, int y)"))
+    }
+
+    /// M17 — the dispatch temp must not be a single-letter name a golfed pass macro can capture:
+    /// a last-pass `#define c ...` would expand `vec4 c;` in main() into garbage → compile fail.
+    func test_dispatchTemp_isCollisionResistant() {
+        let r = GLSLBodyBuilder.build(passBodies: ["void mainImage(out vec4 O, in vec2 f){ O=vec4(0.0);}"],
+                                      commonCode: "")
+        XCTAssertFalse(r.code.contains("vec4 c;"), "single-letter dispatch temp is macro-capturable")
+        XCTAssertTrue(r.code.contains("vec4 _isf_passColor;"), r.code)
+        XCTAssertTrue(r.code.contains("gl_FragColor = _isf_passColor;"), r.code)
     }
 
     func test_vectorTernary_warns() {

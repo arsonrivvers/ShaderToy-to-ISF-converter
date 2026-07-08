@@ -7,6 +7,12 @@ public enum UniformRewriter {
         ("iTimeDelta", "max(TIMEDELTA, 1e-4)"),
         ("iSampleRate", "44100.0"),
         ("iFrameRate", "60.0"),
+        // iMouse.xy is in pixels; ISF point2D `mouse` is normalized [0,1]. iMouse.zw is the click
+        // position with sign signalling button-down; many shaders gate interaction on it
+        // (`if (iMouse.z < 0.01) ...`). Mirror xy into zw (non-zero, "pressed") so the mouse input
+        // actually drives those shaders. A standard rule (not a converter special case) so the
+        // scope-aware Common path picks it up too.
+        ("iMouse", "vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)"),
         ("iTime", "TIME"),
         ("iFrame", "FRAMEINDEX"),
         ("iDate", "DATE"),

@@ -69,6 +69,17 @@ final class CommonUniformRewriterTests: XCTestCase {
         XCTAssertEqual(r, "#define Res vec3(RENDERSIZE, 1.0)\n")
     }
 
+    /// C6 — a file-scope Common `#define M iMouse` must be rewritten (it previously survived as an
+    /// undeclared identifier), while a helper that threads iMouse as a PARAMETER stays protected.
+    func test_iMouseDefine_rewritten_parameterThreaded_protected() {
+        let src = "#define M iMouse\nvoid f(vec4 iMouse){ vec2 p = iMouse.xy; }"
+        let out = CommonUniformRewriter.rewrite(src)
+        XCTAssertTrue(out.contains("#define M vec4(mouse * RENDERSIZE, mouse * RENDERSIZE)"),
+                      "file-scope define must rewrite; got:\n\(out)")
+        XCTAssertTrue(out.contains("void f(vec4 iMouse){ vec2 p = iMouse.xy; }"),
+                      "param-threaded iMouse must stay protected; got:\n\(out)")
+    }
+
     /// Mixed: file-scope #define rewritten, helper body left alone, in one pass.
     func test_mixed_defineRewritten_helperUntouched() {
         let src = """

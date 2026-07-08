@@ -29,11 +29,17 @@ enum GLSLCallParser {
             if matchesIdentifier(chars, at: i, fn: fnChars) {
                 let openIdx = i + fnChars.count
                 if openIdx < chars.count, chars[openIdx] == "(" {
-                    if let (args, endIdx) = parseArgs(chars, openParen: openIdx), args.count == arity,
-                       let replacement = transform(args) {
-                        result += replacement
-                        i = endIdx + 1
-                        continue
+                    if let (args, endIdx) = parseArgs(chars, openParen: openIdx), args.count == arity {
+                        // Rewrite calls nested inside the args first (texture-inside-texture is the
+                        // standard distortion/feedback idiom) — skipping past the outer match would
+                        // otherwise leave the inner call raw.
+                        let nested = args.map { replaceCall(in: $0, fn: fn, arity: arity,
+                                                            transform: transform) }
+                        if let replacement = transform(nested) {
+                            result += replacement
+                            i = endIdx + 1
+                            continue
+                        }
                     }
                 }
             }

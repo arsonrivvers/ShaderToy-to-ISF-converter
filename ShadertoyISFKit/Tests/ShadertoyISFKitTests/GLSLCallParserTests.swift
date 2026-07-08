@@ -48,4 +48,26 @@ final class GLSLCallParserTests: XCTestCase {
         XCTAssertFalse(r.code.contains("texture("), r.code)
         XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(bufA"), r.code)
     }
+
+    /// C7 — a call nested inside another matched call's ARGS must also be rewritten. Skipping past
+    /// the outer match left the inner call raw (texture-inside-texture is the standard
+    /// distortion/feedback idiom).
+    func test_nestedSameFnCall_insideArgs_isRewritten() {
+        let out = wrap("f(a, f(b, c))", fn: "f", arity: 2)
+        XCTAssertEqual(out, "<a| <b| c>>")
+    }
+
+    /// C7 end-to-end through SamplerRewriter: `texture(iCh0, uv + texture(iCh1, uv).xy)` — both
+    /// the outer and the inner call must become IMG_NORM_PIXEL; no raw `texture(` may survive.
+    func test_samplerRewriter_nestedTextureCalls_bothConverted() {
+        let bindings: [Int: ChannelBinding.Binding] = [
+            0: .init(glslName: "bufA", kind: .buffer),
+            1: .init(glslName: "bufB", kind: .buffer),
+        ]
+        let r = SamplerRewriter.rewrite("texture(iChannel0, uv + texture(iChannel1, uv).xy)",
+                                        bindings: bindings)
+        XCTAssertFalse(r.code.contains("texture("), r.code)
+        XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(bufA"), r.code)
+        XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(bufB"), r.code)
+    }
 }

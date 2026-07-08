@@ -26,4 +26,24 @@ final class OutputInitializerTests: XCTestCase {
         XCTAssertEqual(r.code, src)
         XCTAssertTrue(r.notes.isEmpty)
     }
+
+    /// C4 — an `inout vec4` accumulator must NOT be zero-injected: the injected `col = vec4(0.0);`
+    /// would wipe the value the caller passed in (silent wrong render, zero diagnostics).
+    func test_inoutParam_isNotInjected() {
+        let src = "void addGlow(inout vec4 col, vec2 p){\n  col += vec4(p, 0.0, 1.0);\n}"
+        let r = OutputInitializer.apply(src)
+        XCTAssertEqual(r.code, src)
+        XCTAssertTrue(r.notes.isEmpty)
+    }
+
+    /// C4 — when a real `out` accumulator and an `inout` helper share the output NAME, only the
+    /// `out` signature gets the injection (the old pattern injected into ALL matching signatures).
+    func test_mixedOutAndInout_onlyOutSignatureIsInjected() {
+        let src = "void glow(inout vec4 O){\n  O += vec4(0.1);\n}\nvoid mainImage( out vec4 O, vec2 I ){\n  for (O*=i; i++<9.;){ O+=v; }\n}"
+        let r = OutputInitializer.apply(src)
+        XCTAssertTrue(r.code.contains("void mainImage( out vec4 O, vec2 I ){\n    O = vec4(0.0);"),
+                      "out signature must be initialized; got:\n\(r.code)")
+        XCTAssertTrue(r.code.contains("void glow(inout vec4 O){\n  O += vec4(0.1);"),
+                      "inout signature must be untouched; got:\n\(r.code)")
+    }
 }
