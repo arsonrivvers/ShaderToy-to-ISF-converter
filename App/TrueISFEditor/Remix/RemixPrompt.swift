@@ -3,12 +3,20 @@ import Foundation
 /// Assembles the system + user prompts for one child generation. System loads the shader skills
 /// (via SkillPreamble) and pins the output contract; user carries the parents, mode, steer, directive.
 enum RemixPrompt {
+    /// Skills loaded into the child-generation system prompt, in survive-first order. The corpus
+    /// catalog is included ONLY on the Remix path (not ShaderAssist): generation is where the deep
+    /// 964-shader knowledge pays off. Loading it requires inlining — the subprocess runs with tools
+    /// stripped, so reference files it can't read otherwise are invisible. Order = descending priority
+    /// (SkillPreamble truncates from the tail if the ARG_MAX ceiling is ever hit).
+    static let skillPaths = [
+        "\(NSHomeDirectory())/.claude/skills/shader-lineage-remix/SKILL.md",
+        "\(NSHomeDirectory())/.claude/skills/isf-shader-development/SKILL.md",
+        "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md",
+        "\(NSHomeDirectory())/.claude/skills/isf-shader-development/references/arsonrivvers_technique_catalog.md",
+    ]
+
     static func system() -> String {
-        let skills = SkillPreamble.load(paths: [
-            "\(NSHomeDirectory())/.claude/skills/shader-lineage-remix/SKILL.md",
-            "\(NSHomeDirectory())/.claude/skills/isf-shader-development/SKILL.md",
-            "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md",
-        ])
+        let skills = SkillPreamble.load(paths: skillPaths)
         return skills + "\n\n---\n\n" + """
         You are remixing ISF shaders. Output ONE complete, valid ISF .fs shader and NOTHING else:
         a /*{ ... }*/ JSON header (ISFVSN 2.0) followed by GLSL. No prose, no explanation. If you use

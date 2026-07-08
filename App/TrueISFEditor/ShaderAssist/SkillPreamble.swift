@@ -9,7 +9,14 @@ enum SkillPreamble {
         "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md",
     ]
 
-    static func load(paths: [String] = defaultPaths, cap: Int = 12000) -> String {
+    /// Safety ceiling on the assembled preamble length, in characters. This is an ARG_MAX guard —
+    /// the preamble ships as a CLI argument to the claude/codex subprocess and macOS ARG_MAX is ≈1 MB —
+    /// NOT a content budget. It must stay well above the real skill set so the SKILL.md files and the
+    /// corpus catalog load in FULL. (Was 12,000, which silently truncated isf-shader-development
+    /// mid-file and dropped shader-dev + the catalog entirely — the bug this constant fixes.)
+    static let defaultCap = 200_000
+
+    static func load(paths: [String] = defaultPaths, cap: Int = defaultCap) -> String {
         var parts: [String] = []
         for path in paths {
             guard let text = try? String(contentsOfFile: path, encoding: .utf8),

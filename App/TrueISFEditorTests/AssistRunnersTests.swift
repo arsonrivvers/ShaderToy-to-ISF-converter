@@ -167,4 +167,16 @@ final class SkillPreambleTests: XCTestCase {
         XCTAssertTrue(out.contains("ISF"))   // built-in primer
         XCTAssertFalse(out.isEmpty)
     }
+
+    /// Regression (2026-07-08): the real skill set — isf-shader-development (~15.5K) + shader-dev
+    /// (~16.7K) + the corpus catalog (~38K) ≈ 80K+ chars — must survive the DEFAULT cap. The prior
+    /// default of 12,000 silently truncated it mid-file, so shader-dev and the catalog never reached
+    /// the model. Exercises the default cap specifically (every other test pins an explicit cap).
+    func testDefaultCapLoadsRealSizedSkillSetWithoutTruncation() throws {
+        let a = String(repeating: "A", count: 43_000)
+        let b = String(repeating: "B", count: 43_000)
+        let out = SkillPreamble.load(paths: [try tempFile(a), try tempFile(b)])   // default cap
+        XCTAssertTrue(out.contains(a), "first file truncated under the default cap")
+        XCTAssertTrue(out.contains(b), "second file dropped under the default cap")
+    }
 }

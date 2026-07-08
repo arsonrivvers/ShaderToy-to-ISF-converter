@@ -42,4 +42,19 @@ final class RemixPromptTests: XCTestCase {
         XCTAssertFalse(s.isEmpty)
         XCTAssertTrue(s.contains("ISF"))
     }
+
+    func test_skillPaths_includeCorpusCatalog_onlyOnGenerationPath() {
+        // The 38K corpus catalog must be wired into Remix generation (it's invisible to the
+        // tool-stripped subprocess otherwise). It is deliberately NOT on ShaderAssist's paths.
+        XCTAssertTrue(RemixPrompt.skillPaths.contains { $0.hasSuffix("arsonrivvers_technique_catalog.md") },
+                      "corpus catalog missing from Remix load paths")
+        XCTAssertFalse(SkillPreamble.defaultPaths.contains { $0.hasSuffix("arsonrivvers_technique_catalog.md") },
+                       "catalog should stay off the ShaderAssist path")
+    }
+
+    func test_skillPaths_catalogIsLast_soCoreSkillsSurviveTruncation() {
+        // Descending priority: the catalog (deep reference) must be last so a future ARG_MAX
+        // truncation drops it before the core skills.
+        XCTAssertTrue(RemixPrompt.skillPaths.last?.hasSuffix("arsonrivvers_technique_catalog.md") == true)
+    }
 }
