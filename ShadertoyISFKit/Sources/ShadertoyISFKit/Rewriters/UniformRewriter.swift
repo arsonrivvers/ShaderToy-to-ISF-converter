@@ -18,6 +18,10 @@ public enum UniformRewriter {
         ("iDate", "DATE"),
     ]
 
+    /// Every Shadertoy uniform name this rewriter maps — used by the C5-interim detection of
+    /// body-scope uses the scope-aware Common rewrite can't reach.
+    static var detectableNames: [String] { rules.map(\.0) + ["iChannelResolution", "iChannelTime"] }
+
     public static func rewrite(_ code: String) -> String {
         var out = code
 

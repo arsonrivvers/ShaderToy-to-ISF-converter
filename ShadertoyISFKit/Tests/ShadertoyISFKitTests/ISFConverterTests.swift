@@ -98,6 +98,53 @@ final class ISFConverterTests: XCTestCase {
                      "no raw iMouse may survive conversion")
     }
 
+    /// M24 — a shader with no convertible render passes (e.g. sound-only) must surface an
+    /// error-severity warning instead of "successfully" emitting an empty, black main().
+    func test_soundOnlyShader_errorsInsteadOfSilentBlack() {
+        let sound = RenderPass(inputs: [], outputs: [],
+                               code: "vec2 mainSound(float t){ return vec2(0.0); }",
+                               name: "Sound", type: .sound)
+        let shader = Shader(info: Info(id: "", name: "SoundOnly", username: nil, description: nil),
+                            renderpass: [sound])
+        let (_, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(warnings.contains {
+            $0.severity == .error && $0.message.lowercased().contains("no convertible")
+        }, "\(warnings)")
+    }
+
+    /// N17 — stub-input warnings must come out in deterministic ascending-channel order
+    /// (Set iteration made corpus report diffs noisy run-to-run).
+    func test_stubWarnings_deterministicAscendingOrder() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: "void mainImage(out vec4 O, vec2 I){ O = texture(iChannel3, I) + texture(iChannel1, I) + texture(iChannel2, I); }",
+            name: "Stubs")
+        let (_, warnings) = ISFConverter.convert(shader)
+        let stubs = warnings.filter { $0.message.contains("added a stub image input") }.map(\.message)
+        XCTAssertEqual(stubs.count, 3)
+        XCTAssertTrue(stubs[0].contains("iChannel1"), "\(stubs)")
+        XCTAssertTrue(stubs[1].contains("iChannel2"), "\(stubs)")
+        XCTAssertTrue(stubs[2].contains("iChannel3"), "\(stubs)")
+    }
+
+    /// C5 interim — a Shadertoy uniform inside a Common helper BODY is not auto-rewritten (the
+    /// scope-aware rewrite protects bodies); until the real scope-aware fix lands, conversion must
+    /// warn loudly instead of silently shipping an undeclared identifier.
+    func test_commonBodyUniform_warnsLoudly() {
+        let common = RenderPass(inputs: [], outputs: [],
+                                code: "float n(vec2 p){ return sin(p.x + iTime); }",
+                                name: "Common", type: .common)
+        let image = RenderPass(inputs: [], outputs: [PassOutput(id: "out0", channel: 0)],
+                               code: "void mainImage(out vec4 O, vec2 I){ O = vec4(n(I.xy)); }",
+                               name: "Image", type: .image)
+        let shader = Shader(info: Info(id: "", name: "C5", username: nil, description: nil),
+                            renderpass: [image, common])
+        let (_, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(warnings.contains {
+            $0.severity == .warning && $0.message.contains("iTime")
+                && $0.message.lowercased().contains("common")
+        }, "\(warnings)")
+    }
+
     func test_multipass_producesPersistentBuffersAndReads() throws {
         let (doc, _) = ISFConverter.convert(try fixtureShader("multipass_feedback"))
         let text = doc.fileText

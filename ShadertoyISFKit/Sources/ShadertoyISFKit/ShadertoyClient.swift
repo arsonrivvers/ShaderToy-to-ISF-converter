@@ -49,15 +49,19 @@ public struct ShadertoyClient {
 
     /// Fetches a shader, retrying once on a *transient* failure (network error, HTTP 429, or 5xx).
     /// Definitive outcomes (not-accessible, decode failure, other 4xx) are surfaced immediately.
-    public func fetchShader(id: String, maxAttempts: Int = 2) async throws -> Shader {
+    /// The retry waits `retryDelayNanos` first — an immediate 429 retry almost certainly 429s again.
+    public func fetchShader(id: String, maxAttempts: Int = 2,
+                            retryDelayNanos: UInt64 = 1_500_000_000) async throws -> Shader {
         var attempt = 0
         while true {
             attempt += 1
             do {
                 return try await attemptFetch(id: id)
             } catch let e as ShadertoyClientError where Self.isTransient(e) && attempt < maxAttempts {
+                if retryDelayNanos > 0 { try? await Task.sleep(nanoseconds: retryDelayNanos) }
                 continue
             } catch let e where !(e is ShadertoyClientError) && attempt < maxAttempts {
+                if retryDelayNanos > 0 { try? await Task.sleep(nanoseconds: retryDelayNanos) }
                 continue   // network-layer error → retry
             }
         }

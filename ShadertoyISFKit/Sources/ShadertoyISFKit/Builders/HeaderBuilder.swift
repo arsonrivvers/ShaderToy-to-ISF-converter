@@ -13,12 +13,13 @@ public enum HeaderBuilder {
             inputs.append(["NAME": name, "TYPE": "image"])
         }
         // ISF native audio: an FFT-spectrum sampler and a raw-waveform sampler, each a 1D-ish texture
-        // sampled like an image. MAX is the host's max bins/samples hint.
+        // sampled like an image. MAX is the host's max bins/samples hint — 512 matches Shadertoy's
+        // 512-wide audio texture; sampling is normalized, so this only raises resolution.
         for name in audioFFTNames {
-            inputs.append(["NAME": name, "TYPE": "audioFFT", "MAX": 256])
+            inputs.append(["NAME": name, "TYPE": "audioFFT", "MAX": 512])
         }
         for name in audioWaveNames {
-            inputs.append(["NAME": name, "TYPE": "audio", "MAX": 256])
+            inputs.append(["NAME": name, "TYPE": "audio", "MAX": 512])
         }
         if includeMouse {
             inputs.append([

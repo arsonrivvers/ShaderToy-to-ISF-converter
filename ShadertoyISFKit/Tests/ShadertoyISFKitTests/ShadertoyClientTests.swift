@@ -64,7 +64,18 @@ final class ShadertoyClientTests: XCTestCase {
         let data = try fixture("single_pass")
         let fetcher = SequenceFetcher([.failure(FakeNetErr.down), .success((data, 200))])
         let client = ShadertoyClient(key: "k", fetcher: fetcher)
-        let shader = try await client.fetchShader(id: "Ms2SD1")
+        let shader = try await client.fetchShader(id: "Ms2SD1", retryDelayNanos: 0)
+        XCTAssertEqual(shader.info.name, "Test Single")
+        XCTAssertEqual(fetcher.calls, 2)
+    }
+
+    // N16 — the transient retry waits before re-hitting the API (an immediate 429 retry almost
+    // certainly 429s again). Exercised with a tiny delay so the suite stays fast.
+    func test_fetch_429_retriesAfterBackoff_thenSucceeds() async throws {
+        let data = try fixture("single_pass")
+        let fetcher = SequenceFetcher([.success((Data(), 429)), .success((data, 200))])
+        let client = ShadertoyClient(key: "k", fetcher: fetcher)
+        let shader = try await client.fetchShader(id: "Ms2SD1", retryDelayNanos: 1_000)
         XCTAssertEqual(shader.info.name, "Test Single")
         XCTAssertEqual(fetcher.calls, 2)
     }
@@ -74,7 +85,7 @@ final class ShadertoyClientTests: XCTestCase {
         let fetcher = SequenceFetcher([.success((Data(), 500))])
         let client = ShadertoyClient(key: "k", fetcher: fetcher)
         do {
-            _ = try await client.fetchShader(id: "Ms2SD1")
+            _ = try await client.fetchShader(id: "Ms2SD1", retryDelayNanos: 0)
             XCTFail("expected httpError")
         } catch ShadertoyClientError.httpError(let s) {
             XCTAssertEqual(s, 500)

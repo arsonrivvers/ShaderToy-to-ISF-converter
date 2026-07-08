@@ -42,7 +42,13 @@ final class FixRuleEngineTests: XCTestCase {
         let s = FixRuleEngine.suggestions(for: d, sourceLine: "    float t = tanh(x);")
         XCTAssertEqual(s.count, 1)
         XCTAssertTrue(s[0].explanation.lowercased().contains("polyfill"))
-        XCTAssertNotNil(s[0].edit)
+        // M23: guidance-only. The old one-line auto-edit replaced the diagnostic line (inside a
+        // function body) with a polyfill FUNCTION + the line — a nested function definition,
+        // invalid GLSL, guaranteed second compile error presented as a "fix". TextEdit can't
+        // express "insert at file top + rewrite this line", so no edit until it can.
+        XCTAssertNil(s[0].edit)
+        XCTAssertTrue(s[0].explanation.contains("float tanh_(float x)"),
+                      "explanation must carry the copyable polyfill; got: \(s[0].explanation)")
     }
     func testUndeclaredIsAdvisoryOnly() {
         let d = Diagnostic.compiler(message: "ERROR: 31: 'uvAspect' : undeclared identifier", line: 31)

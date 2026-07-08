@@ -82,4 +82,16 @@ final class SamplerRewriterTests: XCTestCase {
         let r = SamplerRewriter.rewrite("texture(iChannel0, uv)", bindings: binding())
         XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")  // buffer/2D stays a plain coord
     }
+
+    /// M22 — sampler builtins with no ISF mapping (textureSize, texelFetchOffset, textureGrad,
+    /// textureProj) must WARN instead of passing through silently — whether the leftover call
+    /// compiles depends entirely on the host's sampler declaration.
+    func test_unmappedSamplerBuiltins_warn() {
+        let r = SamplerRewriter.rewrite("ivec2 s = textureSize(iChannel0, 0);", bindings: binding())
+        XCTAssertTrue(r.warnings.contains { $0.message.contains("textureSize") }, "\(r.warnings)")
+    }
+    func test_mappedBuiltins_doNotTriggerUnmappedWarning() {
+        let r = SamplerRewriter.rewrite("texture(iChannel0, uv)", bindings: binding())
+        XCTAssertTrue(r.warnings.isEmpty, "\(r.warnings)")
+    }
 }

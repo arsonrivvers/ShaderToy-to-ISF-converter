@@ -69,6 +69,25 @@ final class CommonUniformRewriterTests: XCTestCase {
         XCTAssertEqual(r, "#define Res vec3(RENDERSIZE, 1.0)\n")
     }
 
+    /// C5 interim — a uniform used inside a function BODY with no parameter of that name declared
+    /// anywhere in the file is NOT rewritten by the scope-aware pass and WILL be undeclared;
+    /// detect it so the converter can warn loudly.
+    func test_unrewrittenBodyUniforms_detected() {
+        let src = "float n(vec2 p){ return sin(p.x + iTime); }"
+        XCTAssertEqual(CommonUniformRewriter.unrewrittenBodyUniforms(src), ["iTime"])
+    }
+
+    /// C5 interim — a param-shadowed uniform is legitimate (the helper uses its parameter): no flag.
+    func test_paramShadowedUniform_notFlaggedAsUnrewritten() {
+        let src = "vec2 f(vec2 iResolution) {\n  return iResolution.xy * 2.0;\n}"
+        XCTAssertTrue(CommonUniformRewriter.unrewrittenBodyUniforms(src).isEmpty)
+    }
+
+    /// C5 interim — file-scope uses are rewritten normally, so they must not be flagged.
+    func test_fileScopeUniform_notFlaggedAsUnrewritten() {
+        XCTAssertTrue(CommonUniformRewriter.unrewrittenBodyUniforms("#define res iResolution.xy\n").isEmpty)
+    }
+
     /// C6 — a file-scope Common `#define M iMouse` must be rewritten (it previously survived as an
     /// undeclared identifier), while a helper that threads iMouse as a PARAMETER stays protected.
     func test_iMouseDefine_rewritten_parameterThreaded_protected() {

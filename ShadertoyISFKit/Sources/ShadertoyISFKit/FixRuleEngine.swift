@@ -39,18 +39,18 @@ public enum FixRuleEngine {
             edit: TextEdit(fromLine: line, toLine: line, replacement: renamed, expectedContains: name))]
     }
 
-    // NOTE: this interactive rule intentionally differs from the batch GLSLCompat tanh handling.
-    // GLSLCompat prepends a `#if __VERSION__`-guarded global `tanh` overload set; here we offer a
-    // single-line, self-contained `tanh_` polyfill + call rewrite so the quick-fix stays a one-line
-    // edit the user can review in place (no whole-file preamble injection from a diagnostic click).
+    // Guidance-only: the diagnostic line is by definition inside a function body, so a one-line
+    // edit inserting the polyfill there would nest a function definition — invalid GLSL, a
+    // guaranteed second compile error presented as a "fix". TextEdit can't express "insert at file
+    // top AND rewrite this line", so until it can, hand the user the recipe instead of a bad edit.
+    // (The batch path is unaffected: GLSLCompat prepends a guarded global tanh overload set.)
     private static func tanhRule(_ d: Diagnostic, _ src: String?) -> [FixSuggestion] {
-        guard d.message.contains("'tanh'"), let line = d.line, let src else { return [] }
+        guard d.message.contains("'tanh'"), d.line != nil, src != nil else { return [] }
         let polyfill = "float tanh_(float x){ float e=exp(2.0*x); return (e-1.0)/(e+1.0); }"
-        let rewritten = src.replacingOccurrences(of: "tanh(", with: "tanh_(")
         return [FixSuggestion(
             title: "Add a tanh polyfill",
-            explanation: "GLSL ES 1.00 / this target lacks 'tanh'. Insert a polyfill and call it instead. (For vec types, add matching overloads.)",
-            edit: TextEdit(fromLine: line, toLine: line, replacement: polyfill + "\n" + rewritten, expectedContains: "tanh("))]
+            explanation: "GLSL ES 1.00 / this target lacks 'tanh'. Add this polyfill at the TOP of the file, outside any function: \(polyfill) — then rename this line's call to tanh_(…). (For vec types, add matching overloads.)",
+            edit: nil)]
     }
 
     private static func undeclaredRule(_ d: Diagnostic, _ src: String?) -> [FixSuggestion] {

@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open / 20 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; C4/C6/C7/M17 fixed same day (plan Task 1.1 — 209 tests green, corpus 74/78 no-change) · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 48 open / 29 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -47,6 +47,7 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open /
 
 ### C5 — Common helper bodies never receive uniform rewrites → `iTime` inside a Common function ships raw
 - **Status:** todo
+- **Interim (2026-07-08, plan Task 1.2b):** `CommonUniformRewriter.unrewrittenBodyUniforms` detects body-scope uniform uses with no param declaration anywhere and ISFConverter emits a loud warning-severity ConversionWarning — the failure is no longer silent. Real scope-aware rewrite still pending (Phase 3, behind the pixel gate). PM requires an explicit ship/hold call on this for launch.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/CommonUniformRewriter.swift:27`
 - **Why it matters:** The param-shadow protection is indiscriminate — **all** brace-depth>0 code is skipped, not just shadowed names. `float n(vec2 p){ return sin(p.x + iTime); }` — extremely common in real Common tabs — reaches the final `.fs` with `iTime` intact → transpile fail → black import. Tests only cover the param-shadow case. Likely a real slice of remaining corpus failures.
 - **Recommend:** Protect a uniform name inside a body **only when that function's parameter list declares it**; rewrite otherwise. Needs the function scanner (ties into M3).
@@ -208,14 +209,16 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open /
 - **Safe to fix now?** wait — fold into M3.
 
 ### M15 — Common-tab audio/cubemap dispatchers degrade incorrectly
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Dispatchers now mirror SamplerRewriter's binding semantics: audio bindings split FFT/waveform by read-y in both tex and texel dispatchers; a cubemap-bound channel's tex dispatcher takes `vec3 dir` and projects via `_dirToEquirect` (mixed cube/2D across passes warns + samples dir.xy). 3 new tests. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/CommonChannelRewriter.swift:84-85` (vs `SamplerRewriter.swift:91-99`)
 - **Why it matters:** The dispatcher samples `IMG_NORM_PIXEL(b.glslName, uv)` flat: for audio that's the FFT sampler at raw uv with no FFT/wave y-split — waveform reads silently return spectrum data; for cubemaps the call site passes a `vec3` direction into a `vec2` param → type-mismatch compile error.
 - **Recommend:** Replicate `normSample`'s audio split in the dispatcher; add a vec3-param `_chN_tex` overload using `_dirToEquirect` for cubemap channels.
 - **Safe to fix now?** yes.
 
 ### M16 — `CommonChannelRewriter.chan()` diverged from `SamplerRewriter.binding(forChannelArg:)`
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `chan()` now delegates to the shared `GLSLCallParser.channelIndex(forArg:)` (extracted from SamplerRewriter, trailing-comment tolerant); SamplerRewriter uses the same helper. 1 new test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `CommonChannelRewriter.swift:31-35` vs `SamplerRewriter.swift:66-77`
 - **Why it matters:** The per-pass parser tolerates a trailing comment in the channel arg (`iChannel0 /* src */`); the Common one requires the whole trimmed token to `Int`-parse — same input, undeclared `iChannel0` in Common. M3's divergence claim, live and growing.
 - **Recommend:** Extract and share one channel-arg parser (SamplerRewriter's version).
@@ -251,28 +254,32 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open /
 - **Safe to fix now?** wait — same design change as C5.
 
 ### M21 — `texture (iChannel0, uv)` — space before paren — is not rewritten
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `replaceCall` skips spaces/tabs between the identifier and `(`. 1 new test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLCallParser.swift:29-31` (requires `(` immediately after the identifier)
 - **Why it matters:** Valid GLSL, occasionally seen; falls through to the bare-identifier rename with the same host-dependent consequences as C7.
 - **Recommend:** Skip whitespace between identifier and `(`.
 - **Safe to fix now?** yes.
 
 ### M22 — `textureSize`/`texelFetchOffset`/`textureGrad`/`textureProj` pass through silently
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `SamplerRewriter` emits a warning-severity ConversionWarning when textureSize/texelFetchOffset/textureGrad/textureProj is called on an iChannel — left as-is textually but no longer silent. 2 new tests. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/SamplerRewriter.swift` (no handling)
 - **Why it matters:** `textureSize(bufA, 0)` survives conversion; whether it compiles depends entirely on the host's sampler declaration — and the failure is silent.
 - **Recommend:** Emit a conversion warning at minimum.
 - **Safe to fix now?** yes (warning only).
 
 ### M23 — `FixRuleEngine.tanhRule` quick-fix emits a nested function definition → can never compile
-- **Status:** todo
+- **Status:** done
+- **Resolved:** tanhRule is guidance-only (`edit: nil`) with the copyable polyfill + add-at-file-top instructions in the explanation — TextEdit can't express insert-at-top+rewrite-line, and the old single-line edit produced guaranteed-invalid nested-function GLSL. Test updated. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/FixRuleEngine.swift:46-54`
 - **Why it matters:** The fix replaces the diagnostic line — by definition inside a function body — with `float tanh_(float x){…}` + the rewritten line: a nested function definition, invalid GLSL, guaranteed second compile error presented to the user as a "fix".
 - **Recommend:** Two-part edit (polyfill prepended at file top + line rewrite), or reuse GLSLCompat's prepend.
 - **Safe to fix now?** yes — interactive path only.
 
 ### M24 — Zero convertible passes converts "successfully" to a black shader
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `PassBuilder` appends an error-severity warning ("no convertible render passes … would render black") when buffers+images is empty (sound/common-only shaders). 1 new test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/PassBuilder.swift:36-42` + `ISFConverter.swift:37` → emits `void main() {\n\n}`
 - **Why it matters:** A shader with only sound/common passes (sound-only shaders exist on Shadertoy) yields a valid-looking `.fs` that renders black, with only a per-pass "skipped" note.
 - **Recommend:** Hard error-severity warning ("nothing convertible") or throw.
@@ -485,21 +492,24 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 57 open /
 - **Safe to fix now?** yes.
 
 ### N15 — HeaderBuilder audio `MAX: 256` vs Shadertoy's 512-wide audio texture
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Audio MAX 256→512 in HeaderBuilder to match Shadertoy's 512-wide audio texture (skill-verified: sampling is normalized, positions unaffected, resolution doubles). 1 new test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Builders/HeaderBuilder.swift:18-21`
 - **Why it matters:** If hosts honor MAX as bin count this halves FFT resolution vs the shader's original sampling assumptions.
 - **Recommend:** Verify intended bin count against ISF hosts (VDMX) and align.
 - **Safe to fix now?** yes — RESOLVED BY SKILL (2026-07-08): the isf-shader-development spec documents `MAX: 256` as the house convention, and all sampling is normalized (`IMG_NORM_PIXEL(audio, vec2(uv.x,…))`) so bin count affects resolution only, never coordinates. For *converted Shadertoy* shaders, bump to 512 to match Shadertoy's texture width — free fidelity, positions unaffected.
 
 ### N16 — ShadertoyClient retries a 429 with zero backoff
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `fetchShader` gains `retryDelayNanos` (default 1.5s) and sleeps before transient retries; tests pass 0 to stay fast, plus a new 429-backoff test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShadertoyClient.swift:52-64`
 - **Why it matters:** The immediate retry almost certainly 429s again; the retry is dead weight.
 - **Recommend:** Small delay (e.g. 1–2s) before the single retry.
 - **Safe to fix now?** yes.
 
 ### N17 — Conversion warning order is nondeterministic run-to-run
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Both `referencedChannelIndices` iteration sites in ISFConverter now `.sorted()` — stub warnings emit in ascending channel order. 1 new test. 223 tests green; corpus 74/78, baseline pass list (7 transient FETCH-FAILs re-run 7/7 OK).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ISFConverter.swift:65,101` (iterating a `Set`/`Dictionary`)
 - **Why it matters:** Noisy diffs in corpus logs; makes regression comparison harder than it needs to be.
 - **Recommend:** Sort before emitting.

@@ -17,6 +17,35 @@ import Foundation
 public enum CommonUniformRewriter {
     public static func rewrite(_ code: String) -> String {
         var output = ""
+        walkRuns(code) { run, isProtected in
+            output += isProtected ? run : UniformRewriter.rewrite(run)
+        }
+        return output
+    }
+
+    /// C5 interim: uniform names used at brace/paren depth > 0 (function bodies/param lists — the
+    /// runs `rewrite` protects) that are NOT declared as a parameter anywhere in the file. Such a
+    /// use is never rewritten and reaches the transpiler as an undeclared identifier; callers warn
+    /// loudly. Detection only — the real fix is per-function scope-aware rewriting (DESLOPPIFY C5).
+    public static func unrewrittenBodyUniforms(_ code: String) -> [String] {
+        var protectedText = ""
+        walkRuns(code) { run, isProtected in
+            if isProtected { protectedText += run }
+        }
+        return UniformRewriter.detectableNames.filter { name in
+            guard protectedText.range(of: "\\b\(name)\\b", options: .regularExpression) != nil
+            else { return false }
+            // Declared as a parameter somewhere → body uses are (at least sometimes) the parameter;
+            // the mixed case is C5-proper, not this interim net.
+            return code.range(of: "[(,]\\s*(in\\s+|inout\\s+|out\\s+)?\\w+\\s+\(name)\\b",
+                              options: .regularExpression) == nil
+        }
+    }
+
+    /// Walks `code` splitting it into runs, emitting each with whether it is "protected" (inside
+    /// parens or braces). Single walker shared by `rewrite` and `unrewrittenBodyUniforms` so the
+    /// two can't disagree about scope.
+    private static func walkRuns(_ code: String, _ emit: (String, Bool) -> Void) {
         var run = ""
         var inProtected = false   // true while inside parens or braces
         var brace = 0
@@ -24,7 +53,7 @@ public enum CommonUniformRewriter {
 
         func flush() {
             if run.isEmpty { return }
-            output += inProtected ? run : UniformRewriter.rewrite(run)
+            emit(run, inProtected)
             run = ""
         }
 
@@ -83,6 +112,5 @@ public enum CommonUniformRewriter {
             i += 1
         }
         flush()
-        return output
     }
 }

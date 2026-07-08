@@ -44,6 +44,17 @@ public enum SamplerRewriter {
             }
         }
 
+        // Sampler builtins with no ISF mapping pass through textually (the bare rename below still
+        // rewrites their sampler arg) — whether the leftover call compiles depends entirely on the
+        // host's sampler declaration, so make the gap loud instead of silent.
+        for fn in ["textureSize", "texelFetchOffset", "textureGrad", "textureProj"] {
+            if out.range(of: "\\b\(fn)\\s*\\(\\s*iChannel\\d", options: .regularExpression) != nil {
+                warnings.append(ConversionWarning(severity: .warning,
+                    message: "\(fn)() has no ISF equivalent and was left as-is (its sampler is renamed to the bound input) — the shader may not compile; rewrite this call manually.",
+                    context: ""))
+            }
+        }
+
         // Any bare `iChannelN` identifier that survives the call rewrites above is a value use —
         // e.g. the sampler passed as a function argument (`ups(..., iChannel0, ...)`), a pattern
         // some Shadertoy authors use to thread the channel through helper functions. Rewrite it to
@@ -65,16 +76,7 @@ public enum SamplerRewriter {
 
     private static func binding(forChannelArg arg: String,
                                 bindings: [Int: ChannelBinding.Binding]) -> ChannelBinding.Binding? {
-        // The arg may carry a trailing comment (`iChannel0 /* src */`); match the leading
-        // `iChannelN` identifier rather than requiring the whole token to be exactly the channel.
-        let t = arg.trimmed
-        guard t.hasPrefix("iChannel") else { return nil }
-        let rest = t.dropFirst("iChannel".count)
-        let digits = rest.prefix { $0.isNumber }
-        guard !digits.isEmpty, let n = Int(digits) else { return nil }
-        // The digits must end the identifier — don't match `iChannel0img` as channel 0.
-        if let after = rest.dropFirst(digits.count).first, after.isLetter || after == "_" { return nil }
-        return bindings[n]
+        GLSLCallParser.channelIndex(forArg: arg).flatMap { bindings[$0] }
     }
 
     /// The sample coordinate for a binding: cubemap channels are sampled with a vec3 direction, so

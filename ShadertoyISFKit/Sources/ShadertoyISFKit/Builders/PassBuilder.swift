@@ -34,6 +34,12 @@ public struct PassBuilder {
         }
 
         let ordered = buffers + images
+        if ordered.isEmpty {
+            // Without this, conversion "succeeds" with an empty main() that renders black —
+            // the silent failure mode this engine exists to eliminate.
+            warnings.append(ConversionWarning(severity: .error,
+                message: "Shader has no convertible render passes (sound/common-only) — the converted file would render black."))
+        }
         return Plan(renderPasses: ordered,
                     orderedPassNames: ordered.map(\.name),
                     bufferOutputIDToName: idToName,

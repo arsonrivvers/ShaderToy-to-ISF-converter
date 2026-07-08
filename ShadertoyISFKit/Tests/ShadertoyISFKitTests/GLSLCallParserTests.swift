@@ -49,6 +49,14 @@ final class GLSLCallParserTests: XCTestCase {
         XCTAssertTrue(r.code.contains("IMG_NORM_PIXEL(bufA"), r.code)
     }
 
+    /// M21 — valid GLSL permits whitespace between the function name and its paren
+    /// (`texture (iChannel0, uv)`); requiring adjacency let the call fall through to the
+    /// bare-identifier rename with host-dependent results.
+    func test_spaceBetweenIdentifierAndParen_isRewritten() {
+        let out = wrap("f (a, b)", fn: "f", arity: 2)
+        XCTAssertEqual(out, "<a| b>")
+    }
+
     /// C7 — a call nested inside another matched call's ARGS must also be rewritten. Skipping past
     /// the outer match left the inner call raw (texture-inside-texture is the standard
     /// distortion/feedback idiom).

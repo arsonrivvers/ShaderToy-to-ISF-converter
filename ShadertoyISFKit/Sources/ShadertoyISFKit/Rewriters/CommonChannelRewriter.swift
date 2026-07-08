@@ -28,11 +28,9 @@ enum CommonChannelRewriter {
         var needTexel = Set<Int>()
         var needTex = Set<Int>()
 
-        func chan(_ arg: String) -> Int? {
-            let t = arg.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard t.hasPrefix("iChannel"), let n = Int(t.dropFirst("iChannel".count)) else { return nil }
-            return n
-        }
+        // Shared with SamplerRewriter (tolerates a trailing comment in the channel arg) so the
+        // per-pass and Common paths can't disagree on what counts as an iChannelN argument.
+        func chan(_ arg: String) -> Int? { GLSLCallParser.channelIndex(forArg: arg) }
         func coord(_ arg: String) -> String { arg.trimmingCharacters(in: .whitespacesAndNewlines) }
 
         // texelFetch(iChannelN, COORD, LOD) -> _chN_texel(COORD)  (pixel-coord access)
@@ -71,19 +69,21 @@ enum CommonChannelRewriter {
     }
 
     /// One dispatcher: `vec4 _chN_(texel|tex)(...) { if (PASSINDEX==p) { return IMG_*; } … return vec4(0.0); }`.
+    /// The per-branch sampling mirrors SamplerRewriter's binding semantics: audio bindings split the
+    /// read between the FFT and waveform samplers by the read's y (Shadertoy's 512×2 layout — flat
+    /// FFT sampling would silently return spectrum data for waveform reads), and a cubemap-bound
+    /// channel's tex dispatcher takes the vec3 direction its Common call sites actually pass,
+    /// projecting via `_dirToEquirect` (a vec2 signature was a guaranteed type-mismatch).
     private static func makeDispatcher(channel n: Int, texel: Bool,
                                        perPass: [Int: ChannelBinding.Binding], passCount: Int,
                                        warnings: inout [ConversionWarning]) -> String {
         let name = texel ? "_ch\(n)_texel" : "_ch\(n)_tex"
-        let param = texel ? "ivec2 U" : "vec2 uv"
+        let isCube = !texel && perPass.values.contains { $0.kind == .cubemap }
+        let param = texel ? "ivec2 U" : (isCube ? "vec3 dir" : "vec2 uv")
         var body = ""
         for p in 0..<passCount {
             guard let b = perPass[p] else { continue }
-            // A cubemap binding maps to a 2D image (iChannelNimg); the equirect projection only makes
-            // sense with a vec3 direction, which we don't have here, so sample the 2D image directly.
-            let sample = texel ? "IMG_PIXEL(\(b.glslName), vec2(U))"
-                               : "IMG_NORM_PIXEL(\(b.glslName), uv)"
-            body += "    if (PASSINDEX == \(p)) { return \(sample); }\n"
+            body += "    if (PASSINDEX == \(p)) { return \(sample(b, texel: texel, isCube: isCube, channel: n, warnings: &warnings)); }\n"
         }
         if body.isEmpty {
             warnings.append(ConversionWarning(severity: .warning,
@@ -91,5 +91,34 @@ enum CommonChannelRewriter {
                 context: ""))
         }
         return "vec4 \(name)(\(param)) {\n\(body)    return vec4(0.0);\n}"
+    }
+
+    private static func sample(_ b: ChannelBinding.Binding, texel: Bool, isCube: Bool,
+                               channel n: Int, warnings: inout [ConversionWarning]) -> String {
+        if texel {
+            if b.kind == .audio, let wave = b.auxName {
+                let fft  = "IMG_PIXEL(\(b.glslName), vec2(vec2(U).x, 0.5))"
+                let wav  = "IMG_PIXEL(\(wave), vec2(vec2(U).x, 0.5))"
+                return "mix(\(fft), \(wav), step(0.5, float(U.y)))"
+            }
+            return "IMG_PIXEL(\(b.glslName), vec2(U))"
+        }
+        if isCube {
+            if b.kind == .cubemap {
+                return "IMG_NORM_PIXEL(\(b.glslName), _dirToEquirect(dir))"
+            }
+            // Mixed cubemap/2D binding across passes: the vec3-direction dispatcher can only guess
+            // a uv for the 2D pass. Sample dir.xy and say so.
+            warnings.append(ConversionWarning(severity: .warning,
+                message: "iChannel\(n) binds a cubemap in one pass and a 2D input in another; the Common dispatcher samples the 2D input at dir.xy — verify.",
+                context: ""))
+            return "IMG_NORM_PIXEL(\(b.glslName), (dir).xy)"
+        }
+        if b.kind == .audio, let wave = b.auxName {
+            let fft  = "IMG_NORM_PIXEL(\(b.glslName), vec2((uv).x, 0.5))"
+            let wav  = "IMG_NORM_PIXEL(\(wave), vec2((uv).x, 0.5))"
+            return "mix(\(fft), \(wav), step(0.5, (uv).y))"
+        }
+        return "IMG_NORM_PIXEL(\(b.glslName), uv)"
     }
 }

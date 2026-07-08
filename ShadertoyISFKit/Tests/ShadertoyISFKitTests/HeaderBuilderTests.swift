@@ -42,6 +42,20 @@ final class HeaderBuilderTests: XCTestCase {
         XCTAssertTrue(inputs.contains { $0["NAME"] as? String == "iChannel0wave" && $0["TYPE"] as? String == "audio" })
     }
 
+    /// N15 — converted Shadertoy audio declares MAX 512 to match Shadertoy's 512-wide audio
+    /// texture (sampling is normalized, so this only raises resolution; positions are unaffected).
+    func test_audioInputs_max512_matchesShadertoyWidth() throws {
+        let json = HeaderBuilder.build(description: "d", credit: "c",
+            imageInputNames: [], includeMouse: false, bufferNames: [],
+            audioFFTNames: ["iChannel0fft"], audioWaveNames: ["iChannel0wave"])
+        let obj = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+        let inputs = obj["INPUTS"] as! [[String: Any]]
+        let fft = try XCTUnwrap(inputs.first { $0["NAME"] as? String == "iChannel0fft" })
+        let wave = try XCTUnwrap(inputs.first { $0["NAME"] as? String == "iChannel0wave" })
+        XCTAssertEqual(fft["MAX"] as? Int, 512)
+        XCTAssertEqual(wave["MAX"] as? Int, 512)
+    }
+
     func test_buffers_producePersistentFloatPasses_plusFinalEmpty() throws {
         let json = HeaderBuilder.build(description: "d", credit: "c",
             imageInputNames: [], includeMouse: false, bufferNames: ["bufA", "bufB"])

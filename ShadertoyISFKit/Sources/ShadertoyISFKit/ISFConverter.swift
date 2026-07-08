@@ -55,7 +55,7 @@ public enum ISFConverter {
             // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
             // some Shadertoy shaders reference a channel the API/internal response never lists, which
             // would otherwise leave a bare `iChannelN` / `texture(iChannelN,…)` undeclared.
-            for n in Self.referencedChannelIndices(code) where bindings[n] == nil {
+            for n in Self.referencedChannelIndices(code).sorted() where bindings[n] == nil {
                 bindings[n] = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
                 warnings.append(ConversionWarning(severity: .warning,
                     message: "iChannel\(n) is used but the renderpass declares no input for it — added a stub image input; supply an image or verify.",
@@ -96,7 +96,7 @@ public enum ISFConverter {
         }
         // A channel sampled in the Common tab but bound by NO pass → stub it as an image across all
         // passes so its dispatcher samples something real rather than returning 0.
-        for n in Self.referencedChannelIndices(splicedCommon) where perChannelPerPass[n] == nil {
+        for n in Self.referencedChannelIndices(splicedCommon).sorted() where perChannelPerPass[n] == nil {
             let stub = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
             for p in 0..<plan.renderPasses.count { perChannelPerPass[n, default: [:]][p] = stub }
             imageInputNames.insert(stub.glslName)
@@ -113,6 +113,14 @@ public enum ISFConverter {
         warnings.append(contentsOf: channelRewrite.warnings)
 
         var commonCode = CommonUniformRewriter.rewrite(channelRewrite.rewrittenCommon)
+        // C5 interim: body-scope uniform uses are protected from the rewrite (param-shadowing), so
+        // an unshadowed one ships as an undeclared identifier — warn loudly until the scope-aware
+        // rewrite exists.
+        for name in CommonUniformRewriter.unrewrittenBodyUniforms(channelRewrite.rewrittenCommon) {
+            warnings.append(ConversionWarning(severity: .warning,
+                message: "\(name) is used inside a Common helper body and was NOT auto-rewritten (only file-scope Common code is rewritten) — the shader may fail to compile. Thread it through as a parameter or move the use to file scope.",
+                context: "Common"))
+        }
         if !channelRewrite.dispatchers.isEmpty {
             commonCode = channelRewrite.dispatchers + "\n\n" + commonCode
         }
