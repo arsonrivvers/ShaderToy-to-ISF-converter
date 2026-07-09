@@ -34,4 +34,14 @@ final class GLSLReservedIdentifierRewriterTests: XCTestCase {
         let src = "vec3 palette(float t){ return vec3(t); }\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(palette(f.x), 1.0); }"
         XCTAssertEqual(GLSLReservedIdentifierRewriter.rewrite(src), src)
     }
+
+    /// N2 — reserved words inside comments are prose, not identifiers; renaming them pollutes
+    /// output the user reads (`// new approach` became `// usr_new approach`).
+    func test_reservedWordInComment_notRenamed_N2() {
+        let src = "// try the new approach\nfloat new_x = 1.0; int new = 2;"
+        let out = GLSLReservedIdentifierRewriter.rewrite(src)
+        XCTAssertTrue(out.contains("// try the new approach"), out)
+        XCTAssertTrue(out.contains("float new_x = 1.0"), out)     // word boundary holds
+        XCTAssertTrue(out.contains("int usr_new = 2"), out)       // real identifier renamed
+    }
 }

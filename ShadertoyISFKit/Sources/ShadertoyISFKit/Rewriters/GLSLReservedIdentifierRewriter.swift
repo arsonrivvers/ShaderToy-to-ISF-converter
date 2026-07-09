@@ -25,14 +25,23 @@ public enum GLSLReservedIdentifierRewriter {
     static let prefix = "usr_"
 
     public static func rewrite(_ code: String) -> String {
-        var out = code
+        // Match on comment-masked text (N2: a reserved word in a comment is prose, not an
+        // identifier), edit the original at the same UTF-16 offsets, back-to-front.
+        let masked = GLSLScanner.strip(code)
+        let mns = masked as NSString
+        var edits: [(NSRange, String)] = []
         for name in reserved {
             let re = try! NSRegularExpression(
                 pattern: "\\b" + NSRegularExpression.escapedPattern(for: name) + "\\b")
-            let range = NSRange(out.startIndex..<out.endIndex, in: out)
-            out = re.stringByReplacingMatches(in: out, range: range,
-                withTemplate: NSRegularExpression.escapedTemplate(for: prefix + name))
+            for m in re.matches(in: masked, range: NSRange(location: 0, length: mns.length)) {
+                edits.append((m.range, prefix + name))
+            }
         }
-        return out
+        guard !edits.isEmpty else { return code }
+        let out = NSMutableString(string: code)
+        for (range, replacement) in edits.sorted(by: { $0.0.location > $1.0.location }) {
+            out.replaceCharacters(in: range, with: replacement)
+        }
+        return out as String
     }
 }
