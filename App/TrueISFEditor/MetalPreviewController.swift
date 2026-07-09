@@ -287,6 +287,57 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         cb.commit()
         return tex
     }
+
+    /// Pixel-truth render gate: renders `times.count` frames offscreen at explicit times on the
+    /// current scene and analyzes the pixels. Frames render sequentially on the SAME scene so
+    /// persistent/feedback buffers accumulate — multipass shaders warm up honestly. Synchronous
+    /// (~ms for 3 small frames); callers are the headless corpus harness and the post-import hook.
+    /// See docs/superpowers/specs/2026-07-09-pixel-truth-render-gate-design.md.
+    func runPixelGate(size: CGSize = CGSize(width: 320, height: 180),
+                      times: [Double] = [0.0, 0.5, 1.5]) -> PixelVerdict {
+        guard let scene = scene else { return .renderError }
+        // Bind the deterministic pattern to every image input (offscreen renders bind nothing,
+        // so texture-sampling shaders would false-fail as black).
+        if inputs.contains(where: { $0.type == "image" }) {
+            guard let pattern = GateInputPattern.makeTexture(device: device) else {
+                return .renderError   // don't silently render unbound
+            }
+            for input in inputs where input.type == "image" {
+                if let val = ISFMSLSceneVal.create(with: pattern) as? ISFMSLSceneVal {
+                    scene.setValue(val, forInputNamed: input.name)
+                }
+            }
+        }
+        var frames: [FramePixelStats?] = []
+        for t in times {
+            guard let cb = renderQueue.makeCommandBuffer() else { return .renderError }
+            var err: NSString?
+            guard let tex = ISFMSLSafeRenderAtTime(
+                scene, NSSize(width: size.width, height: size.height), t, cb, &err) else {
+                return .renderError
+            }
+            guard FramePixelStats.supports(tex.pixelFormat) else {
+                cb.commit()
+                return .unsupported
+            }
+            // Blit into a CPU-readable copy — pool textures aren't guaranteed CPU-accessible.
+            let desc = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: tex.pixelFormat, width: tex.width, height: tex.height, mipmapped: false)
+            desc.storageMode = .managed
+            guard let readback = device.makeTexture(descriptor: desc),
+                  let blit = cb.makeBlitCommandEncoder() else {
+                cb.commit()
+                return .renderError
+            }
+            blit.copy(from: tex, to: readback)
+            blit.synchronize(resource: readback)
+            blit.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+            frames.append(FramePixelStats.analyze(texture: readback))
+        }
+        return PixelGate.verdict(frames)
+    }
 }
 
 extension MetalPreviewController: MTKViewDelegate {

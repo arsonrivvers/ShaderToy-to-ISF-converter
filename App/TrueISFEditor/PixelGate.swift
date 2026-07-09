@@ -28,8 +28,13 @@ enum PixelGate {
         return .ok
     }
 
-    /// ImportLog mapping (spec §C): OK records nothing; WARN set → .warning; FAIL set → .error.
-    static func importOutcome(_ v: PixelVerdict) -> (outcome: ImportEvent.Outcome, message: String)? {
+    /// Report severity for a non-OK verdict — deliberately NOT ImportEvent.Outcome, so this file
+    /// stays free of ImportLog types (it is compiled into the test target standalone). The import
+    /// hook maps warning→.warning / error→.error at the call site.
+    enum ReportSeverity { case warning, error }
+
+    /// ImportLog mapping (spec §C): OK records nothing; WARN set → warning; FAIL set → error.
+    static func importOutcome(_ v: PixelVerdict) -> (severity: ReportSeverity, message: String)? {
         switch v {
         case .ok:
             return nil

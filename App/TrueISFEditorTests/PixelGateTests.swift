@@ -50,11 +50,11 @@ final class PixelGateTests: XCTestCase {
 
     func testImportOutcomeMapping() {
         XCTAssertNil(PixelGate.importOutcome(.ok))
-        XCTAssertEqual(PixelGate.importOutcome(.constant)?.outcome, .warning)
-        XCTAssertEqual(PixelGate.importOutcome(.unsupported)?.outcome, .warning)
-        XCTAssertEqual(PixelGate.importOutcome(.black)?.outcome, .error)
-        XCTAssertEqual(PixelGate.importOutcome(.nan)?.outcome, .error)
-        XCTAssertEqual(PixelGate.importOutcome(.renderError)?.outcome, .error)
+        XCTAssertEqual(PixelGate.importOutcome(.constant)?.severity, .warning)
+        XCTAssertEqual(PixelGate.importOutcome(.unsupported)?.severity, .warning)
+        XCTAssertEqual(PixelGate.importOutcome(.black)?.severity, .error)
+        XCTAssertEqual(PixelGate.importOutcome(.nan)?.severity, .error)
+        XCTAssertEqual(PixelGate.importOutcome(.renderError)?.severity, .error)
         XCTAssertTrue(PixelGate.importOutcome(.black)!.message.contains("BLACK"))
     }
 }

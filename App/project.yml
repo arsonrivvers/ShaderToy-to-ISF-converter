@@ -60,6 +60,9 @@ targets:
       - TrueISFEditor/MetalPreviewController.swift
       - TrueISFEditor/WebKitPreviewController.swift
       - TrueISFEditor/ISFMSLSafeBridge.mm
+      - TrueISFEditor/FramePixelStats.swift
+      - TrueISFEditor/PixelGate.swift
+      - TrueISFEditor/GateInputPattern.swift
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
       - TrueISFEditor/ShaderAssist/AssistProvider.swift
