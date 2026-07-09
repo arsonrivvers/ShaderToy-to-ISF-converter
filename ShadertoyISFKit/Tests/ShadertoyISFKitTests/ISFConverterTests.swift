@@ -211,4 +211,19 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(doc.glslBody.contains("i = 0.0,z = 0.0,d = 0.0;"), doc.glslBody)
         XCTAssertTrue(warnings.contains { $0.message.contains("Zero-initialized") }, "\(warnings)")
     }
+
+    /// InjectedNameGuard end-to-end — the tXfBz2 shape: `vec2 mouse = iMouse.xy` must not shadow
+    /// the ISF `mouse` input that the iMouse rewrite's replacement expression references.
+    func test_userMouseLocal_doesNotShadowInjectedMouseInput() {
+        let shader = ShaderFactory.singlePass(imageCode: """
+            void mainImage( out vec4 fragColor, in vec2 fragCoord ){
+                vec2 mouse = iMouse.xy;
+                fragColor = vec4(mouse / iResolution.xy, 0., 1.);
+            }
+            """)
+        let (doc, _) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.glslBody.contains("vec2 usr_mouse = vec4(mouse * RENDERSIZE, mouse * RENDERSIZE).xy"),
+                      doc.glslBody)
+        XCTAssertTrue(doc.glslBody.contains("vec4(usr_mouse / vec3(RENDERSIZE, 1.0).xy, 0., 1.)"), doc.glslBody)
+    }
 }

@@ -5,7 +5,8 @@ public enum ISFConverter {
     /// fails silently as a black shader rather than loudly. The authoritative stage list (some stages
     /// live in `GLSLBodyBuilder`, so they aren't visible in this function's body — see stage 10):
     ///
-    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter.rewriteScoped (scope-aware; incl. iMouse mirror)
+    ///   Per pass:  1. GLSLLineContinuation.splice   1b. InjectedNameGuard (whole shader)
+    ///              2. UniformRewriter.rewriteScoped (scope-aware; incl. iMouse mirror)
     ///              3. channel auto-stub             4. SamplerRewriter
     ///   Common:    5. GLSLLineContinuation.splice   6. CommonChannelRewriter (PASSINDEX dispatch)
     ///              7. UniformRewriter.rewriteScoped   8. HeaderMacroExpander
@@ -36,6 +37,17 @@ public enum ISFConverter {
         // Drives the Common-tab PASSINDEX dispatchers (a channel can bind a different buffer per pass).
         var perChannelPerPass: [Int: [Int: ChannelBinding.Binding]] = [:]
 
+        // Stage 1: splice `\` line-continuations in ALL pass codes + Common up front (glslang
+        // rejects them and black-screens the shader). Stage 1b: rename user identifiers that
+        // collide with ISF-injected names (mouse, TIME, …) across the WHOLE shader BEFORE any
+        // rewrite injects references to them — a user `vec2 mouse = iMouse.xy` would otherwise
+        // shadow the ISF input the iMouse rewrite expands to (tXfBz2's black import).
+        let splicedPasses = plan.renderPasses.map { GLSLLineContinuation.splice($0.code) }
+        let guarded = InjectedNameGuard.rewrite(
+            passBodies: splicedPasses,
+            commonCode: GLSLLineContinuation.splice(plan.commonCode))
+        warnings.append(contentsOf: guarded.warnings)
+
         for (passIndex, pass) in plan.renderPasses.enumerated() {
             let resolved = ChannelBinding.resolve(inputs: pass.inputs,
                                                   bufferOutputIDToName: plan.bufferOutputIDToName)
@@ -44,9 +56,7 @@ public enum ISFConverter {
             })
             var bindings = resolved.bindings
 
-            // Splice `\` line-continuations first — glslang rejects them and black-screens the
-            // shader; downstream rewriters and the transpiler then see clean, single-logical-line code.
-            var code = GLSLLineContinuation.splice(pass.code)
+            var code = guarded.passBodies[passIndex]
             // Detection scans run on comment-blanked code — `// TODO try iChannel2` must not
             // invent inputs. The rewrites below still run on the real `code`.
             let detectable = GLSLScanner.strip(code)
@@ -89,7 +99,7 @@ public enum ISFConverter {
         // The Common code is shared, un-renamed source. The scope-aware rewrite maps its Shadertoy
         // uniforms everywhere EXCEPT inside functions that thread a uniform through as a parameter
         // (substituting the mapped expression into a parameter declaration is a syntax error).
-        let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
+        let splicedCommon = guarded.commonCode
         let detectableCommon = GLSLScanner.strip(splicedCommon)
         if detectableCommon.contains("iChannelResolution") { usesChannelResolution = true }
         // iMouse referenced only in the Common tab must still declare the mouse input — the
