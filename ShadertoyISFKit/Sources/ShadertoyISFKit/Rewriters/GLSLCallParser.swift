@@ -3,66 +3,50 @@ import Foundation
 /// Shared identifier/call-site parsing for GLSL rewriters. Replaces `fn(arg0, arg1, …)` with a
 /// caller-supplied transform, respecting nested parentheses and word boundaries. Used by
 /// SamplerRewriter (per-pass sampling) and CommonChannelRewriter (Common-tab PASSINDEX dispatch).
+///
+/// Structure (comment skipping, arg splitting) is computed on GLSLScanner-masked text; arg text
+/// is sliced from the ORIGINAL at the same UTF-16 offsets, so comments inside args are preserved.
 enum GLSLCallParser {
     /// Replaces every `fn(...)` whose top-level arg count equals `arity` with `transform(args)`.
-    /// Returning nil from `transform` leaves that call untouched.
+    /// Returning nil from `transform` leaves that call untouched (its args are still scanned for
+    /// nested matches on the next search iteration). Calls inside comments never match — their
+    /// identifier is blanked in the masked text.
     static func replaceCall(in code: String, fn: String, arity: Int,
                             transform: ([String]) -> String?) -> String {
+        let masked = GLSLScanner.strip(code)
+        let ns = code as NSString
+        let mns = masked as NSString
+        // GLSL permits whitespace between the function name and its paren (M21).
+        let re = try! NSRegularExpression(
+            pattern: "\\b" + NSRegularExpression.escapedPattern(for: fn) + "\\b[ \\t]*\\(")
         var result = ""
-        let chars = Array(code)
-        var i = 0
-        let fnChars = Array(fn)
-        var inLine = false, inBlock = false   // never match/rewrite a call sitting inside a comment
-        while i < chars.count {
-            let c = chars[i]
-            let next = i + 1 < chars.count ? chars[i + 1] : " "
-            if inLine {
-                result.append(c); if c == "\n" { inLine = false }; i += 1; continue
+        var cursor = 0     // UTF-16 read position in the original
+        var searchAt = 0
+        while searchAt < mns.length,
+              let m = re.firstMatch(in: masked,
+                                    range: NSRange(location: searchAt, length: mns.length - searchAt)) {
+            let openParen = m.range.location + m.range.length - 1
+            guard let (argRanges, close) = GLSLScanner.splitArgs(masked, openParen: openParen),
+                  argRanges.count == arity else {
+                searchAt = m.range.location + m.range.length
+                continue
             }
-            if inBlock {
-                result.append(c)
-                if c == "*" && next == "/" { result.append(next); inBlock = false; i += 2; continue }
-                i += 1; continue
+            // Rewrite calls nested inside the args first (texture-inside-texture is the standard
+            // distortion/feedback idiom) — skipping past the outer match would leave them raw.
+            let args = argRanges.map { ns.substring(with: $0) }
+            let nested = args.map { replaceCall(in: $0, fn: fn, arity: arity, transform: transform) }
+            if let replacement = transform(nested) {
+                result += ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))
+                result += replacement
+                cursor = close + 1
+                searchAt = close + 1
+            } else {
+                searchAt = m.range.location + m.range.length
             }
-            if c == "/" && next == "/" { inLine = true; result.append(c); i += 1; continue }
-            if c == "/" && next == "*" { inBlock = true; result.append(c); i += 1; continue }
-            if matchesIdentifier(chars, at: i, fn: fnChars) {
-                // GLSL permits whitespace between the function name and its paren.
-                var openIdx = i + fnChars.count
-                while openIdx < chars.count, chars[openIdx] == " " || chars[openIdx] == "\t" {
-                    openIdx += 1
-                }
-                if openIdx < chars.count, chars[openIdx] == "(" {
-                    if let (args, endIdx) = parseArgs(chars, openParen: openIdx), args.count == arity {
-                        // Rewrite calls nested inside the args first (texture-inside-texture is the
-                        // standard distortion/feedback idiom) — skipping past the outer match would
-                        // otherwise leave the inner call raw.
-                        let nested = args.map { replaceCall(in: $0, fn: fn, arity: arity,
-                                                            transform: transform) }
-                        if let replacement = transform(nested) {
-                            result += replacement
-                            i = endIdx + 1
-                            continue
-                        }
-                    }
-                }
-            }
-            result.append(chars[i]); i += 1
         }
+        result += ns.substring(from: cursor)
         return result
     }
-
-    /// True if `fn` occurs at `i` as a standalone identifier (not a substring of a longer one).
-    static func matchesIdentifier(_ chars: [Character], at i: Int, fn: [Character]) -> Bool {
-        guard i + fn.count <= chars.count else { return false }
-        for k in 0..<fn.count where chars[i + k] != fn[k] { return false }
-        if i > 0, isIdentChar(chars[i - 1]) { return false }              // left boundary
-        let after = i + fn.count
-        if after < chars.count, isIdentChar(chars[after]) { return false } // right boundary
-        return true
-    }
-
-    static func isIdentChar(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "_" }
 
     /// The channel index of an `iChannelN` argument, or nil. The arg may carry a trailing comment
     /// (`iChannel0 /* src */`), so match the LEADING identifier rather than requiring the whole
@@ -76,31 +60,5 @@ enum GLSLCallParser {
         guard !digits.isEmpty, let n = Int(digits) else { return nil }
         if let after = rest.dropFirst(digits.count).first, after.isLetter || after == "_" { return nil }
         return n
-    }
-
-    /// Parses comma-separated args starting at the open paren; returns (args, indexOfCloseParen).
-    static func parseArgs(_ chars: [Character], openParen: Int) -> (args: [String], end: Int)? {
-        var depth = 0, i = openParen
-        var current = "", args: [String] = []
-        var inLine = false, inBlock = false   // parens/commas inside comments are not arg structure
-        while i < chars.count {
-            let c = chars[i]
-            let next = i + 1 < chars.count ? chars[i + 1] : " "
-            if inLine {
-                current.append(c); if c == "\n" { inLine = false }; i += 1; continue
-            }
-            if inBlock {
-                current.append(c)
-                if c == "*" && next == "/" { current.append(next); inBlock = false; i += 2; continue }
-                i += 1; continue
-            }
-            if c == "/" && next == "/" { inLine = true; current.append(c); i += 1; continue }
-            if c == "/" && next == "*" { inBlock = true; current.append(c); i += 1; continue }
-            if c == "(" { depth += 1; if depth == 1 { i += 1; continue } }
-            if c == ")" { depth -= 1; if depth == 0 { args.append(current); return (args, i) } }
-            if c == "," && depth == 1 { args.append(current); current = ""; i += 1; continue }
-            current.append(c); i += 1
-        }
-        return nil
     }
 }
