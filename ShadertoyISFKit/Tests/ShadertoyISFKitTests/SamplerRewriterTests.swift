@@ -83,6 +83,22 @@ final class SamplerRewriterTests: XCTestCase {
         XCTAssertEqual(r.code, "IMG_NORM_PIXEL(bufA, uv)")  // buffer/2D stays a plain coord
     }
 
+    /// N4 — a bare audio `iChannelN` threaded as a value can only bind ONE sampler (the FFT); the
+    /// waveform half is silently dropped, so it must warn.
+    func test_bareAudioIdentifier_warnsAboutDroppedWaveform() {
+        let bindings: [Int: ChannelBinding.Binding] = [
+            0: .init(glslName: "iChannel0fft", kind: .audio, auxName: "iChannel0wave")]
+        let r = SamplerRewriter.rewrite("ups(iChannel0);", bindings: bindings)
+        XCTAssertTrue(r.code.contains("iChannel0fft"), r.code)
+        XCTAssertTrue(r.warnings.contains { $0.message.lowercased().contains("waveform") }, "\(r.warnings)")
+    }
+
+    /// N4 — a bare cubemap identifier binds the 2D equirect stub with no projection; warn.
+    func test_bareCubemapIdentifier_warns() {
+        let r = SamplerRewriter.rewrite("env(iChannel0);", bindings: cubemapBinding())
+        XCTAssertTrue(r.warnings.contains { $0.message.lowercased().contains("cubemap") }, "\(r.warnings)")
+    }
+
     /// M22 — sampler builtins with no ISF mapping (textureSize, texelFetchOffset, textureGrad,
     /// textureProj) must WARN instead of passing through silently — whether the leftover call
     /// compiles depends entirely on the host's sampler declaration.

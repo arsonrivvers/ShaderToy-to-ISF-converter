@@ -38,7 +38,9 @@ public enum GLSLCompat {
 
     public static func apply(_ code: String) -> Result {
         var warnings: [ConversionWarning] = []
-        let used = funcs.filter { callsFunction(code, $0.name) }
+        // Skip functions the shader defines ITSELF (its own polyfill) — a second definition inside
+        // the #if block is a redefinition error on the old backends the block targets.
+        let used = funcs.filter { callsFunction(code, $0.name) && !definesFunction(code, $0.name) }
 
         var out = code
         if !used.isEmpty {
@@ -87,6 +89,11 @@ public enum GLSLCompat {
     /// True if `name` appears as a function call (word-boundary name followed by `(`).
     static func callsFunction(_ code: String, _ name: String) -> Bool {
         code.range(of: "\\b\(name)\\s*\\(", options: .regularExpression) != nil
+    }
+
+    /// True when the shader contains its own definition `float|vecN <name>(...)`.
+    static func definesFunction(_ code: String, _ name: String) -> Bool {
+        code.range(of: "\\b(?:float|vec[234])\\s+\(name)\\s*\\(", options: .regularExpression) != nil
     }
 
     private static func polyfillBlock(name: String, body: String) -> String {

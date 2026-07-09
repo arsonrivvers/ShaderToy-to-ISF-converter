@@ -98,6 +98,18 @@ final class ISFConverterTests: XCTestCase {
                      "no raw iMouse may survive conversion")
     }
 
+    /// M19 interim — channel/mouse mentions inside COMMENTS must not invent header inputs
+    /// (`// TODO try iChannel2` produced a phantom stub image input + warning).
+    func test_commentedChannelAndMouse_produceNoPhantomInputs() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: "// TODO try iChannel2 here\n/* maybe iMouse later */\nvoid mainImage(out vec4 O, vec2 I){ O = vec4(1.0); }",
+            name: "Comments")
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertFalse(doc.fileText.contains("iChannel2img"), "phantom stub input from a comment")
+        XCTAssertFalse(doc.fileText.contains("\"NAME\" : \"mouse\""), "phantom mouse input from a comment")
+        XCTAssertFalse(warnings.contains { $0.message.contains("iChannel2") }, "\(warnings)")
+    }
+
     /// M24 — a shader with no convertible render passes (e.g. sound-only) must surface an
     /// error-severity warning instead of "successfully" emitting an empty, black main().
     func test_soundOnlyShader_errorsInsteadOfSilentBlack() {

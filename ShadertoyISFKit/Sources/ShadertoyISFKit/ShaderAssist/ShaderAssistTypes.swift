@@ -115,5 +115,12 @@ public struct AIApplyResult: Codable, Equatable, Sendable {
 }
 
 public enum ShaderAssistParseError: Error, Equatable {
+    /// No JSON object could be located in the output at all.
     case unparseable(raw: String)
+    /// JSON was found but didn't decode — `detail` carries the field-level DecodingError reason
+    /// (e.g. which key was missing) so almost-valid responses are debuggable without re-reading raw.
+    case malformed(detail: String, raw: String)
+    /// The CLI reported an error envelope (`is_error: true`) — `message` is its actual error text
+    /// (quota, auth, timeout), previously discarded as unparseable(raw: "").
+    case cliError(message: String)
 }

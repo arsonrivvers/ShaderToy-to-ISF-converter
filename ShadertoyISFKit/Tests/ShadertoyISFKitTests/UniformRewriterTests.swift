@@ -47,6 +47,16 @@ final class UniformRewriterTests: XCTestCase {
         XCTAssertEqual(UniformRewriter.rewrite("iChannelTime [ ch ]"), "TIME")
     }
 
+    /// N14 — a nested-bracket index (`iChannelResolution[idx[0]]`) must still consume the whole
+    /// access; the old `[^\[\]]*` regex failed on it and left an undeclared identifier.
+    func test_iChannelResolution_nestedBracketIndex() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelResolution[idx[0]].xy"),
+                       "vec3(RENDERSIZE, 1.0).xy")
+    }
+    func test_iChannelTime_nestedBracketIndex() {
+        XCTAssertEqual(UniformRewriter.rewrite("iChannelTime[ch[1]]"), "TIME")
+    }
+
     /// C6 — iMouse is a standard rule (not a converter special case) so the Common path picks it
     /// up too. xy is mirrored into zw ("pressed") so mouse-gated shaders stay responsive.
     func test_iMouse_mappedToEngagedMouseExpression() {

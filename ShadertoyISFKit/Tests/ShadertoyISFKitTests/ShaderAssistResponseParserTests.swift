@@ -50,6 +50,30 @@ final class ShaderAssistResponseParserTests: XCTestCase {
         XCTAssertEqual(r.replacementSource, replacement)
     }
 
+    /// N3 — almost-valid JSON (one missing key) must carry the field-level DecodingError detail,
+    /// not collapse into a generic unparseable(raw:) the user has to re-debug by hand.
+    func testDecodeFailure_carriesDecodingDetail() {
+        let raw = #"{"goals":[{"id":"x"}]}"#   // missing "title" etc.
+        XCTAssertThrowsError(try ShaderAssistResponseParser.suggestionGoals(fromClaudeStdout: raw)) { err in
+            guard case ShaderAssistParseError.malformed(let detail, _) = err else {
+                return XCTFail("expected .malformed, got \(err)")
+            }
+            XCTAssertTrue(detail.contains("title"), detail)
+        }
+    }
+
+    /// N3 sibling — an is_error envelope used to become unparseable(raw: ""), throwing away the
+    /// CLI's actual error message (quota, auth, timeout).
+    func testIsErrorEnvelope_preservesCLIErrorText() {
+        let raw = #"{"type":"result","result":"Credit balance too low","is_error":true}"#
+        XCTAssertThrowsError(try ShaderAssistResponseParser.fixResult(fromClaudeStdout: raw)) { err in
+            guard case ShaderAssistParseError.cliError(let message) = err else {
+                return XCTFail("expected .cliError, got \(err)")
+            }
+            XCTAssertTrue(message.contains("Credit balance"), message)
+        }
+    }
+
     private func escaped(_ s: String) -> String {
         let data = try! JSONEncoder().encode(s)
         return String(String(data: data, encoding: .utf8)!.dropFirst().dropLast())

@@ -34,9 +34,18 @@ public enum TestPatternCatalog {
         return TestPattern(id: basename, name: name, sourceText: text)
     }
 
+    /// Inline pattern needing NO bundle resources — the floor `default` can never trap through
+    /// (an empty/broken resource bundle used to crash on `all[0]`).
+    public static let builtinFallback = TestPattern(
+        id: "builtin_fallback", name: "Test Pattern",
+        sourceText: """
+        /*{ "DESCRIPTION": "Builtin fallback gradient", "CATEGORIES": ["Test"], "INPUTS": [] }*/
+        void main() { gl_FragColor = vec4(isf_FragNormCoord, 0.5, 1.0); }
+        """)
+
     /// The reference / fallback pattern (used when a source is unavailable). SMPTE bars.
     public static var `default`: TestPattern {
-        all.first { $0.id == "smpte_bars" } ?? all[0]
+        all.first { $0.id == "smpte_bars" } ?? all.first ?? builtinFallback
     }
 
     public static func pattern(id: String) -> TestPattern? { all.first { $0.id == id } }

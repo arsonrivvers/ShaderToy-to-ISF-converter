@@ -24,4 +24,13 @@ final class TestPatternCatalogTests: XCTestCase {
             XCTAssertTrue(p.sourceText.contains("gl_FragColor"), "\(p.id) has no fragment output")
         }
     }
+
+    /// N12 — `default` must never trap, even with an empty/broken resource bundle: there is an
+    /// inline builtin fallback that needs no resources at all.
+    func test_builtinFallback_isSelfContained() {
+        let p = TestPatternCatalog.builtinFallback
+        XCTAssertTrue(p.sourceText.contains("gl_FragColor"))
+        XCTAssertFalse(TestPatternCatalog.default.id.isEmpty)
+    }
+
 }

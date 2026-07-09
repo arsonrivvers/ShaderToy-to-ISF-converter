@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 35 open / 42 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 29 open / 48 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -242,7 +242,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 35 open /
 - **Safe to fix now?** wait — fold into a scoper revision (with M3/M14).
 
 ### M19 — iChannel/iMouse/iResolution detection matches inside comments → junk header inputs
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Detection scans (channel refs, iMouse, iChannelResolution — pass AND Common) run on `GLSLComments.strip`-blanked code (new detection-only helper, offset-preserving, documented as the seed of M3's shared scanner); rewrites still see the real source. Converter + 4 unit tests. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ISFConverter.swift:48-49,65,101,163-171`
 - **Why it matters:** `// TODO try iChannel2 here` yields a phantom stub image input + warning in the published `.fs`; a commented `iMouse` adds a mouse input and triggers the rewrite pass. Users see inputs that don't exist.
 - **Recommend:** Comment-strip before the detection scans (shared scanner; or an interim detection-only strip).
@@ -418,14 +419,16 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 35 open /
 - **Safe to fix now?** yes.
 
 ### N3 — ShaderAssistResponseParser.decode discards the underlying DecodingError
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `decode` now distinguishes: root-level non-JSON stays `.unparseable`; wrong-shape JSON throws new `.malformed(detail:raw:)` carrying the field-level DecodingError reason; an `is_error` envelope throws new `.cliError(message:)` preserving the CLI's actual error text. 2 new tests. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderAssist/ShaderAssistResponseParser.swift:48-53`
 - **Why it matters:** `try? JSONDecoder().decode(...)` collapses any failure into `unparseable(raw:)`, losing the field-level reason — so when Claude returns almost-valid JSON (one missing key), debugging means re-reading the raw blob by hand. `ShadertoyInternalParser.malformed(detail:)` already shows the better pattern. (Re-verified 2026-07-08, plus a sibling: `ShaderAssistResponseParser.swift:12` — an `is_error == true` envelope returns `""`, so the eventual `unparseable(raw: "")` throws away the CLI's actual error message (quota/auth/timeout) that was sitting in `result`.)
 - **Recommend:** Capture and attach the `DecodingError` detail; preserve the `is_error` envelope's `result` text in the thrown error.
 - **Safe to fix now?** yes.
 
 ### N4 — SamplerRewriter bare-identifier audio rewrite drops the waveform sampler
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Bare-identifier rewrite warns when the binding is audio (waveform half dropped) or cubemap (no direction projection); iteration sorted for deterministic order. 2 new tests. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/SamplerRewriter.swift:54-57`
 - **Why it matters:** When an audio `iChannelN` is threaded as a bare value (not a `texture()` call), the loop replaces it with `b.glslName` (FFT sampler only); `auxName` (waveform) is lost → half-correct audio reaction, no warning. Rare.
 - **Recommend:** Emit a warning for bare-identifier use of an audio/cubemap binding.
@@ -482,21 +485,24 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 35 open /
 - **Safe to fix now?** yes. (2026-07-08 CSO rescan: `#if DEBUG`-gating the four debug env blocks is the **single named pre-public-launch item** — it resolves N11 and most of N9 in one ~10-minute change.)
 
 ### N12 — TestPatternCatalog crashes if bundle resources are missing entirely
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `TestPatternCatalog.builtinFallback` — inline zero-resource pattern; `default` chains smpte → first → builtinFallback, can never trap. 1 new test. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/TestPatternCatalog.swift:39` (`default` falls back to `all[0]`)
 - **Why it matters:** An empty resource bundle (broken packaging) turns a fallback into an index-out-of-range crash.
 - **Recommend:** Return an inline hardcoded pattern instead.
 - **Safe to fix now?** yes.
 
 ### N13 — GLSLCompat adds a duplicate tanh polyfill when the shader defines its own
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `GLSLCompat` skips polyfills for functions the shader defines itself (`definesFunction` regex) — no more duplicate `float tanh(` inside the #if block. 1 new test. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLCompat.swift:41`
 - **Why it matters:** A shader already carrying a `float tanh(` polyfill gets a second one inside the `#if __VERSION__ < 130` block → redefinition on old GL backends.
 - **Recommend:** Check for a user definition before adding.
 - **Safe to fix now?** yes.
 
 ### N14 — UniformRewriter: nested-bracket `iChannelResolution[idx[0]]` survives → loud undeclared identifier
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Both indexed-access patterns (`iChannelResolution`/`iChannelTime`) accept one nesting level in the index. 2 new tests. 236 kit tests green; corpus 74/78 baseline pass list.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/UniformRewriter.swift:24` (`[^\[\]]*` can't match nested brackets)
 - **Why it matters:** Rare, but the miss is silent at conversion time and only surfaces as a transpile error.
 - **Recommend:** Handle one nesting level or emit a warning on `iChannelResolution[` with unmatched inner brackets.

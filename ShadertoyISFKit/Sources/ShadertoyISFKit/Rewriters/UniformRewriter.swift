@@ -31,7 +31,9 @@ public enum UniformRewriter {
         // `[N].xy` on a float would not compile). Exact for buffer channels (ISF buffers are
         // RENDERSIZE); an approximation for image inputs. Runs before the word rules so nothing of the
         // `iChannelResolution` token survives for those to touch.
-        let chanRes = try! NSRegularExpression(pattern: "iChannelResolution\\s*\\[[^\\[\\]]*\\]")
+        // One nesting level allowed in the index (`iChannelResolution[idx[0]]`) — a flat
+        // `[^\[\]]*` fails on it and leaves the identifier undeclared.
+        let chanRes = try! NSRegularExpression(pattern: "iChannelResolution\\s*\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]")
         out = chanRes.stringByReplacingMatches(
             in: out, range: NSRange(out.startIndex..<out.endIndex, in: out),
             withTemplate: NSRegularExpression.escapedTemplate(for: "vec3(RENDERSIZE, 1.0)"))
@@ -40,7 +42,7 @@ public enum UniformRewriter {
         // equivalent — map the whole indexed access to TIME (ISF's global clock). Same index-consuming
         // reason as iChannelResolution. A close approximation: it loses any per-channel playback offset,
         // which almost no shader depends on.
-        let chanTime = try! NSRegularExpression(pattern: "iChannelTime\\s*\\[[^\\[\\]]*\\]")
+        let chanTime = try! NSRegularExpression(pattern: "iChannelTime\\s*\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]")
         out = chanTime.stringByReplacingMatches(
             in: out, range: NSRange(out.startIndex..<out.endIndex, in: out),
             withTemplate: NSRegularExpression.escapedTemplate(for: "TIME"))

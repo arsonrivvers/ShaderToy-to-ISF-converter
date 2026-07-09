@@ -45,8 +45,11 @@ public enum ISFConverter {
             // Splice `\` line-continuations first — glslang rejects them and black-screens the
             // shader; downstream rewriters and the transpiler then see clean, single-logical-line code.
             var code = GLSLLineContinuation.splice(pass.code)
-            if code.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
-            if code.contains("iChannelResolution") { usesChannelResolution = true }
+            // Detection scans run on comment-blanked code — `// TODO try iChannel2` must not
+            // invent inputs. The rewrites below still run on the real `code`.
+            let detectable = GLSLComments.strip(code)
+            if detectable.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
+            if detectable.contains("iChannelResolution") { usesChannelResolution = true }
 
             // iMouse is one of UniformRewriter's standard rules (mirrors xy into zw, "pressed");
             // `includeMouse` above only gates declaring the `mouse` input in the header.
@@ -55,7 +58,7 @@ public enum ISFConverter {
             // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
             // some Shadertoy shaders reference a channel the API/internal response never lists, which
             // would otherwise leave a bare `iChannelN` / `texture(iChannelN,…)` undeclared.
-            for n in Self.referencedChannelIndices(code).sorted() where bindings[n] == nil {
+            for n in Self.referencedChannelIndices(detectable).sorted() where bindings[n] == nil {
                 bindings[n] = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
                 warnings.append(ConversionWarning(severity: .warning,
                     message: "iChannel\(n) is used but the renderpass declares no input for it — added a stub image input; supply an image or verify.",
@@ -84,10 +87,11 @@ public enum ISFConverter {
         // some shaders thread the uniforms through helpers as parameters, which the per-pass
         // whole-string rewriter would corrupt.
         let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
-        if splicedCommon.contains("iChannelResolution") { usesChannelResolution = true }
+        let detectableCommon = GLSLComments.strip(splicedCommon)
+        if detectableCommon.contains("iChannelResolution") { usesChannelResolution = true }
         // iMouse referenced only in the Common tab must still declare the mouse input — the
         // file-scope rewrite happens in CommonUniformRewriter below, but the header flag is set here.
-        if splicedCommon.range(of: #"\biMouse\b"#, options: .regularExpression) != nil {
+        if detectableCommon.range(of: #"\biMouse\b"#, options: .regularExpression) != nil {
             includeMouse = true
         }
         if usesChannelResolution {
@@ -96,7 +100,7 @@ public enum ISFConverter {
         }
         // A channel sampled in the Common tab but bound by NO pass → stub it as an image across all
         // passes so its dispatcher samples something real rather than returning 0.
-        for n in Self.referencedChannelIndices(splicedCommon).sorted() where perChannelPerPass[n] == nil {
+        for n in Self.referencedChannelIndices(detectableCommon).sorted() where perChannelPerPass[n] == nil {
             let stub = ChannelBinding.Binding(glslName: "iChannel\(n)img", kind: .texture)
             for p in 0..<plan.renderPasses.count { perChannelPerPass[n, default: [:]][p] = stub }
             imageInputNames.insert(stub.glslName)

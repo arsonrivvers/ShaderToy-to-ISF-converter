@@ -50,4 +50,13 @@ final class GLSLCompatTests: XCTestCase {
         let r = GLSLCompat.apply("void main(){ gl_FragColor = vec4(1.0); }")
         XCTAssertFalse(r.code.contains("_dirToEquirect"))
     }
+
+    /// N13 — a shader that defines its own tanh polyfill must not get a second definition inside
+    /// the #if block (redefinition on old GL backends).
+    func test_userDefinedPolyfill_notDuplicated() {
+        let code = "float tanh(float x){ return x; }\nvoid main(){ gl_FragColor = vec4(tanh(0.5)); }"
+        let r = GLSLCompat.apply(code)
+        XCTAssertEqual(r.code.components(separatedBy: "float tanh(").count - 1, 1, r.code)
+    }
+
 }

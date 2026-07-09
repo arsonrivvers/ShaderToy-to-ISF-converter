@@ -62,8 +62,21 @@ public enum SamplerRewriter {
         // this pass's bindings; the shared Common code (helper-function bodies whose `sampler2D
         // iChannelN` *parameters* must stay) is never routed through SamplerRewriter, so those are
         // untouched. Word boundaries keep `iChannel1` from matching `iChannel1img`/`iChannel10`.
-        for (n, b) in bindings {
-            out = out.replacingOccurrences(of: "\\biChannel\(n)\\b", with: b.glslName,
+        for (n, b) in bindings.sorted(by: { $0.key < $1.key }) {
+            let pattern = "\\biChannel\(n)\\b"
+            guard out.range(of: pattern, options: .regularExpression) != nil else { continue }
+            // A bare identifier can only carry ONE sampler name — audio loses its waveform half,
+            // cubemap loses the equirect projection. Rewrite anyway (undeclared is worse) but warn.
+            if b.kind == .audio, b.auxName != nil {
+                warnings.append(ConversionWarning(severity: .warning,
+                    message: "iChannel\(n) (audio) is passed as a bare value — only the FFT sampler '\(b.glslName)' is bound; the waveform half is dropped. Verify audio-reactive behavior.",
+                    context: ""))
+            } else if b.kind == .cubemap {
+                warnings.append(ConversionWarning(severity: .warning,
+                    message: "iChannel\(n) (cubemap) is passed as a bare value — bound to the 2D stub '\(b.glslName)' with no direction projection. Verify sampling.",
+                    context: ""))
+            }
+            out = out.replacingOccurrences(of: pattern, with: b.glslName,
                                            options: .regularExpression)
         }
         return Result(code: out, warnings: warnings)
