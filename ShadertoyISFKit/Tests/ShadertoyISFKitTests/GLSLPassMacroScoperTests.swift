@@ -11,7 +11,7 @@ final class GLSLPassMacroScoperTests: XCTestCase {
     func test_undefsObjectMacroShadowedByDeclarationInAnotherPass() {
         let pass0 = "#define _G0 0.25\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(_G0); }"
         let pass1 = "const float _G0 = 0.25;\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(_G0); }"
-        let out = GLSLPassMacroScoper.scope([pass0, pass1])
+        let out = GLSLPassMacroScoper.scope([pass0, pass1], commonCode: "")
 
         // The defining pass gains a trailing `#undef`; the declaring pass is untouched.
         XCTAssertTrue(out[0].contains("#undef _G0"), "defining pass should #undef its macro")
@@ -26,7 +26,7 @@ final class GLSLPassMacroScoperTests: XCTestCase {
     func test_undefsFunctionMacroRedefinedAcrossPasses() {
         let pass0 = "#define A(U) texture(bufA, (U))\nvoid mainImage(out vec4 o, in vec2 f){ o = A(f); }"
         let pass1 = "#define A(U) texture(bufB, (U))\nvoid mainImage(out vec4 o, in vec2 f){ o = A(f); }"
-        let out = GLSLPassMacroScoper.scope([pass0, pass1])
+        let out = GLSLPassMacroScoper.scope([pass0, pass1], commonCode: "")
 
         // `#undef` uses the bare macro name (no parameter list), in every pass that defines it.
         XCTAssertTrue(out[0].hasSuffix("#undef A"))
@@ -38,7 +38,7 @@ final class GLSLPassMacroScoperTests: XCTestCase {
     func test_leavesPassLocalMacroAlone() {
         let pass0 = "#define LOCAL 1.0\nvoid mainImage(out vec4 o, in vec2 f){ o = vec4(LOCAL); }"
         let pass1 = "void mainImage(out vec4 o, in vec2 f){ o = vec4(0.0); }"
-        let out = GLSLPassMacroScoper.scope([pass0, pass1])
+        let out = GLSLPassMacroScoper.scope([pass0, pass1], commonCode: "")
         XCTAssertEqual(out, [pass0, pass1])
     }
 
@@ -46,6 +46,33 @@ final class GLSLPassMacroScoperTests: XCTestCase {
     /// `#define`s are scoped. A single pass with a macro used elsewhere-as-token still scopes only the
     /// defining pass. Sanity: empty input round-trips.
     func test_emptyInputRoundTrips() {
-        XCTAssertEqual(GLSLPassMacroScoper.scope([]), [])
+        XCTAssertEqual(GLSLPassMacroScoper.scope([], commonCode: ""), [])
+    }
+
+    /// M18 — a pass redefining a Common macro: `#undef` inserted immediately BEFORE the pass's
+    /// own `#define` (code above it legitimately uses the Common meaning), and the Common
+    /// definition restored after the pass so later passes/Common helpers keep their meaning.
+    func test_passDefineShadowingCommonMacro_undeffedAndRestored_M18() {
+        let common = "#define A 1.0"
+        let passes = ["float x = A;\n#define A 2.0\nfloat y = A;", "float z = A;"]
+        let out = GLSLPassMacroScoper.scope(passes, commonCode: common)
+        XCTAssertTrue(out[0].contains("float x = A;\n#undef A\n#define A 2.0"), out[0])
+        XCTAssertTrue(out[0].hasSuffix("#undef A\n#define A 1.0"), out[0])
+        XCTAssertEqual(out[1], "float z = A;")
+    }
+
+    /// M18 comment-awareness — a macro name mentioned only inside another pass's COMMENT is not
+    /// a collision; no spurious #undef.
+    func test_macroMentionedOnlyInComment_noUndef_M18() {
+        let passes = ["#define B 1.0\nfloat x = B;", "// B is prose here\nfloat y = 0.;"]
+        let out = GLSLPassMacroScoper.scope(passes, commonCode: "")
+        XCTAssertEqual(out, passes)
+    }
+
+    /// A #define inside a comment is not a definition.
+    func test_commentedOutDefine_notCollected() {
+        let passes = ["// #define C 1.0\nfloat x = 0.;", "#define C 2.0\nfloat y = C;"]
+        let out = GLSLPassMacroScoper.scope(passes, commonCode: "")
+        XCTAssertEqual(out, passes)   // C defined in one pass only, mentioned nowhere else real
     }
 }

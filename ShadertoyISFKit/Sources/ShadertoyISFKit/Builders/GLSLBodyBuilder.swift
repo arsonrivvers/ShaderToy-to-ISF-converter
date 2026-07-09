@@ -20,7 +20,7 @@ public enum GLSLBodyBuilder {
         // once passes are concatenated, so a pass macro otherwise leaks into later passes (rewriting a
         // same-named declaration → FLOATCONSTANT, or colliding as a redefinition). Restores Shadertoy's
         // per-pass isolation.
-        let scoped = GLSLPassMacroScoper.scope(namespaced)
+        let scoped = GLSLPassMacroScoper.scope(namespaced, commonCode: commonCode)
 
         for (idx, body) in scoped.enumerated() {
             let fnName = "pass\(idx)_mainImage"
