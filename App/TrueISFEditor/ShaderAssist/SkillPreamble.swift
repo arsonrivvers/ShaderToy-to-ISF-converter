@@ -4,6 +4,22 @@ import Foundation
 /// isf-shader-development + shader-dev skills, concatenated and length-capped. Falls back to a small
 /// built-in primer if those files aren't present (e.g. another machine).
 enum SkillPreamble {
+    /// One logical skill text: the user's live copy wins (the maker edits skills in
+    /// `~/.claude/skills`), the app-bundled copy (`Resources/<name>.md`) is the floor every public
+    /// install gets — without it, any machine but the maker's silently fell back to the tiny primer.
+    /// Bundled copies are refreshed from `~/.claude/skills` at release time.
+    struct SkillSource {
+        let name: String       // section title AND bundled resource basename
+        let userPath: String   // live override
+    }
+
+    static let defaultSources = [
+        SkillSource(name: "isf-shader-development",
+                    userPath: "\(NSHomeDirectory())/.claude/skills/isf-shader-development/SKILL.md"),
+        SkillSource(name: "shader-dev",
+                    userPath: "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md"),
+    ]
+
     static let defaultPaths = [
         "\(NSHomeDirectory())/.claude/skills/isf-shader-development/SKILL.md",
         "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md",
@@ -16,7 +32,27 @@ enum SkillPreamble {
     /// mid-file and dropped shader-dev + the catalog entirely — the bug this constant fixes.)
     static let defaultCap = 200_000
 
-    static func load(paths: [String] = defaultPaths, cap: Int = defaultCap) -> String {
+    /// Source-based load: user path → bundled resource → skip; primer only if NOTHING loaded.
+    static func load(sources: [SkillSource] = defaultSources, cap: Int = defaultCap) -> String {
+        let parts = sources.compactMap { src in
+            text(for: src).map { "## Skill: \(src.name)\n\n\($0)" }
+        }
+        guard !parts.isEmpty else { return fallback }
+        let combined = "# ISF authoring expertise (loaded skills)\n\n" + parts.joined(separator: "\n\n")
+        return combined.count > cap ? String(combined.prefix(cap)) : combined
+    }
+
+    static func text(for src: SkillSource) -> String? {
+        if let t = try? String(contentsOfFile: src.userPath, encoding: .utf8),
+           !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return t }
+        if let url = Bundle.main.url(forResource: src.name, withExtension: "md"),
+           let t = try? String(contentsOf: url, encoding: .utf8),
+           !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return t }
+        return nil
+    }
+
+    /// Path-only load (no bundle fallback) — kept for tests and explicit file lists.
+    static func load(paths: [String], cap: Int = defaultCap) -> String {
         var parts: [String] = []
         for path in paths {
             guard let text = try? String(contentsOfFile: path, encoding: .utf8),

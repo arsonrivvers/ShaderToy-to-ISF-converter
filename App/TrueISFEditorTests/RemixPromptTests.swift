@@ -43,18 +43,44 @@ final class RemixPromptTests: XCTestCase {
         XCTAssertTrue(s.contains("ISF"))
     }
 
-    func test_skillPaths_includeCorpusCatalog_onlyOnGenerationPath() {
+    func test_skillSources_includeCorpusCatalog_onlyOnGenerationPath() {
         // The 38K corpus catalog must be wired into Remix generation (it's invisible to the
-        // tool-stripped subprocess otherwise). It is deliberately NOT on ShaderAssist's paths.
-        XCTAssertTrue(RemixPrompt.skillPaths.contains { $0.hasSuffix("arsonrivvers_technique_catalog.md") },
-                      "corpus catalog missing from Remix load paths")
-        XCTAssertFalse(SkillPreamble.defaultPaths.contains { $0.hasSuffix("arsonrivvers_technique_catalog.md") },
+        // tool-stripped subprocess otherwise). It is deliberately NOT on ShaderAssist's sources.
+        XCTAssertTrue(RemixPrompt.skillSources.contains { $0.name == "arsonrivvers_technique_catalog" },
+                      "corpus catalog missing from Remix skill sources")
+        XCTAssertFalse(SkillPreamble.defaultSources.contains { $0.name == "arsonrivvers_technique_catalog" },
                        "catalog should stay off the ShaderAssist path")
     }
 
-    func test_skillPaths_catalogIsLast_soCoreSkillsSurviveTruncation() {
+    func test_skillSources_catalogIsLast_soCoreSkillsSurviveTruncation() {
         // Descending priority: the catalog (deep reference) must be last so a future ARG_MAX
         // truncation drops it before the core skills.
-        XCTAssertTrue(RemixPrompt.skillPaths.last?.hasSuffix("arsonrivvers_technique_catalog.md") == true)
+        XCTAssertEqual(RemixPrompt.skillSources.last?.name, "arsonrivvers_technique_catalog")
+    }
+
+    // M39 — every skill source must have a bundled copy so PUBLIC installs (no ~/.claude) get the
+    // full knowledge, not the tiny primer.
+    func test_everySkillSource_hasABundledCopy() {
+        for src in RemixPrompt.skillSources + SkillPreamble.defaultSources {
+            XCTAssertNotNil(Bundle.main.url(forResource: src.name, withExtension: "md"),
+                            "no bundled copy for skill source '\(src.name)'")
+        }
+    }
+
+    // M39 — with the user path absent (a public machine), the bundled copy loads — and the full
+    // Remix set stays under the ARG_MAX ceiling (no silent truncation).
+    func test_bundledSkills_loadWithoutUserPaths_andWithoutTruncation() {
+        let publicSources = RemixPrompt.skillSources.map {
+            SkillPreamble.SkillSource(name: $0.name, userPath: "/nonexistent/\($0.name).md")
+        }
+        let out = SkillPreamble.load(sources: publicSources)
+        XCTAssertNotEqual(out, SkillPreamble.fallback, "public installs must not fall back to the primer")
+        XCTAssertTrue(out.contains("## Skill: arsonrivvers_technique_catalog"), "catalog must survive")
+        XCTAssertLessThan(out.count, SkillPreamble.defaultCap, "preamble must never hit the ARG_MAX ceiling")
+    }
+
+    func test_unknownSource_fallsBackToPrimer() {
+        let out = SkillPreamble.load(sources: [.init(name: "no-such-skill", userPath: "/nonexistent")])
+        XCTAssertEqual(out, SkillPreamble.fallback)
     }
 }

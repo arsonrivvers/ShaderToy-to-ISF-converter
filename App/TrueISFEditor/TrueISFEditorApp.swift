@@ -19,6 +19,11 @@ struct TrueISFEditorApp: App {
         let pendingURL = MainActor.assumeIsolated { CrashLog.shared.pendingURL }
         CrashReporter.install(pendingURL: pendingURL)
 
+        // Debug-only headless harnesses (fetch / preview / ISFMSL / corpus). Compiled out of
+        // release builds: a shipped app that silently fetches-and-exits on an env var is surprise
+        // behavior, and the raw ids here bypass the ShadertoyURL validator (CSO N9/N11). The
+        // corpus scripts build Debug, so `scripts/corpus-run.sh` keeps working.
+        #if DEBUG
         // Headless debug affordance: `SHADERTOY_DEBUG_FETCH=<id>` fetches + converts that
         // shader, prints the .fs to stdout, and exits — no UI. Used to verify the WKWebView
         // fetch path in the real (entitled, sandboxed) app context. No effect in normal use.
@@ -176,6 +181,7 @@ void main() {
                 exit(0)
             }
         }
+        #endif
     }
 
     var body: some Scene {

@@ -75,7 +75,9 @@ final class WebKitShaderFetcher: NSObject {
                let got = try? JSONDecoder().decode([String].self, from: data) {
                 ids.formUnion(got)
             }
-            print("HARVEST poll: ids=\(ids.count)")
+            #if DEBUG
+            print("HARVEST poll: ids=\(ids.count)")   // corpus-harness diagnostics only
+            #endif
             if ids.count >= count { break }
         }
         return Array(ids.prefix(count))

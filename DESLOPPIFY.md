@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 29 open / 48 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open / 51 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -396,7 +396,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 29 open /
 - **Safe to fix now?** wait — investigate before changing.
 
 ### M39 — ShaderAssist/Remix skill preambles read maker-machine-only paths → public users silently get a degraded AI
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Skill texts bundled as app resources (`Resources/<name>.md` ×4 incl. the 964-shader catalog); `SkillPreamble.SkillSource` resolves user path (live override) → bundled copy → skip, primer only if nothing loads. Tests: every source has a bundled copy; public-machine simulation (nonexistent user paths) loads the full set under the ARG_MAX cap with zero truncation. The 12k-cap half was fixed in 52d5036 (cap→200k ARG_MAX guard + catalog inlined into Remix); closes action item trueisf-skillpreamble-12k-cap-20260708. 196 app tests green; Release build green.
 - **Where:** `App/TrueISFEditor/ShaderAssist/SkillPreamble.swift` (`defaultPaths` → `~/.claude/skills/isf-shader-development/` etc.), `Remix/RemixPrompt.swift` (`system()`)
 - **Why it matters:** Those paths exist only on this machine. Every public user silently falls back to the ~10-line primer — ShaderAssist and Remix ship materially dumber than tested, with no signal. **Launch-critical.**
 - **Recommend:** Bundle the skill texts as app resources (user path as override). Also fold in open action item `trueisf-skillpreamble-12k-cap-20260708`: fix the 12,000-char skill-preamble cap in `SkillPreamble` so the bundled texts (incl. the new 964-shader technique catalog) aren't silently truncated.
@@ -463,7 +464,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 29 open /
 - **Safe to fix now?** yes.
 
 ### N9 — Unconditional `print` in harvest + debug exit paths ship in the release binary
-- **Status:** todo
+- **Status:** done
+- **Resolved:** All four debug env harnesses (`SHADERTOY_DEBUG_FETCH/_PREVIEW/_ISFMSL/_CORPUS`) + the HARVEST poll print are `#if DEBUG` — verified compiled OUT of the Release binary (strings scan: 0 hits) and still IN the Debug debug.dylib (5 hits; corpus scripts build Debug). 196 app tests green; Release build green.
 - **Where:** `App/TrueISFEditor/WebKitShaderFetcher.swift:78` (`print("HARVEST poll…")`); env-gated `SHADERTOY_DEBUG_*` blocks at `App/TrueISFEditor/TrueISFEditorApp.swift:31-187`
 - **Why it matters:** Not dead (the debug harnesses are real corpus tooling) but they ship in release and write to stdout; `harvestShaderIDs` prints on every poll. Noise/surface area.
 - **Recommend:** Gate the harvest `print` behind a debug flag; consider `#if DEBUG` around the env-gated harnesses.
@@ -478,7 +480,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 29 open /
 - **Safe to fix now?** yes.
 
 ### N11 — Debug-fetch affordance bypasses the shaderID validator
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Resolved by N9's gate: the raw-id debug fetch entry no longer exists in release builds. 196 app tests green; Release build green.
 - **Where:** `App/TrueISFEditor/TrueISFEditorApp.swift:34-43` (`SHADERTOY_DEBUG_FETCH` / `--debug-fetch` → `fetchShader(id:)` with no validation)
 - **Why it matters:** Normal paths validate the id through `ShadertoyURL.shaderID(from:)` (alphanumeric 3–16) before the fetcher; this debug door doesn't. Real exploitability is low (literal host, parameterized in-page JS, requires launch-env control) but it's an inconsistency.
 - **Recommend:** Route the debug id through `ShadertoyURL.shaderID(from:)`, or compile the debug affordances out with `#if DEBUG`.
