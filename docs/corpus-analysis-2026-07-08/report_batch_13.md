@@ -1,0 +1,71 @@
+# Batch 13 Analysis Report (Genuary day20 + day20_alt + day21, 41 files, all read, no misses)
+
+## Family 1: JFA Voronoi Tracker / Tech HUD (day20_01–03) — tier 3–4
+Live-camera CV-style overlay filters. Threshold input → sparse point set → hand-built Jump Flood Algorithm (10–12 passes: seed, 8 JFA iterations jfa128→jfa1 halving stride, render) → Voronoi/nearest-seed distance field → tech-HUD render (glow, edges, brackets, connection lines, scanlines). All FLOAT buffers; day20_03 adds downsampled quantization pass (host-side WIDTH/HEIGHT expressions `"floor($WIDTH/8.0)*8.0/8.0"`) + PERSISTENT trail pass (`max(current.r, history.r*trailDecay)`).
+- JFA by hand: 3×3 neighborhood at `stride = pow(2.0, float(8 - PASSINDEX))`; "no seed" = vec4(-100.0) sentinel; `sampleLastPass()` dispatcher maps PASSINDEX→previous buffer (ISF has no generic prev-pass handle).
+- Voronoi edges: differing JFA seeds across neighbors; day20_03 upgrades to 4-tap distance-field gradient.
+- day20_02 sparse grid mask seeding (`mod(gl_FragCoord, seedDensity) < 1.0`) — de-clumping, one seed per cell.
+- `exp(-distToSeed*glowFalloff)*glowIntensity` glow idiom; grid-space HUD: L-brackets from step() on abs(cellUV), per-cell pulse via hash phase; dashed connection lines via `fract(h*length(ba)*dashFreq + time)`; procedural data-readout strip.
+- UI: `--- SECTION ---` label rows as event inputs named lbl_*; ~20 inputs, 5 color inputs, per-layer show/hide bools.
+- Evolution: 01→02 fixes clumping (grid-sparse seeding); 02→03 fixes temporal instability (quantization + trail) + maximalist HUD. CREDIT "Gemini" → "Gemini / Enhanced by Claude".
+- Rough edges: JFA depth hardcoded 8 (max stride 128px, insufficient >255px seeds on large canvases); grid not aspect-corrected; inconsistent sentinel magnitudes.
+
+## Family 2: Constellation Tracker CV Debug Overlay (day20_04–09) — tier 5 (04 alone tier 2)
+From-scratch optical-flow feature tracker in ISF passes: Harris-like corner detection, frame-to-frame brute-force block matching, CV-debug-HUD render (L-brackets, fake OCR labels, network lines, trails). Filter.
+- Architecture: day20_04 stateless 2-pass (64×64 detection buffer, jitter in B/A channels, NMS — flickers). day20_05+ 3-pass PERSISTENT: `prevFrame` (full-res last frame) + `featureBuffer` (128×2 texel struct-of-arrays tracker table: row0 pos.xy/age/confidence, row1 velocity(encoded)/ID/matchQuality); per-slot state machine (track-if-active/spawn-if-inactive). day20_09 reorders passes so tracking uses true previous frame.
+- Feature strength: manual 3×3 Sobel + cheap Harris substitute `abs(gx*gy)/(abs(gx)+abs(gy)+0.01)`.
+- Block matching: 17×17→11×11 search window (shrinks across revs for perf), score `lumaDiff + distPenalty - featureStrength*bonus`; v07 5-tap cross-pattern weighted luma both sides.
+- Struct-of-arrays texel addressing: `posUV = vec2((slotID+0.5)/W, 0.5/H)`; velocity bias-encoded to [0,1].
+- Lifecycle: kill on OOB/low-confidence/lostTrack/age>1.0 (age += 1/maxAge); stochastic spawn where featureStrength>threshold and not within minSpacing (aspect-corrected O(n) scan); adaptive spawn rate from countActiveTrackers() sampling every 4th slot — closed-loop population control.
+- Motion gating (08/09): `|curr-prev|` gates spawning to moving content (in-code "The Fix" for static false positives). Velocity-predictive search recenter (Kalman-lite). Age-fade envelope `smoothstep(0,.05,age)*(1-smoothstep(.85,1,age))`.
+- Procedural fake text: hashed 5×5 dot grid per char cell with edgeBoost bias — OCR aesthetic, zero glyph data.
+- UI: `--- TRACKING/NETWORK/STYLE ---` sections; 9→18 inputs; debug bool paints raw motion mask red.
+- Evolution: stateless→persistent (05) → edge-margin kill fix (06) → smoothed matching + adaptive spawn + perf hoist (07) → minimal-render debugging rev w/ motion gate + prediction (08 "V3.1") → merged mature version (09 "V5").
+- Rough edges: O(n) spawn scans, O(n²) network-line pixel loops (~128 tracker ceiling); velocity encoding scale inconsistent across versions (merge trap); v05 double trackFeature call (fixed v07); v08 row-1 unconditional junk writes.
+
+## Family 3: "One Line" Trefoil Knot Raymarch (day20_alt_01–13) — tier 3→5
+Single-pass SDF raymarcher: trefoil-knot ribbon (parametric curve + Frenet frame + rotated rounded-box cross-section) over ground plane, Obra-Dinn 1-bit Bayer-dithered + hard-shadow look. Evolves into "reality manipulation" instrument — knot unwinds into a literal line (Genuary "one line" prompt). Generators, all single-pass; resolution capped via pixel-block quantization `p_scale = floor(max(1.0, RENDERSIZE.y/targetResY))` (~280 logical rows).
+- Frenet-Serret ribbon SDF: `getKnotPos(t)` trefoil `(sin t + 2sin 2t, cos t − 2cos 2t, −sin 3t)`; T/N/B from finite differences; degenerate-curvature fallback (`length(N)<0.0001 → N=(0,1,0)`) needed when knot straightens.
+- Coarse-then-fine closest-point search: 32-step coarse over t + 16-step fine — parametric curve as SDF primitive; returned distance relaxed ×0.8 (not a true lower bound).
+- Bayer 4×4 as const mat4 read through fully unrolled if/else (`bayerThresh`) — dynamic const-matrix indexing unreliable on Metal. Dither + edge XOR (`abs(val - edgeMask)`) = signature ink look.
+- Edge detection via full neighbor re-raymarch (normal dot < 0.8 or depth delta); later: separate depth/normal weights, edgeThickness multi-sample, edgeMode (XOR/max/min), edgeBreakup hash fraying (alt_13).
+- "Unwind" macro: `mix(knotState, lineState, unwind)` lerps the parametric function; environment morphs `mix(flatPlane, cylinderAroundLine, unwind)` (alt_03 "Rolling Reality").
+- Domain warping stack (alt_04+): fractalFold (abs+rotate ×2), spaceTwist (height-proportional rotation), digitalDecay (space voxelization).
+- Domain-vs-distance effect split (alt_05+): applyDomainEffects (WHERE you sample) vs applyDistanceEffects (WHAT distance returns: liquidDistort sine ripple; realitySlice boolean subtraction) — explicit composability architecture.
+- Reality-slice 6-file arc: sine-threshold hack → slab SDF `abs(mod(y+φ,period)−period/2)−halfWidth` with `max(d,−cut)` → parameterized → static 1-axis + rotate/offset → 3-axis + diagonal slab field returning slice normal (`sliceField3D`/`unsliceNormal`) → seam displacement with exponential "lip" (torn paper) → tangent-basis shear (`t1=cross(upRef,n)`, `t2=cross(n,t1)`, biased displacement) → slice curvature via low-freq sine bend (alt_13).
+- Bounding-volume culling (alt_06+): cheap bounding sphere gate before expensive 48-step curve search. Adaptive raymarch step damping `stepScale = 1 − clamp(max(warps)*0.15, 0, 0.6)` when domain warps make SDF non-Euclidean — correctness fix.
+- Dual map: map() full vs mapShadow() domain-only 32-step (vs 100 primary); alt_11 re-adds slice to mapShadow so cut geometry stops shadowing.
+- Camera: TIME orbit → manual cam_pos_x/y/z + cam_lens look-at (VJ control) → gimbal-safe up fallback (alt_09+).
+- Fog with contour banding (alt_13): depth smoothstep × height exponential × sin(depth*fogBandFreq) — banded woodcut fog; groundCreation slider sinks floor to infinity.
+- UI: flat lists, no divider events; `unwind` labeled "UNWIND REALITY" hero macro; slice* prefix subsystem; shadowHardness mislabeled (actually max shadow distance); performance-ready defaults.
+- Rough edges: massive boilerplate duplication across ~10 files; alt_09 accidentally drops TIME from twist (silent freeze, reverted alt_10); 10 files share identical DESCRIPTION.
+
+## Family 4: Generative Bauhaus Engine (day21_01–19) — tier 2→5; day21_19 most complex file in batch
+From-scratch generative graphic-design system: BSP guillotine subdivision, golden-ratio splits, Kandinsky shape-color correspondence, Itten contrast-of-extension, lithographic print physics. Self-documented phased build ("Phase 1"…"Phase 4: The Print Shop", "Complete", then "Poster Engine" v1/v2/v2.1/v2.3). Generators.
+- Architecture: single-pass through ~07; day21_08+ genuine 4-pass: gridPass (BSP) → floatingPass (free forms, alpha-composited) → compositePass (ink blend mode) → final (paper/grain/misregistration/contrast/vignette). Intermediates PERSISTENT+FLOAT (persistence unused — habit). Poster Engine renames to basePass/inkPass/compPass with explicit compositional roles (hero/diagonal band/counterweight/accents) in a slot loop.
+- BSP guillotine (`findCell`): unrolled max 7–8 iters; hash decides split axis (aspect-biased), ratio from weighted historical table (25% golden-major, 20% golden-minor, 20% half, 15%+10% thirds, 10% √2), skip/stop probability grows with depth + small area — natural termination. day21_09: break-vs-continue + one-hash decorrelation (`fract(h*17)/fract(h*47)/fract(h*91)`).
+- Cell ID via binary path encoding (`cellID = cellID*2 (+1)` per split) — stable per-cell hashing.
+- Exclusion zones carved from BSP root bounds BEFORE subdivision (content-aware layout for typography); frieze/panel logic splits extreme aspects into golden-ratio-target panels incl. `int(min(float(i), float(count-1)))` GLSL-int-min portability fix.
+- Dual-UV per cell: fillUV (stretches) vs fitUV (aspect-corrected) from getCellCoords — shapes don't distort with cell aspect.
+- SDF shape library: exact equilateral triangle (IQ construction), corner-quadrant arc (day21_06 rewrites quadrant test to branchless `mix(1000.0, d, inQuadrant)`), rounded rects, centroid-pointing triangles with 90°-snap + 35% random-cardinal override.
+- fwidth-based AA everywhere: `aa = max(fwidth(d), 0.001); 1.0 - smoothstep(-aa, aa, d)`; optional hash edge roughness in d.
+- Kandinsky + Itten as blendable systems: fixed shape→color lookup (triangle=yellow, square=red, circle=blue) mixed with area-bucketed palette (>12% area = receding colors, <5% = loud accents) via kandinskyStrength knob; 15% monochrome override; historical pigment #defines "never pure RGB extremes".
+- Dessau tilt: probabilistic 45° rotation; v05 √2-scale bug fixed in 06 (INV_ROOT_2) — caught-and-fixed math error visible across adjacent files.
+- Print materiality: 4-octave midtone-weighted litho grain, paper fbm fiber, rotated-grid halftone (luminance-driven radius, fwidth AA), ink bleed evolving from mask-softening to SDF-level dilation `sdf - u_InkBleed*aa*BLEED_SCALE` blended by ink darkness, ink limit (channel scale so max ≤ mix(1.0, 0.78, amount)).
+- True misregistration (08+): per-channel resample of compositePass at different fbm-driven offsets — replacing single-pass fake (in-code comment admits "We can't actually sample other pixels in a single-pass shader").
+- Premultiplied-alpha over-compositing fix (09): `accumRGB = src + accum*(1-srcA)` then un-premultiply — replacing naive mix().
+- Per-panel composition modes (10/11): hash-picked sparse/balanced/dense + 3 split-grammar tables (Golden/Thirds/Halves); Contrast-of-Extension dynamic margins (∝ sqrt(area)); rotation-aware scale shrink (0.70 tilted / 0.65 triangles).
+- Poster-hierarchy system (12/13+): hero placed opposite void centroid (heroC = 1.0 − voidCenter + jitter); diagonal axis (45°/−45°/true canvas diagonal, blended per PosterMode); axis-space warp of the whole BSP (applyAxis rotates layout UVs); diagonal band SDF; counterweight via reflected void→hero vector + perpendicular offset + snap.
+- Triple hybrid snap (`hybridSnap`): candidates snapped to nearest of THREE lattices — Cartesian (golden lines + void boundaries), polar (5 rings × 8 spokes around hero), diagonal band edges — with distance-falloff smoothstep so distant points aren't force-snapped; intersectionSnap (v2.1+) weighted by u_CellDiscipline order/chaos macro.
+- Role-based color (15): roleHeroColor/roleCounterColor (avoids hero hue)/roleAccentColor. Rejection-sampling placement (chooseAvoidedPoint, 4 candidates vs exclusion radii) — cheap Poisson disc. Hero knockout: base grid suppressed inside hero silhouette.
+- Connector linework (19): segments between hero/counterweight/axis-origin/void-center in 3 styles (straight/bracket-dogleg/dashed); golden-grid rule rendering (layout armature as design element); typoBar fake typographic bars in voids; warm/cool paper stock; DEV_DISABLE_* consts for A/B-ing.
+- UI: most systematic — u_ prefixes, theory-named LABELs ("Density (Mies↔Moholy)", "Boldness (Fewer, Larger)"), long dropdowns, 3 debug bools incl. u_DebugLayers canvas-thirds layer view; macro knobs driving many internals (u_Density, u_Boldness, u_CellDiscipline). Inputs 5 → ~26 → ~55.
+- Evolution: two explicit ground-up rebuilds (08: single→multi-pass because layering/misregistration impossible single-pass; 12: Poster Engine because random placement lacked hierarchy). Author abandons working code when architecture can't express the next idea.
+- Rough edges: helper-library duplication with bug divergence across siblings (√2 tilt bug lives in 05, fixed 06+); PERSISTENT declared but unused; abandoned experiment params in 18; dead maxDepth copy in 17; metadata versioning unreliable.
+
+## Batch synthesis
+Top 3: (1) day21_19 Bauhaus Poster Engine v2.3 — generative-design SYSTEM, 4-pass, hierarchy solver, triple-lattice snap, print physics, ~55 inputs. (2) day20_09 Constellation Tracker V5 — hand-rolled optical-flow tracker w/ GPU struct-of-arrays, prediction, closed-loop population. (3) day20_alt_12/13 One Line late revs — domain/distance effect architecture, curve-as-SDF, tangent shear, adaptive stepping.
+
+Fingerprints: identical hash library (0.1031/33.33 constants) verbatim everywhere — personal stdlib. Gemini-credited families use `--- SECTION ---` event dividers; Bauhaus family uses u_ prefixes + theory labels + dropdowns. CREDIT strings document LLM-collaborative workflow ("Gemini / Fixed by Claude" etc.). Backend-quirk scars: unrolled Bayer if/else, int(min(float,float)), branchless mix(1000,d,flag), const bounds + break. Recurring idioms: exp(-d*falloff) glow, max(prev*decay,current) trails, fwidth AA, one-macro-knob UX (unwind, u_Boldness, u_CellDiscipline). "Rebuild rather than patch" development style.
+
+Beyond-ShaderToy: hand-built 8-pass JFA Voronoi; texel-buffer struct-of-arrays w/ spawn/track/kill + population feedback; parametric-curve SDF via two-level search + Frenet; triple hybrid snap layout; true per-channel resample misregistration; Kandinsky/Itten as blendable parameter systems.
