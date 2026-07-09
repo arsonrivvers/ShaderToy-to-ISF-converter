@@ -195,4 +195,20 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(warnings.contains { $0.message.contains("Auto-initialized output 'O'")
                                           && $0.context == "Image" }, "\(warnings)")
     }
+
+    /// ZeroInitLocals end-to-end — the 3XBBWD golf shape: `float t = iTime,i,z,d;` +
+    /// `for(o*=i;i++<80.;…)`. Metal doesn't zero-init locals, so without the fix `i` is garbage
+    /// and the loop never runs (black). The converted body must carry explicit zeros.
+    func test_golfShader_uninitializedLocals_zeroInitialized() {
+        let shader = ShaderFactory.singlePass(imageCode: """
+            void mainImage( out vec4 o, in vec2 I ){
+                float t = iTime,i,z,d;
+                for(o*=i;i++<80.;){ z += t; }
+                o = vec4(z);
+            }
+            """)
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.glslBody.contains("i = 0.0,z = 0.0,d = 0.0;"), doc.glslBody)
+        XCTAssertTrue(warnings.contains { $0.message.contains("Zero-initialized") }, "\(warnings)")
+    }
 }

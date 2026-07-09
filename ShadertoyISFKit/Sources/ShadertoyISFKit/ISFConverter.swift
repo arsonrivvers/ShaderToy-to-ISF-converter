@@ -10,6 +10,7 @@ public enum ISFConverter {
     ///   Common:    5. GLSLLineContinuation.splice   6. CommonChannelRewriter (PASSINDEX dispatch)
     ///              7. UniformRewriter.rewriteScoped   8. HeaderMacroExpander
     ///              8b. OutputInitializer — PER PASS BODY + Common, before concatenation (M1)
+    ///              8c. ZeroInitLocals — zero-init uninitialized locals (WebGL parity; golf shaders)
     ///              9. GLSLBodyBuilder.build, which internally runs, IN ORDER:
     ///                   9a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
     ///                   9b. GLSLPassMacroScoper  (#undef per-pass #defines; Common-aware — M18)
@@ -148,12 +149,24 @@ public enum ISFConverter {
                 ConversionWarning(severity: $0.severity, message: $0.message,
                                   context: plan.renderPasses[idx].name)
             })
-            initializedBodies.append(r.code)
+            // 8c: zero-init uninitialized locals (WebGL/ANGLE zero-inits, Metal doesn't — the
+            // golf-shader `for(O*=i; i++<…)` class reads garbage guards and renders black).
+            let z = ZeroInitLocals.rewrite(r.code)
+            warnings.append(contentsOf: z.warnings.map {
+                ConversionWarning(severity: $0.severity, message: $0.message,
+                                  context: plan.renderPasses[idx].name)
+            })
+            initializedBodies.append(z.code)
         }
-        let commonInitialized = OutputInitializer.apply(expanded.commonCode)
+        var commonInitialized = OutputInitializer.apply(expanded.commonCode)
         warnings.append(contentsOf: commonInitialized.warnings.map {
             ConversionWarning(severity: $0.severity, message: $0.message, context: "Common")
         })
+        let commonZeroed = ZeroInitLocals.rewrite(commonInitialized.code)
+        warnings.append(contentsOf: commonZeroed.warnings.map {
+            ConversionWarning(severity: $0.severity, message: $0.message, context: "Common")
+        })
+        commonInitialized = RewriteResult(code: commonZeroed.code, warnings: [])
 
         let glsl = GLSLBodyBuilder.build(passBodies: initializedBodies,
                                          commonCode: commonInitialized.code)
