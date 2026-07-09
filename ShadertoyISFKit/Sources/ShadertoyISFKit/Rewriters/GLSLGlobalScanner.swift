@@ -23,59 +23,20 @@ enum GLSLGlobalScanner {
         "(?m)^[ \\t]*(?:const[ \\t]+)?[A-Za-z_]\\w*(?:[ \\t]*\\[[^\\]]*\\])?[ \\t]+([A-Za-z_]\\w*)(?:[ \\t]*\\[[^\\]]*\\])?[ \\t]*(?:=|;)"
 
     /// All file-scope (brace-depth-0) global declarations in `code`, in source order.
+    /// Matching runs on comment-masked text (M14: a commented-out global can't become a Def);
+    /// ranges index into the original, which is offset-identical. Depth/statement scans are
+    /// directive-aware via GLSLScanner (a `{` or `;` inside a `#define` line can't desync them).
     static func defs(in code: String) -> [Def] {
         let re = try! NSRegularExpression(pattern: headerPattern)
-        let s = code as NSString
+        let masked = GLSLScanner.strip(code)
+        let ms = masked as NSString
         var out: [Def] = []
-        for m in re.matches(in: code, range: NSRange(location: 0, length: s.length)) {
-            guard depth(s, before: m.range.location) == 0 else { continue }   // skip locals (depth > 0)
-            guard let end = statementEnd(s, from: m.range.location) else { continue }
-            let name = s.substring(with: m.range(at: 1))
+        for m in re.matches(in: masked, range: NSRange(location: 0, length: ms.length)) {
+            guard GLSLScanner.braceDepth(code, before: m.range.location) == 0 else { continue }
+            guard let end = GLSLScanner.statementEnd(code, from: m.range.location) else { continue }
+            let name = ms.substring(with: m.range(at: 1))
             out.append(Def(name: name, start: m.range.location, end: end))
         }
         return out
-    }
-
-    /// Brace depth immediately before `pos`, skipping // and /* */ comments. 0 == file scope.
-    private static func depth(_ s: NSString, before pos: Int) -> Int {
-        let slash: unichar = 47, star: unichar = 42, nl: unichar = 10
-        let open: unichar = 123, close: unichar = 125
-        var depth = 0, i = 0, mode = 0   // 0 normal, 1 line comment, 2 block comment
-        while i < pos {
-            let c = s.character(at: i)
-            let n: unichar? = i + 1 < s.length ? s.character(at: i + 1) : nil
-            switch mode {
-            case 1: if c == nl { mode = 0 }
-            case 2: if c == star, n == slash { mode = 0; i += 2; continue }
-            default:
-                if c == slash, n == slash { mode = 1 }
-                else if c == slash, n == star { mode = 2 }
-                else if c == open { depth += 1 }
-                else if c == close { depth -= 1 }
-            }
-            i += 1
-        }
-        return depth
-    }
-
-    /// Index just past the first `;` at or after `from`, skipping // and /* */ comments. A global
-    /// initializer contains no `;`, so the first one outside a comment terminates the declaration.
-    private static func statementEnd(_ s: NSString, from: Int) -> Int? {
-        let slash: unichar = 47, star: unichar = 42, nl: unichar = 10, semi: unichar = 59
-        var i = from, mode = 0
-        while i < s.length {
-            let c = s.character(at: i)
-            let n: unichar? = i + 1 < s.length ? s.character(at: i + 1) : nil
-            switch mode {
-            case 1: if c == nl { mode = 0 }
-            case 2: if c == star, n == slash { mode = 0; i += 2; continue }
-            default:
-                if c == slash, n == slash { mode = 1 }
-                else if c == slash, n == star { mode = 2 }
-                else if c == semi { return i + 1 }
-            }
-            i += 1
-        }
-        return nil
     }
 }
