@@ -78,6 +78,7 @@ final class AppModel: ObservableObject {
             suggestedFileName = Self.safeFileName(shader.info.name)
             statusMessage = w.isEmpty ? "Converted cleanly." : "Converted with \(w.count) warning(s)."
             stage = .converted; outcome = w.isEmpty ? .success : .warning; warningCount = w.count
+            runPixelGateAndRecord(isfText: doc.fileText, shaderID: id, source: source)
         } catch ShadertoyClientError.shaderNotAccessible {
             statusMessage = "API: the shader's author must enable 'public + API'. Remove your key in Settings to use the browser path instead."
         } catch ShadertoyClientError.httpError(let status) {
@@ -110,6 +111,36 @@ final class AppModel: ObservableObject {
                                 message: statusMessage, responseSnippet: snippet, warningCount: warnings)
         lastImport = event
         ImportLog.shared.record(event)
+    }
+
+    /// Dedicated headless Metal controller for the post-import pixel gate — deliberately NOT the
+    /// live preview (which may be showing another document or toggled to WebKit). One shared
+    /// instance; `load()`'s generation counter makes rapid re-imports supersede cleanly.
+    private static let gatePreview = MetalPreviewController()
+
+    /// Post-conversion pixel-truth check (spec §C): compile the converted ISF headlessly, render
+    /// 3 frames, and record a `.rendered` ImportEvent when the result is not OK. Fire-and-forget;
+    /// an OK verdict records nothing (the `converted` event already said ✓), and compile failures
+    /// record nothing here either — the editor preview reports those in context.
+    private func runPixelGateAndRecord(isfText: String, shaderID: String?,
+                                       source: ImportEvent.FetchSource) {
+        let query = urlText
+        Task { @MainActor in
+            let preview = Self.gatePreview
+            preview.load(isf: isfText)
+            for _ in 0..<200 {                       // ≤10 s; typical transpile ≪ 1 s
+                if preview.compileValid || preview.compileError != nil { break }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard preview.compileValid else { return }
+            let verdict = preview.runPixelGate()
+            guard let (severity, message) = PixelGate.importOutcome(verdict) else { return }
+            let outcome: ImportEvent.Outcome = severity == .warning ? .warning : .error
+            ImportLog.shared.record(ImportEvent(
+                query: query, shaderID: shaderID, fetchSource: source, httpStatus: nil,
+                stage: .rendered, outcome: outcome, message: message,
+                responseSnippet: nil, warningCount: 0))
+        }
     }
 
     /// Friendly, actionable copy for an HTTP failure status.
@@ -145,5 +176,6 @@ final class AppModel: ObservableObject {
         warnings = w
         suggestedFileName = isMultipass ? "pasted-multipass.fs" : "pasted-shader.fs"
         statusMessage = w.isEmpty ? "Converted pasted code cleanly." : "Converted pasted code with \(w.count) warning(s)."
+        runPixelGateAndRecord(isfText: doc.fileText, shaderID: nil, source: .webView)
     }
 }

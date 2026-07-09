@@ -92,7 +92,7 @@ After `pollCompile` succeeds, run `runPixelGate()` and count verdicts. Report ga
 
 ### C. Import report (`AppModel` / `ImportLog`)
 
-`ImportEvent.Stage` gains `.rendered`. When an import-originated document's first compile completes in the preview, run the gate and record a second event:
+`ImportEvent.Stage` gains `.rendered`. After each successful conversion, a dedicated headless Metal controller compiles the converted ISF and runs the gate (fire-and-forget — deliberately not the live preview, which may be showing another document or toggled to WebKit), recording a second event:
 
 - verdict OK → no event (don't spam the log with successes; the `converted` event already said ✓).
 - WARN (`STATIC`/`UNSUPPORTED`) → `.rendered` event, outcome `.warning`, message e.g. `"pixel gate: STATIC (renders, never animates)"`.

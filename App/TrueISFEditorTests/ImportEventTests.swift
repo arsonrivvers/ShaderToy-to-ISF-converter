@@ -31,4 +31,14 @@ final class ImportEventTests: XCTestCase {
         let data = try JSONEncoder().encode(e)
         XCTAssertEqual(try JSONDecoder().decode(ImportEvent.self, from: data), e)
     }
+    func test_renderedStage_codableRoundTrip() throws {
+        let e = ImportEvent(query: "q", shaderID: "abc", fetchSource: .webView, httpStatus: nil,
+                            stage: .rendered, outcome: .error,
+                            message: "pixel gate: BLACK — compiled but renders black",
+                            responseSnippet: nil, warningCount: 0)
+        let data = try JSONEncoder().encode(e)
+        let back = try JSONDecoder().decode(ImportEvent.self, from: data)
+        XCTAssertEqual(back.stage, .rendered)
+        XCTAssertEqual(back, e)
+    }
 }

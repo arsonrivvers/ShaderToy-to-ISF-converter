@@ -3,7 +3,7 @@ import Foundation
 /// One Shadertoy import attempt (fetch → parse → convert), recorded into `ImportLog`.
 struct ImportEvent: Codable, Equatable, Identifiable {
     enum FetchSource: String, Codable { case api, webView }
-    enum Stage: String, Codable { case urlInvalid, fetched, parsed, converted }
+    enum Stage: String, Codable { case urlInvalid, fetched, parsed, converted, rendered }
     enum Outcome: String, Codable { case success, warning, error }
 
     var id = UUID()
