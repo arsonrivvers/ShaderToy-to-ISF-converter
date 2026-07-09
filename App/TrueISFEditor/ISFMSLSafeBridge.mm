@@ -72,3 +72,30 @@ id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
         return nil;
     }
 }
+
+id<MTLTexture> _Nullable ISFMSLSafeRenderAtTime(ISFMSLScene *scene,
+                                                NSSize size,
+                                                double time,
+                                                id<MTLCommandBuffer> commandBuffer,
+                                                NSString * _Nullable * _Nullable errorOut)
+{
+    if (errorOut) { *errorOut = nil; }
+    try {
+        id<VVMTLTextureImage> img = [scene createAndRenderToTextureSized:size
+                                                                  atTime:time
+                                                         inCommandBuffer:commandBuffer];
+        if (img == nil) { return nil; }
+        // Same pool-recycle guard as ISFMSLSafeRender: keep the VVMTLTextureImage wrapper alive
+        // until the GPU is done, or VVMTLPool may recycle the backing texture mid-render.
+        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull cb) { (void)img; }];
+        return img.texture;
+    }
+    catch (const std::exception &e) {
+        if (errorOut) { *errorOut = [NSString stringWithFormat:@"Render exception: %s", e.what()]; }
+        return nil;
+    }
+    catch (...) {
+        if (errorOut) { *errorOut = @"Unknown render exception."; }
+        return nil;
+    }
+}

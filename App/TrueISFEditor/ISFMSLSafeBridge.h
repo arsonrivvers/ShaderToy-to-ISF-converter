@@ -34,6 +34,14 @@ id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
                                           id<MTLCommandBuffer> commandBuffer,
                                           NSString * _Nullable * _Nullable errorOut);
 
+/// Renders `scene` at an explicit time (non-realtime rendering — the pixel-truth gate), catching
+/// any C++ exception thrown at render time. Same contract as ISFMSLSafeRender otherwise.
+id<MTLTexture> _Nullable ISFMSLSafeRenderAtTime(ISFMSLScene *scene,
+                                                NSSize size,
+                                                double time,
+                                                id<MTLCommandBuffer> commandBuffer,
+                                                NSString * _Nullable * _Nullable errorOut);
+
 #ifdef __cplusplus
 }
 #endif
