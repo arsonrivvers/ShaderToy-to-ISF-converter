@@ -113,20 +113,20 @@ final class AppModel: ObservableObject {
         ImportLog.shared.record(event)
     }
 
-    /// Dedicated headless Metal controller for the post-import pixel gate — deliberately NOT the
-    /// live preview (which may be showing another document or toggled to WebKit). One shared
-    /// instance; `load()`'s generation counter makes rapid re-imports supersede cleanly.
-    private static let gatePreview = MetalPreviewController()
-
     /// Post-conversion pixel-truth check (spec §C): compile the converted ISF headlessly, render
     /// 3 frames, and record a `.rendered` ImportEvent when the result is not OK. Fire-and-forget;
     /// an OK verdict records nothing (the `converted` event already said ✓), and compile failures
     /// record nothing here either — the editor preview reports those in context.
+    /// A FRESH controller per run — deliberately NOT the live preview (which may be showing
+    /// another document or toggled to WebKit), and not shared: sharing would let a rapid second
+    /// import satisfy the first task's compile poll and mis-attribute its verdict. Paused
+    /// immediately so the windowless MTKView never spins its own render loop.
     private func runPixelGateAndRecord(isfText: String, shaderID: String?,
                                        source: ImportEvent.FetchSource) {
         let query = urlText
         Task { @MainActor in
-            let preview = Self.gatePreview
+            let preview = MetalPreviewController()
+            preview.setPaused(true)
             preview.load(isf: isfText)
             for _ in 0..<200 {                       // ≤10 s; typical transpile ≪ 1 s
                 if preview.compileValid || preview.compileError != nil { break }
