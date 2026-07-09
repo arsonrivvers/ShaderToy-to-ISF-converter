@@ -9,12 +9,13 @@ public enum ISFConverter {
     ///              3. channel auto-stub             4. SamplerRewriter
     ///   Common:    5. GLSLLineContinuation.splice   6. CommonChannelRewriter (PASSINDEX dispatch)
     ///              7. UniformRewriter.rewriteScoped   8. HeaderMacroExpander
+    ///              8b. OutputInitializer — PER PASS BODY + Common, before concatenation (M1)
     ///              9. GLSLBodyBuilder.build, which internally runs, IN ORDER:
     ///                   9a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
-    ///                   9b. GLSLPassMacroScoper  (#undef per-pass #defines — restores isolation)
+    ///                   9b. GLSLPassMacroScoper  (#undef per-pass #defines; Common-aware — M18)
     ///                   9c. per-pass mainImage rename + PASSINDEX dispatch assembly
-    ///             10. GLSLFunctionDedup   11. GLSLReservedIdentifierRewriter   12. OutputInitializer
-    ///             13. GLSLCompat (+ GLSLLint)   14. HeaderBuilder
+    ///             10. GLSLFunctionDedup   11. GLSLReservedIdentifierRewriter
+    ///             12. GLSLCompat (+ GLSLLint)   13. HeaderBuilder
     ///
     /// Key invariants: line-continuation splice precedes everything; macro-expand (8) precedes the
     /// per-pass mainImage rename (9c); dedup (10) follows namespacing (9a); compat polyfills (13)
@@ -134,7 +135,28 @@ public enum ISFConverter {
         // mainImage(…)`) into the pass bodies, so GLSLBodyBuilder's per-pass mainImage rename can make
         // each unique (otherwise every pass expands to a duplicate `void mainImage`).
         let expanded = HeaderMacroExpander.expand(commonCode: commonCode, passBodies: passBodies)
-        let glsl = GLSLBodyBuilder.build(passBodies: expanded.passBodies, commonCode: expanded.commonCode)
+
+        // M1: run the uninitialized-accumulator fix on each ISOLATED pass body (and on Common's
+        // helpers) BEFORE concatenation — on the merged file, pass 0's plain `O =` masked pass 1's
+        // compound-first `O` (passes typically all name their output `O`; the whole-file test
+        // dedups names). After HeaderMacroExpander so header-macro shaders' expanded mainImage
+        // signatures are seen.
+        var initializedBodies: [String] = []
+        for (idx, body) in expanded.passBodies.enumerated() {
+            let r = OutputInitializer.apply(body)
+            warnings.append(contentsOf: r.warnings.map {
+                ConversionWarning(severity: $0.severity, message: $0.message,
+                                  context: plan.renderPasses[idx].name)
+            })
+            initializedBodies.append(r.code)
+        }
+        let commonInitialized = OutputInitializer.apply(expanded.commonCode)
+        warnings.append(contentsOf: commonInitialized.warnings.map {
+            ConversionWarning(severity: $0.severity, message: $0.message, context: "Common")
+        })
+
+        let glsl = GLSLBodyBuilder.build(passBodies: initializedBodies,
+                                         commonCode: commonInitialized.code)
         warnings.append(contentsOf: glsl.warnings)
 
         // Remove byte-identical duplicate helpers merged from multiple passes (multipass shaders
@@ -145,14 +167,9 @@ public enum ISFConverter {
         // Shadertoy's GLSL ES but rejected by the Metal transpiler the preview compiles against.
         let reserved = GLSLReservedIdentifierRewriter.rewrite(deduped)
 
-        // Auto-initialize outputs accumulated before assignment (XorDev `for(O*=i;…)` pattern) —
-        // undefined on Metal → NaN → black. Runs before lint so the now-fixed case isn't also warned.
-        let initialized = OutputInitializer.apply(reserved)
-        warnings.append(contentsOf: initialized.warnings)
-
-        let compat = GLSLCompat.apply(initialized.code)
+        let compat = GLSLCompat.apply(reserved)
         warnings.append(contentsOf: compat.warnings)
-        warnings.append(contentsOf: GLSLLint.check(initialized.code))
+        warnings.append(contentsOf: GLSLLint.check(reserved))
 
         // Reuse the plan's ordered buffer names — the single source of truth shared with the
         // in-body sampler names — so the header PASSES TARGETs can never drift from the GLSL.

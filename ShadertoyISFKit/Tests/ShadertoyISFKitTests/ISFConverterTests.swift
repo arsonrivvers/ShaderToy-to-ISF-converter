@@ -177,4 +177,22 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(text.contains("if (PASSINDEX == 0)"))
         XCTAssertFalse(text.contains("texture(iChannel0"))
     }
+
+    /// M1 — multipass: pass 0 plainly assigns `O`, pass 1 accumulates into `O` before assigning.
+    /// The merged-file detector saw pass 0's plain `=` first and skipped pass 1 → NaN/black pass.
+    /// Per-pass runs must inject the initializer into pass 1.
+    func test_multipass_accumulatorSecondPass_isInitialized_M1() {
+        let bufA = RenderPass(inputs: [], outputs: [PassOutput(id: "buf0", channel: 0)],
+                              code: "void mainImage(out vec4 O, in vec2 U){ O = vec4(1.0); }",
+                              name: "Buf A", type: .buffer)
+        let img = RenderPass(inputs: [], outputs: [PassOutput(id: "img", channel: 0)],
+                             code: "void mainImage(out vec4 O, in vec2 U){ for(int i=0;i<4;i++){ O += vec4(0.1); } }",
+                             name: "Image", type: .image)
+        let shader = Shader(info: Info(id: "m1", name: "m1", username: nil, description: nil),
+                            renderpass: [bufA, img])
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.glslBody.contains("O = vec4(0.0);"), doc.glslBody)
+        XCTAssertTrue(warnings.contains { $0.message.contains("Auto-initialized output 'O'")
+                                          && $0.context == "Image" }, "\(warnings)")
+    }
 }
