@@ -138,10 +138,10 @@ final class ISFConverterTests: XCTestCase {
         XCTAssertTrue(stubs[2].contains("iChannel3"), "\(stubs)")
     }
 
-    /// C5 interim — a Shadertoy uniform inside a Common helper BODY is not auto-rewritten (the
-    /// scope-aware rewrite protects bodies); until the real scope-aware fix lands, conversion must
-    /// warn loudly instead of silently shipping an undeclared identifier.
-    func test_commonBodyUniform_warnsLoudly() {
+    /// C5 — a Shadertoy uniform inside an unshadowed Common helper BODY is now REWRITTEN by the
+    /// scope-aware pass (was: protected wholesale, shipped raw, loud interim warning). No warning
+    /// fires because nothing survives.
+    func test_commonBodyUniform_isRewritten_C5() {
         let common = RenderPass(inputs: [], outputs: [],
                                 code: "float n(vec2 p){ return sin(p.x + iTime); }",
                                 name: "Common", type: .common)
@@ -150,11 +150,22 @@ final class ISFConverterTests: XCTestCase {
                                name: "Image", type: .image)
         let shader = Shader(info: Info(id: "", name: "C5", username: nil, description: nil),
                             renderpass: [image, common])
-        let (_, warnings) = ISFConverter.convert(shader)
-        XCTAssertTrue(warnings.contains {
-            $0.severity == .warning && $0.message.contains("iTime")
-                && $0.message.lowercased().contains("common")
-        }, "\(warnings)")
+        let (doc, warnings) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.glslBody.contains("sin(p.x + TIME)"), doc.glslBody)
+        XCTAssertFalse(warnings.contains { $0.message.contains("iTime") }, "\(warnings)")
+    }
+
+    /// M20 — paste path: a helper with a uniform-named PARAM in a pass body must be protected
+    /// (was: whole-string rewrite emitted `vec2 vec3(RENDERSIZE, 1.0)` → syntax error), while
+    /// its call sites still get the real rewrite.
+    func test_pastePath_helperWithUniformNamedParam_isProtected_M20() {
+        let shader = ShaderFactory.singlePass(imageCode: """
+            float vig(vec2 uv, vec2 iResolution){ return uv.x / iResolution.x; }
+            void mainImage(out vec4 O, in vec2 U){ O = vec4(vig(U, iResolution.xy)); }
+            """)
+        let (doc, _) = ISFConverter.convert(shader)
+        XCTAssertTrue(doc.glslBody.contains("float vig(vec2 uv, vec2 iResolution)"), doc.glslBody)
+        XCTAssertTrue(doc.glslBody.contains("vig(U, vec3(RENDERSIZE, 1.0).xy)"), doc.glslBody)
     }
 
     func test_multipass_producesPersistentBuffersAndReads() throws {

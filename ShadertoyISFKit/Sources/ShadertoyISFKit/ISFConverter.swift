@@ -5,10 +5,10 @@ public enum ISFConverter {
     /// fails silently as a black shader rather than loudly. The authoritative stage list (some stages
     /// live in `GLSLBodyBuilder`, so they aren't visible in this function's body — see stage 10):
     ///
-    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter (incl. iMouse mirror)
+    ///   Per pass:  1. GLSLLineContinuation.splice   2. UniformRewriter.rewriteScoped (scope-aware; incl. iMouse mirror)
     ///              3. channel auto-stub             4. SamplerRewriter
     ///   Common:    5. GLSLLineContinuation.splice   6. CommonChannelRewriter (PASSINDEX dispatch)
-    ///              7. CommonUniformRewriter          8. HeaderMacroExpander
+    ///              7. UniformRewriter.rewriteScoped   8. HeaderMacroExpander
     ///              9. GLSLBodyBuilder.build, which internally runs, IN ORDER:
     ///                   9a. GLSLPassNamespace (rename cross-pass colliding helpers/globals)
     ///                   9b. GLSLPassMacroScoper  (#undef per-pass #defines — restores isolation)
@@ -53,7 +53,9 @@ public enum ISFConverter {
 
             // iMouse is one of UniformRewriter's standard rules (mirrors xy into zw, "pressed");
             // `includeMouse` above only gates declaring the `mouse` input in the header.
-            code = UniformRewriter.rewrite(code)
+            // Scope-aware (M20): a paste-path helper that threads a uniform as a PARAMETER is
+            // protected; everything else rewrites exactly as the whole-string rewriter did.
+            code = UniformRewriter.rewriteScoped(code)
 
             // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
             // some Shadertoy shaders reference a channel the API/internal response never lists, which
@@ -82,15 +84,14 @@ public enum ISFConverter {
             passBodies.append(sampled.code)
         }
 
-        // The Common code is shared, un-renamed source. Rewrite its FILE-SCOPE Shadertoy uniforms
-        // (e.g. `#define res iResolution.xy`) while leaving helper-function parameters/bodies alone —
-        // some shaders thread the uniforms through helpers as parameters, which the per-pass
-        // whole-string rewriter would corrupt.
+        // The Common code is shared, un-renamed source. The scope-aware rewrite maps its Shadertoy
+        // uniforms everywhere EXCEPT inside functions that thread a uniform through as a parameter
+        // (substituting the mapped expression into a parameter declaration is a syntax error).
         let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
         let detectableCommon = GLSLScanner.strip(splicedCommon)
         if detectableCommon.contains("iChannelResolution") { usesChannelResolution = true }
         // iMouse referenced only in the Common tab must still declare the mouse input — the
-        // file-scope rewrite happens in CommonUniformRewriter below, but the header flag is set here.
+        // rewrite happens in UniformRewriter.rewriteScoped below, but the header flag is set here.
         if detectableCommon.range(of: #"\biMouse\b"#, options: .regularExpression) != nil {
             includeMouse = true
         }
@@ -116,13 +117,13 @@ public enum ISFConverter {
             passCount: plan.renderPasses.count)
         warnings.append(contentsOf: channelRewrite.warnings)
 
-        var commonCode = CommonUniformRewriter.rewrite(channelRewrite.rewrittenCommon)
-        // C5 interim: body-scope uniform uses are protected from the rewrite (param-shadowing), so
-        // an unshadowed one ships as an undeclared identifier — warn loudly until the scope-aware
-        // rewrite exists.
-        for name in CommonUniformRewriter.unrewrittenBodyUniforms(channelRewrite.rewrittenCommon) {
+        var commonCode = UniformRewriter.rewriteScoped(channelRewrite.rewrittenCommon)
+        // Tripwire (C5 is fixed structurally): any detectable uniform that SURVIVED the
+        // scope-aware rewrite outside a param-shadowed position means a case the rewriter
+        // doesn't map (e.g. bare un-indexed iChannelResolution) — surface it loudly.
+        for name in UniformRewriter.unresolvedUniformUses(commonCode) {
             warnings.append(ConversionWarning(severity: .warning,
-                message: "\(name) is used inside a Common helper body and was NOT auto-rewritten (only file-scope Common code is rewritten) — the shader may fail to compile. Thread it through as a parameter or move the use to file scope.",
+                message: "\(name) survived uniform rewriting in the Common tab (no ISF mapping applies at this use) — the shader may fail to compile. Verify or rework the use.",
                 context: "Common"))
         }
         if !channelRewrite.dispatchers.isEmpty {

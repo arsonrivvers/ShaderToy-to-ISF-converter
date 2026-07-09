@@ -22,6 +22,80 @@ public enum UniformRewriter {
     /// body-scope uses the scope-aware Common rewrite can't reach.
     static var detectableNames: [String] { rules.map(\.0) + ["iChannelResolution", "iChannelTime"] }
 
+    /// Scope-aware uniform rewrite (C5/M20): rewrites every detectable Shadertoy uniform EXCEPT
+    /// occurrences inside a function whose OWN parameter list declares that name (the author
+    /// threads the uniform through as a parameter — substituting the mapped expression into the
+    /// declaration or its uses would corrupt the code). File scope, directive bodies, and
+    /// unshadowed function bodies all rewrite. Comment content is never rewritten.
+    ///
+    /// Replaces both the whole-string per-pass call (M20: paste-path helpers now protected) and
+    /// CommonUniformRewriter's indiscriminate depth>0 protection (C5: unshadowed Common helper
+    /// bodies now rewritten instead of shipping raw `iTime`).
+    public static func rewriteScoped(_ code: String) -> String {
+        let masked = GLSLScanner.strip(code)
+        let mns = masked as NSString
+        let defs = GLSLFunctionScanner.functionDefs(in: code)
+
+        func isProtected(_ pos: Int, _ name: String) -> Bool {
+            for d in defs where pos >= d.start && pos < d.end {
+                return d.paramNames.contains(name)
+            }
+            return false
+        }
+
+        var edits: [(NSRange, String)] = []
+        // Indexed forms first (same rationale as `rewrite`: consume the whole `name[…]` access;
+        // ranges can't overlap the word rules — no rule name is a substring of these at `\b`).
+        let indexed: [(name: String, pattern: String, replacement: String)] = [
+            ("iChannelResolution", "iChannelResolution\\s*\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]",
+             "vec3(RENDERSIZE, 1.0)"),
+            ("iChannelTime", "iChannelTime\\s*\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\]", "TIME"),
+        ]
+        for f in indexed {
+            let re = try! NSRegularExpression(pattern: f.pattern)
+            for m in re.matches(in: masked, range: NSRange(location: 0, length: mns.length))
+            where !isProtected(m.range.location, f.name) {
+                edits.append((m.range, f.replacement))
+            }
+        }
+        for (from, to) in rules {
+            let re = try! NSRegularExpression(
+                pattern: "\\b" + NSRegularExpression.escapedPattern(for: from) + "\\b")
+            for m in re.matches(in: masked, range: NSRange(location: 0, length: mns.length))
+            where !isProtected(m.range.location, from) {
+                edits.append((m.range, to))
+            }
+        }
+        guard !edits.isEmpty else { return code }
+        let out = NSMutableString(string: code)
+        for (range, replacement) in edits.sorted(by: { $0.0.location > $1.0.location }) {
+            out.replaceCharacters(in: range, with: replacement)
+        }
+        return out as String
+    }
+
+    /// Post-rewrite tripwire (replaces the C5-interim `unrewrittenBodyUniforms`): detectable
+    /// uniform names still present (outside comments) in ALREADY-REWRITTEN code, excluding
+    /// legitimate param-shadowed uses. Non-empty means something the scoped rewrite should have
+    /// handled slipped through (e.g. a bare un-indexed iChannelResolution) — callers warn loudly.
+    public static func unresolvedUniformUses(_ rewrittenCode: String) -> [String] {
+        let masked = GLSLScanner.strip(rewrittenCode)
+        let mns = masked as NSString
+        let defs = GLSLFunctionScanner.functionDefs(in: rewrittenCode)
+        var out: [String] = []
+        for name in detectableNames {
+            let re = try! NSRegularExpression(
+                pattern: "\\b" + NSRegularExpression.escapedPattern(for: name) + "\\b")
+            let hits = re.matches(in: masked, range: NSRange(location: 0, length: mns.length))
+            let unresolved = hits.contains { m in
+                let d = defs.first { m.range.location >= $0.start && m.range.location < $0.end }
+                return !(d?.paramNames.contains(name) ?? false)
+            }
+            if unresolved { out.append(name) }
+        }
+        return out
+    }
+
     public static func rewrite(_ code: String) -> String {
         var out = code
 
