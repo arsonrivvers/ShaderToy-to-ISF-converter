@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 48 open / 29 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open / 31 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -70,7 +70,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 48 open /
 - **Safe to fix now?** yes, with tests.
 
 ### C8 — No dirty-document guard anywhere → one stray click destroys unsaved work
-- **Status:** todo
+- **Status:** done
+- **Resolved:** One choke point `EditorViewModel.canReplaceDocument()` guards open()/newUntitled()/loadImported()/loadExample() (Remix open-in-editor routes through loadImported): dirty doc → NSAlert confirm (injectable closure for tests); declining keeps the document + sets a status message. 4 new tests (declined/confirmed/clean/import paths).
 - **Where:** `App/TrueISFEditor/Models/ISFFile.swift` (`isDirty` tracked, never consulted); `Views/LibraryView.swift:39-42`; `EditorViewModel.swift:91,103,113,127`; `Remix/RemixStudioView.swift:242`
 - **Why it matters:** The library list is selection-driven — a single click replaces the document. Open/new/example/import/remix-open all silently discard unsaved edits with zero confirmation. Straight data loss.
 - **Recommend:** One choke-point guard in `EditorViewModel` (`guard !file.isDirty || userConfirms()`) before any document replacement.
@@ -91,7 +92,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 48 open /
 - **Safe to fix now?** yes for the denied path; wait for session-stop (needs design).
 
 ### C11 — `EditorViewModel.open()` skips header sync → old header spliced into the new file
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `open()` now calls `headerModel.syncFromText` like every other load path and clears `conversionReportTitle`; `newUntitled()` clears the stale report too. 3 new tests incl. header-tabs-sync-on-open. App suite 180 tests green.
 - **Where:** `App/TrueISFEditor/EditorViewModel.swift:91-101` (no `headerModel.syncFromText`, unlike `newUntitled`/`loadImported`/`loadExample`); `HeaderAuthoringModel.swift:45-47` (writes from its own cached `currentSource`); `conversionReportTitle` not cleared in `open()`/`newUntitled()`
 - **Why it matters:** The Inputs/Passes tabs keep the **previous** document's header after opening from the library; a GUI edit there splices the old header into the new file — real file corruption. Plus a stale "Imported X" report banner floats over unrelated documents.
 - **Recommend:** `headerModel.syncFromText(file.source)` + `conversionReportTitle = nil` in both paths; regression test.

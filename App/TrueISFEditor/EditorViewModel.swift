@@ -88,12 +88,37 @@ final class EditorViewModel: ObservableObject {
 
     // MARK: document lifecycle
 
+    /// Asked before anything replaces a dirty document (the library list is selection-driven, so a
+    /// single stray click would otherwise destroy unsaved edits). Injectable for tests.
+    var confirmDiscardIfDirty: () -> Bool = { EditorViewModel.askDiscardUnsavedChanges() }
+
+    /// The one choke point every document-replacing path goes through.
+    private func canReplaceDocument() -> Bool {
+        if !file.isDirty { return true }
+        if confirmDiscardIfDirty() { return true }
+        statusMessage = "Kept unsaved changes"
+        return false
+    }
+
+    private static func askDiscardUnsavedChanges() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Discard unsaved changes?"
+        alert.informativeText = "The current shader has unsaved edits. Replacing it will lose them."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Discard Changes")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func open(_ entry: LibraryEntry) {
+        guard canReplaceDocument() else { return }
         do {
             file = try ISFFile(contentsOf: entry.url)
             conversionWarnings = []
+            conversionReportTitle = nil
             statusMessage = "Opened \(file.displayName)"
             editor.setText(file.source)
+            headerModel.syncFromText(file.source)
             recompile(immediate: true)
         } catch {
             statusMessage = "Couldn't open \(entry.name): \(error.localizedDescription)"
@@ -101,8 +126,10 @@ final class EditorViewModel: ObservableObject {
     }
 
     func newUntitled() {
+        guard canReplaceDocument() else { return }
         file = .untitled(source: Self.blankTemplate)
         conversionWarnings = []
+        conversionReportTitle = nil
         statusMessage = "New shader"
         editor.setText(file.source)
         headerModel.syncFromText(file.source)
@@ -111,6 +138,7 @@ final class EditorViewModel: ObservableObject {
 
     /// Called by the Shadertoy import sheet on a successful conversion.
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
+        guard canReplaceDocument() else { return }
         file = .untitled(source: isf)
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
@@ -125,6 +153,7 @@ final class EditorViewModel: ObservableObject {
 
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
     func loadExample(name: String, source: String) {
+        guard canReplaceDocument() else { return }
         file = .untitled(source: source)
         conversionWarnings = []
         conversionReportTitle = nil
