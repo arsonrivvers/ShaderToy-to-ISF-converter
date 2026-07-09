@@ -150,4 +150,14 @@ final class GLSLPassNamespaceTests: XCTestCase {
         XCTAssertFalse(out[1].contains("p1_if"))
         XCTAssertFalse(out[0].contains("else p0_if"))
     }
+
+    /// M2 end-to-end: comma globals colliding across passes with differing values are ALL renamed.
+    func test_commaGlobals_collidingAcrossPasses_allRenamed_M2() {
+        let out = GLSLPassNamespace.namespace([
+            "float a = 1., b = 2.;\nfloat u(){ return a + b; }",
+            "float a = 3., b = 4.;\nfloat v(){ return a + b; }",
+        ])
+        XCTAssertTrue(out[0].contains("p0_a") && out[0].contains("p0_b"), out[0])
+        XCTAssertTrue(out[1].contains("p1_a") && out[1].contains("p1_b"), out[1])
+    }
 }

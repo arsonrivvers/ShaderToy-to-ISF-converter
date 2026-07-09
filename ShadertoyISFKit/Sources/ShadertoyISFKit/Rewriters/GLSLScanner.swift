@@ -129,6 +129,18 @@ enum GLSLScanner {
         return depth
     }
 
+    /// Brace AND paren depth immediately before UTF-16 position `pos` — for callers that must
+    /// exclude both function bodies and parameter lists (GLSLGlobalScanner: a line-leading param
+    /// in a multi-line signature sits at brace 0 but paren 1). Same precondition as `braceDepth`.
+    static func depths(_ code: String, before pos: Int) -> (brace: Int, paren: Int) {
+        var result = (brace: 0, paren: 0)
+        scan(code) { i, _, st in
+            if i >= pos { result = (st.braceDepth, st.parenDepth); return false }
+            return true
+        }
+        return result
+    }
+
     /// Index just past the first `;` at or after `from` outside comments and directives
     /// (a `;` in a `#define` body does not end a declaration statement).
     static func statementEnd(_ code: String, from: Int) -> Int? {

@@ -41,4 +41,22 @@ final class GLSLGlobalScannerTests: XCTestCase {
         XCTAssertEqual(GLSLGlobalScanner.defs(in: "// float ghost = 1.0;\nfloat real = 2.0;").map(\.name),
                        ["real"])
     }
+
+    /// M2 — `float a, b, c;` previously matched only `a` (and `float a = 1., b = 2.;` matched as
+    /// a single Def named `a`), leaving the rest invisible to dedup/namespacing → cross-pass
+    /// redefinition errors.
+    func test_commaSeparatedGlobals_allDeclaratorsVisible_M2() {
+        let defs = GLSLGlobalScanner.defs(in: "float a, b, c;")
+        XCTAssertEqual(defs.map(\.name), ["a", "b", "c"])
+        XCTAssertEqual(Set(defs.map(\.start)).count, 1)   // one statement, three declarators
+    }
+
+    func test_commaListWithInitializers_M2() {
+        XCTAssertEqual(GLSLGlobalScanner.defs(in: "float a = 1., b = 2.;").map(\.name), ["a", "b"])
+    }
+
+    func test_initializerCommas_doNotSplitDeclarators_M2() {
+        XCTAssertEqual(GLSLGlobalScanner.defs(in: "vec2 q = vec2(1., 2.), r = vec2(3., 4.);").map(\.name),
+                       ["q", "r"])
+    }
 }

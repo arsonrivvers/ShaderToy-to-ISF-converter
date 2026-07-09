@@ -88,4 +88,9 @@ final class GLSLFunctionDedupTests: XCTestCase {
         let src = "void a(){ float t = 1.0; }\nvoid b(){ float t = 1.0; }"
         XCTAssertEqual(GLSLFunctionDedup.dedup(src), src)
     }
+
+    /// M2 — identical comma-global statements dedup as ONE removal (not one per declarator).
+    func test_identicalCommaGlobalStatement_dedupedOnce_M2() {
+        XCTAssertEqual(GLSLFunctionDedup.dedup("float a, b;\nfloat a, b;"), "float a, b;\n")
+    }
 }

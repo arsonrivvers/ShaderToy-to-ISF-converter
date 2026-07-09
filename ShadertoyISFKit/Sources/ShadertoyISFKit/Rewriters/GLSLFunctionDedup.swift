@@ -15,16 +15,22 @@ public enum GLSLFunctionDedup {
         let s = code as NSString
         var seen = Set<String>()
         var removals: [(start: Int, end: Int)] = []   // UTF-16 ranges to delete
+        var removedStarts = Set<Int>()                // a multi-declarator statement deletes ONCE
         // Functions and globals interleave in source — walk them together in source order so the
-        // FIRST occurrence of each is the one kept. Their keys never collide (different syntax).
-        let defs = (GLSLFunctionScanner.defs(in: code).map { (start: $0.start, end: $0.end) }
-                    + GLSLGlobalScanner.defs(in: code).map { (start: $0.start, end: $0.end) })
+        // FIRST occurrence of each is the one kept. Global keys carry the declarator NAME (M2:
+        // `float a, b;` yields Defs a and b sharing one statement — same text, distinct keys, so
+        // the first statement's own b isn't a "duplicate" of its a); function keys never collide
+        // with them (different syntax).
+        let defs: [(name: String?, start: Int, end: Int)] =
+            (GLSLFunctionScanner.defs(in: code).map { (name: String?.none, start: $0.start, end: $0.end) }
+             + GLSLGlobalScanner.defs(in: code).map { (name: .some($0.name), start: $0.start, end: $0.end) })
             .sorted { $0.start < $1.start }
         for d in defs {
             let block = s.substring(with: NSRange(location: d.start, length: d.end - d.start))
-            let key = GLSLFunctionScanner.normalize(block)
-            if seen.contains(key) { removals.append((d.start, d.end)) }
-            else { seen.insert(key) }
+            let key = (d.name.map { $0 + "\u{1F}" } ?? "") + GLSLFunctionScanner.normalize(block)
+            if seen.contains(key) {
+                if removedStarts.insert(d.start).inserted { removals.append((d.start, d.end)) }
+            } else { seen.insert(key) }
         }
         guard !removals.isEmpty else { return code }
         let out = NSMutableString(string: code)
