@@ -27,6 +27,8 @@ final class CorpusRenderTests: XCTestCase {
         let controller = MetalPreviewController()
         var pass = 0
         var failures: [(String, String)] = []
+        var pixelCounts: [String: Int] = [:]
+        var pixelFailures: [(String, String)] = []
         var i = 0
         for f in files {
             i += 1
@@ -38,7 +40,12 @@ final class CorpusRenderTests: XCTestCase {
             // the *next* shaders queue behind a slow one and falsely time out (cascade). 20s is the
             // safety cap for a single pathological transpile; almost all finish in well under 1s.
             let ok = await pollCompile(controller, timeout: 20)
-            if ok { pass += 1 }
+            if ok {
+                pass += 1
+                let v = controller.runPixelGate()
+                pixelCounts[v.rawValue, default: 0] += 1
+                if v.isFail { pixelFailures.append((f.lastPathComponent, v.rawValue)) }
+            }
             else { failures.append((f.lastPathComponent, controller.compileError ?? "no-compile (timeout/unknown)")) }
             if i % 100 == 0 { print("CORPUS progress: \(i)/\(files.count) — pass \(pass), fail \(failures.count)") }
         }
@@ -48,6 +55,10 @@ final class CorpusRenderTests: XCTestCase {
         total: \(files.count)  pass: \(pass)  fail: \(failures.count)  rate: \(String(format: "%.1f", Double(pass)/Double(files.count)*100))%
         --- failures (\(failures.count)) ---
         \(failures.map { "\($0.0): \($0.1.replacingOccurrences(of: "\n", with: " ⏎ "))" }.joined(separator: "\n"))
+        --- pixel gate (compiled files) ---
+        \(pixelCounts.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: "  "))
+        --- pixel failures (\(pixelFailures.count)) ---
+        \(pixelFailures.map { "\($0.0): \($0.1)" }.joined(separator: "\n"))
         """
         let out = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("corpus-report.txt")
         try? report.write(to: out, atomically: true, encoding: .utf8)

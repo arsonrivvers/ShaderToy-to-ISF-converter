@@ -156,16 +156,25 @@ void main() {
                             if let e = preview.compileError { err = e; break }
                             try? await Task.sleep(nanoseconds: 50_000_000)
                         }
-                        line = valid
-                            ? "\(id)\tOK\twarnings=\(warnings.count)"
-                            : "\(id)\tFAIL\t\((err ?? "timeout").split(separator: "\n").first.map(String.init) ?? "")"
+                        if valid {
+                            // Pixel-truth gate: a compile-clean conversion can still render
+                            // black/NaN (the C5/M1/M2 class) — render 3 frames and look.
+                            let pixel = preview.runPixelGate()
+                            line = pixel.isFail
+                                ? "\(id)\tFAIL\tpixel=\(pixel.rawValue)"
+                                : "\(id)\tOK\tpixel=\(pixel.rawValue)\twarnings=\(warnings.count)"
+                        } else {
+                            line = "\(id)\tFAIL\t\((err ?? "timeout").split(separator: "\n").first.map(String.init) ?? "")"
+                        }
                         break
                     }
                     let resolved = line ?? "\(id)\tFETCH-FAIL"
                     lines.append(resolved); print(resolved)
                 }
-                let ok = lines.filter { $0.contains("\tOK\t") }.count
-                let report = "=== CORPUS \(ok)/\(ids.count) OK ===\n" + lines.joined(separator: "\n")
+                let compileOK = lines.filter { $0.contains("\tOK\t") || $0.contains("\tFAIL\tpixel=") }.count
+                let pixelOK = lines.filter { $0.contains("\tOK\t") }.count
+                let report = "=== CORPUS compile \(compileOK)/\(ids.count) · pixel \(pixelOK)/\(ids.count) OK ===\n"
+                    + lines.joined(separator: "\n")
                 let outPath = NSTemporaryDirectory() + "conversion-corpus-report.txt"
                 try? report.write(toFile: outPath, atomically: true, encoding: .utf8)
                 print(report)

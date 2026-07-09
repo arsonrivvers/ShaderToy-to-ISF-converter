@@ -6,6 +6,9 @@
 # before users hit them. Unlike the in-app `browse:` mode (which plateaus on ~12 popular shaders),
 # this runs a curated, feature-diverse ID list.
 #
+# Each compiled shader is also pixel-gated: 3 offscreen frames at t=0/0.5/1.5 are analyzed —
+# black/NaN renders are FAILs (pixel=BLACK / pixel=NAN), static renders are WARN-only (pixel=STATIC).
+#
 # Usage:
 #   ./scripts/corpus-run.sh                         # default: corpus/discovery-ids.txt
 #   ./scripts/corpus-run.sh path/to/ids.txt         # a specific ID list (one id per line, # = comment)
