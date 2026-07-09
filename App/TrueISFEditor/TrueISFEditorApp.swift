@@ -159,7 +159,10 @@ void main() {
                         if valid {
                             // Pixel-truth gate: a compile-clean conversion can still render
                             // black/NaN (the C5/M1/M2 class) — render 3 frames and look.
-                            let pixel = preview.runPixelGate()
+                            let gateTimes = PixelGate.parseTimes(
+                                ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_GATE_TIMES"])
+                            let pixel = gateTimes.map { preview.runPixelGate(times: $0) }
+                                ?? preview.runPixelGate()
                             line = pixel.isFail
                                 ? "\(id)\tFAIL\tpixel=\(pixel.rawValue)"
                                 : "\(id)\tOK\tpixel=\(pixel.rawValue)\twarnings=\(warnings.count)"

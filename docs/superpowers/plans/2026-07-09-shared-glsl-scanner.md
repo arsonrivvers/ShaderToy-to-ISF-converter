@@ -119,22 +119,29 @@ Record which flip STATIC→OK (feedback shaders needing warm-up; note them — n
 
 - [ ] **Step 9: Record results + commit.** Fill in the table below in THIS file, listing per-id attribution and the STATIC flips. **The BLACK ids attributed C5/M1/M2/M20 become the binding acceptance targets for Task 13.**
 
-#### Task 1 Results (fill in during execution)
+#### Task 1 Results (filled 2026-07-09)
+
+**Headline: the C5/M1/M2 hypothesis is FALSIFIED for these 10 — zero are that class.** The converted files carry no raw uniforms (C5-clean), and none of the multipass ones hit the M1/M2 shapes. Two NEW converter bug classes dominate, both fixable with exactly the declarator/scanner machinery this plan builds:
+
+- **zero-init-locals (6/10):** uninitialized local declarators read before write — `float i, d, z, r;` + `for(O*=i; i++<9e1;)`, `for (float i; i < log2(R.x);)`. ANGLE (WebGL) zero-initializes locals, Metal does not → loop guards read garbage/NaN → loop never runs → black. The XorDev-golf idiom class, endemic on Shadertoy.
+- **injected-name collision (1/10):** user local `vec2 mouse = iMouse.xy` — the iMouse rule rewrites the initializer to reference `mouse` (the ISF point2D input), which the fresh local shadows immediately → self-referential garbage camera → black.
 
 | id | attribution | evidence (one line) |
 |----|-------------|---------------------|
-| wc33RN | | |
-| wX33zX | | |
-| M3BfzG | | |
-| XtdSDn | | |
-| XXVfRV | | |
-| wfX3WX | | |
-| lcXXzM | | |
-| 33jcRR | | |
-| tXfBz2 | | |
-| 3XBBWD | | |
+| wc33RN | zero-init-locals | `vec4 o, P, q; float i, j, z, d, s, D;` uninit; `o += P.w*P/d` accum; `O = tanh(o/3E3)` |
+| wX33zX | zero-init-locals | `vec3 r=iResolution, o, p, P;` — uninit accumulator `o` + ray state |
+| M3BfzG | other: input-dependent | Canny thresholds = `iMouse.xy*{15,90}`; gate mouse=(0,0) → both 0 → final `mix()` → black. Gate limitation (no mouse binding), not a converter bug |
+| XtdSDn | other: unknown | SmoothLife feedback; seed path (`iFrame<10` → hash noise) looks sound; needs live debug — out of 3.2 scope |
+| XXVfRV | zero-init-locals | `vec2 R=…, S, k, P = k+.5, …` reads uninit `k`; `for(; i < n;` uninit `i` |
+| wfX3WX | zero-init-locals | `for (float i; i < log2(R.x);` — init-less loop var (cubemap-pass degradation secondary) |
+| lcXXzM | zero-init-locals | `float l = 1e5, d,x, r;` + `for(; r < R.y/2.;` — uninit `r` guard |
+| 33jcRR | zero-init-locals | `float i, d, z, r;` + `for(O*=i; i++<9e1;` (silent mic secondary) |
+| tXfBz2 | injected-name collision | `vec2 mouse = iMouse.xy` → rewrite makes the initializer read the just-declared local |
+| 3XBBWD | zero-init-locals | `float t = iTime,i,z,d;` + `for(o*=i;i++<80.;…)` — canonical golf |
 
-STATIC flips at extended times: _(list)_
+STATIC flips at extended times (`0,0.75,2,4,8`): **none** — all 14 remain STATIC; the labels are genuine (truly static or input-content-static shaders), not warm-up artifacts.
+
+**Consequence for exit criteria:** C5/M1/M2/M20 remain correct structural fixes but flip zero of these BLACKs. The BLACK-flipping payoff requires two NEW rewriters (decision checkpoint with Conner recorded below): **ZeroInitLocals** (Task 12b) and **InjectedNameGuard** (Task 12c) — both consumers of M2's declarator machinery.
 
 ```bash
 git add App/TrueISFEditor/PixelGate.swift App/TrueISFEditor/TrueISFEditorApp.swift App/TrueISFEditorTests/PixelGateTests.swift corpus/black-ids.txt corpus/static-ids.txt docs/superpowers/plans/2026-07-09-shared-glsl-scanner.md

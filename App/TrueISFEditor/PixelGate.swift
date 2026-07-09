@@ -28,6 +28,16 @@ enum PixelGate {
         return .ok
     }
 
+    /// Parses the `SHADERTOY_DEBUG_GATE_TIMES` override ("0,0.75,2,4,8") for triage runs that
+    /// need more/later frames than the default 3 (feedback shaders can look STATIC at t≤1.5).
+    /// Returns nil when the raw value yields no parseable times (callers fall back to defaults).
+    static func parseTimes(_ raw: String?) -> [Double]? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let times = raw.split(separator: ",")
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        return times.isEmpty ? nil : times
+    }
+
     /// Report severity for a non-OK verdict — deliberately NOT ImportEvent.Outcome, so this file
     /// stays free of ImportLog types (it is compiled into the test target standalone). The import
     /// hook maps warning→.warning / error→.error at the call site.

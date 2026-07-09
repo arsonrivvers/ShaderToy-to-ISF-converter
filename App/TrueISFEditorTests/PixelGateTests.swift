@@ -57,4 +57,20 @@ final class PixelGateTests: XCTestCase {
         XCTAssertEqual(PixelGate.importOutcome(.renderError)?.severity, .error)
         XCTAssertTrue(PixelGate.importOutcome(.black)!.message.contains("BLACK"))
     }
+
+    // MARK: - SHADERTOY_DEBUG_GATE_TIMES parsing (triage affordance)
+
+    func test_parseTimes_nilAndGarbage_returnNil() {
+        XCTAssertNil(PixelGate.parseTimes(nil))
+        XCTAssertNil(PixelGate.parseTimes(""))
+        XCTAssertNil(PixelGate.parseTimes("abc,def"))
+    }
+
+    func test_parseTimes_commaSeparated_parsesAndTrims() {
+        XCTAssertEqual(PixelGate.parseTimes("0, 0.75,2.0"), [0.0, 0.75, 2.0])
+    }
+
+    func test_parseTimes_partialGarbage_keepsValid() {
+        XCTAssertEqual(PixelGate.parseTimes("0,x,4"), [0.0, 4.0])
+    }
 }
