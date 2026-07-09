@@ -1,10 +1,8 @@
 import Foundation
 
 public enum SamplerRewriter {
-    public struct Result { public let code: String; public let warnings: [ConversionWarning] }
-
     public static func rewrite(_ code: String,
-                               bindings: [Int: ChannelBinding.Binding]) -> Result {
+                               bindings: [Int: ChannelBinding.Binding]) -> RewriteResult {
         var out = code
         var warnings: [ConversionWarning] = []
 
@@ -79,7 +77,7 @@ public enum SamplerRewriter {
             out = out.replacingOccurrences(of: pattern, with: b.glslName,
                                            options: .regularExpression)
         }
-        return Result(code: out, warnings: warnings)
+        return RewriteResult(code: out, warnings: warnings)
     }
 
     private static func name(forChannelArg arg: String,

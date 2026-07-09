@@ -8,7 +8,7 @@ final class OutputInitializerTests: XCTestCase {
         let src = "void pass0_mainImage( out vec4 O, vec2 I ){\n  for (O*=i; i++<40.;){ O+=v; }\n  O=tanh(O);\n}"
         let r = OutputInitializer.apply(src)
         XCTAssertTrue(r.code.contains("){\n    O = vec4(0.0);"), "expected init after the brace; got:\n\(r.code)")
-        XCTAssertTrue(r.notes.contains { $0.message.contains("Auto-initialized output 'O'") })
+        XCTAssertTrue(r.warnings.contains { $0.message.contains("Auto-initialized output 'O'") })
     }
 
     /// An output that is plainly assigned before any compound use must NOT be touched.
@@ -16,7 +16,7 @@ final class OutputInitializerTests: XCTestCase {
         let src = "void f( out vec4 O, vec2 I ){\n  O = vec4(1.0);\n  O += vec4(0.5);\n}"
         let r = OutputInitializer.apply(src)
         XCTAssertEqual(r.code, src)
-        XCTAssertTrue(r.notes.isEmpty)
+        XCTAssertTrue(r.warnings.isEmpty)
     }
 
     /// No out param → unchanged.
@@ -24,7 +24,7 @@ final class OutputInitializerTests: XCTestCase {
         let src = "void helper(vec2 p){ float x = 1.0; }"
         let r = OutputInitializer.apply(src)
         XCTAssertEqual(r.code, src)
-        XCTAssertTrue(r.notes.isEmpty)
+        XCTAssertTrue(r.warnings.isEmpty)
     }
 
     /// C4 — an `inout vec4` accumulator must NOT be zero-injected: the injected `col = vec4(0.0);`
@@ -33,7 +33,7 @@ final class OutputInitializerTests: XCTestCase {
         let src = "void addGlow(inout vec4 col, vec2 p){\n  col += vec4(p, 0.0, 1.0);\n}"
         let r = OutputInitializer.apply(src)
         XCTAssertEqual(r.code, src)
-        XCTAssertTrue(r.notes.isEmpty)
+        XCTAssertTrue(r.warnings.isEmpty)
     }
 
     /// C4 — when a real `out` accumulator and an `inout` helper share the output NAME, only the

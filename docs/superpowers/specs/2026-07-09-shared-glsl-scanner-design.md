@@ -81,7 +81,7 @@ struct RewriteResult {
 }
 ```
 
-Every single-output rewriter converges on `rewrite(...) -> RewriteResult` (`OutputInitializer.notes` renamed to `warnings`; bare-`String` rewriters wrap with `warnings: []`). Multi-output stages (`HeaderMacroExpander`, `CommonChannelRewriter`, `GLSLBodyBuilder`) keep typed result structs but adopt the field-naming convention and carry `warnings`. `GLSLLint.check` stays detection-only (`[ConversionWarning]`) — it rewrites nothing and pretending otherwise obscures that. The `ISFConverter.convert` stage list stays explicit; its header comment is updated in the same commit as any signature change.
+Every warning-carrying rewriter converges on `RewriteResult` (`OutputInitializer.notes` renamed to `warnings`). _Plan sharpening (2026-07-09): pure `String → String` transforms with no possible warnings stay bare-String — wrapping them adds `.code` noise at every call site and no information; the convention itself is documented on `RewriteResult`._ Multi-output stages (`HeaderMacroExpander`, `CommonChannelRewriter`, `GLSLBodyBuilder`) keep typed result structs but adopt the field-naming convention and carry `warnings`. `GLSLLint.check` stays detection-only (`[ConversionWarning]`) — it rewrites nothing and pretending otherwise obscures that. The `ISFConverter.convert` stage list stays explicit; its header comment is updated in the same commit as any signature change.
 
 ## Migration order (each step: full suite + corpus, own commit)
 

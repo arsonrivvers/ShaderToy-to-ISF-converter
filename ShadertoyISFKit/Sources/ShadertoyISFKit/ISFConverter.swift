@@ -147,7 +147,7 @@ public enum ISFConverter {
         // Auto-initialize outputs accumulated before assignment (XorDev `for(O*=i;…)` pattern) —
         // undefined on Metal → NaN → black. Runs before lint so the now-fixed case isn't also warned.
         let initialized = OutputInitializer.apply(reserved)
-        warnings.append(contentsOf: initialized.notes)
+        warnings.append(contentsOf: initialized.warnings)
 
         let compat = GLSLCompat.apply(initialized.code)
         warnings.append(contentsOf: compat.warnings)

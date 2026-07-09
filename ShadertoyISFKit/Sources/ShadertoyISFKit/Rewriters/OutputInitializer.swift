@@ -10,9 +10,7 @@ import Foundation
 /// function makes the shader behave as the author intended. Harmless when the output is later plainly
 /// assigned (it's simply overwritten), and only applied to outputs the detector flags.
 public enum OutputInitializer {
-    public struct Result { public let code: String; public let notes: [ConversionWarning] }
-
-    public static func apply(_ code: String) -> Result {
+    public static func apply(_ code: String) -> RewriteResult {
         var out = code
         var notes: [ConversionWarning] = []
         for name in GLSLLint.uninitializedAccumulatorOutputs(code) {
@@ -31,6 +29,6 @@ public enum OutputInitializer {
                 message: "Auto-initialized output '\(name)' to vec4(0.0) — the shader accumulated into it before initializing (relies on GPU zero-init, which ISF/Metal doesn't guarantee).",
                 context: ""))
         }
-        return Result(code: out, notes: notes)
+        return RewriteResult(code: out, warnings: notes)
     }
 }

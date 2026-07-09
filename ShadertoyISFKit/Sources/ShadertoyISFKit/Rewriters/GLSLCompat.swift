@@ -8,11 +8,6 @@ import Foundation
 /// compiled on backends that lack the builtins — newer backends (Metal, GLSL 1.30+,
 /// ES 3.00) keep their native versions, avoiding any redefinition conflict.
 public enum GLSLCompat {
-    public struct Result {
-        public let code: String
-        public let warnings: [ConversionWarning]
-    }
-
     // name → float-body. vecN overloads are generated componentwise.
     private static let funcs: [(name: String, body: String)] = [
         ("tanh",  "x = clamp(x, -10.0, 10.0); float e = exp(2.0 * x); return (e - 1.0) / (e + 1.0);"),
@@ -36,7 +31,7 @@ public enum GLSLCompat {
         "packSnorm4x8", "unpackSnorm4x8",
     ]
 
-    public static func apply(_ code: String) -> Result {
+    public static func apply(_ code: String) -> RewriteResult {
         var warnings: [ConversionWarning] = []
         // Skip functions the shader defines ITSELF (its own polyfill) — a second definition inside
         // the #if block is a redefinition error on the old backends the block targets.
@@ -83,7 +78,7 @@ public enum GLSLCompat {
                 context: ""))
         }
 
-        return Result(code: out, warnings: warnings)
+        return RewriteResult(code: out, warnings: warnings)
     }
 
     /// True if `name` appears as a function call (word-boundary name followed by `(`).
