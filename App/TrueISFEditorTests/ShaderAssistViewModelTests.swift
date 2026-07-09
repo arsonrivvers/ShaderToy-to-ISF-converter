@@ -73,6 +73,25 @@ final class ShaderAssistViewModelTests: XCTestCase {
         XCTAssertTrue(vm.selectedIdeaIDs.isEmpty)
     }
 
+    /// M33 — dismissing the goal sheet must cancel ITS running goals call (which burns a ~30s CLI
+    /// run and keeps the main buttons disabled) …
+    func testCancelSuggestionGoalsIfRunning_cancelsTheGoalsCall() async {
+        let vm = ShaderAssistViewModel(providerOverride: HangingAssistProvider())
+        vm.requestSuggestionGoals(source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        if case .running(.suggestionGoals) = vm.state {} else {
+            return XCTFail("precondition: expected running(.suggestionGoals), got \(vm.state)")
+        }
+        vm.cancelSuggestionGoalsIfRunning()
+        if case .idle = vm.state {} else { XCTFail("expected idle after cancel, got \(vm.state)") }
+    }
+
+    /// … but must NOT touch any other state (e.g. the rewrite the user just started via Apply).
+    func testCancelSuggestionGoalsIfRunning_isNoOpForOtherStates() async {
+        let vm = ShaderAssistViewModel(providerOverride: nil)
+        vm.cancelSuggestionGoalsIfRunning()
+        if case .idle = vm.state {} else { XCTFail("idle must stay idle") }
+    }
+
     func testApplySelectedBlocksWhenSourceChanged() async {
         let idea = AIIdea(id: "speed", title: "Speed", detail: "Expose speed",
                           kind: "make-interactive", lines: [3], impact: "Playable")
@@ -175,6 +194,15 @@ final class ShaderAssistViewModelTests: XCTestCase {
 }
 
 @MainActor
+/// Never returns until cancelled — simulates a long CLI run for cancellation tests.
+private final class HangingAssistProvider: AssistProvider {
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
+             onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
+        try await Task.sleep(nanoseconds: 60_000_000_000)
+        throw CancellationError()
+    }
+}
+
 private final class FakeAssistProvider: AssistProvider {
     var scripts: [Result<String, Error>]
     private(set) var prompts: [String] = []

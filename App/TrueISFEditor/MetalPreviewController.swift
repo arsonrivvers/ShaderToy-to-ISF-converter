@@ -57,8 +57,15 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
 
     deinit { try? FileManager.default.removeItem(at: tempURL) }
 
+    /// Monotonic load counter: a compile finishing for anything but the CURRENT generation is a
+    /// superseded source and must be dropped, not published (its scene/inputs/diagnostics would
+    /// briefly show as the new shader's).
+    private var loadGeneration = 0
+
     func load(isf: String) {
         lastLoadedSource = isf
+        loadGeneration += 1
+        let generation = loadGeneration
         // Invalidate prior compile state synchronously: a new source is transpiling, so the
         // previous shader's validity no longer applies (also clears stale state between loads).
         compileValid = false
@@ -77,11 +84,15 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             let s = ISFMSLSafeCreateAndLoad(device, url, &compileError, &message)
             let hadError = compileError.boolValue || (s == nil)
             let msg = message as String?
-            Task { @MainActor in self.applyCompile(scene: s, hadError: hadError, message: msg) }
+            Task { @MainActor in
+                self.applyCompile(scene: s, hadError: hadError, message: msg, generation: generation)
+            }
         }
     }
 
-    private func applyCompile(scene s: ISFMSLScene?, hadError: Bool, message: String?) {
+    private func applyCompile(scene s: ISFMSLScene?, hadError: Bool, message: String?,
+                              generation: Int) {
+        guard generation == loadGeneration else { return }   // superseded by a newer load()
         if let s, !hadError {
             scene = s
             compileValid = true

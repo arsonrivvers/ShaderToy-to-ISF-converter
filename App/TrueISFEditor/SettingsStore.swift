@@ -16,9 +16,13 @@ final class SettingsStore: ObservableObject {
     @Published var assistClaudeModel: String = UserDefaults.standard.string(forKey: "assistClaudeModel") ?? "sonnet"
     @Published var assistCodexModel: String = UserDefaults.standard.string(forKey: "assistCodexModel") ?? ""
 
+    /// Non-nil when the last Keychain save failed (surfaced in Settings — a silent drop makes the
+    /// user re-enter the key and lose it again).
+    @Published var keySaveError: String?
+
     func saveKey(_ key: String) {
         apiKey = key
-        KeychainStore.save(key)
+        keySaveError = KeychainStore.saveErrorMessage(for: KeychainStore.save(key))
     }
 
     func saveClaudeBinaryPath(_ p: String) {
@@ -41,4 +45,13 @@ final class SettingsStore: ObservableObject {
     /// login is verified by running the CLI, which the live terminal will surface).
     static func claudeCLIFound(override: String?) -> Bool { ClaudeCodeRunner.locateBinary(override: override) != nil }
     static func codexCLIFound(override: String?) -> Bool { CodexRunner.locateBinary(override: override) != nil }
+
+    /// Async variants for UI: locate can fall back to a login-shell `command -v` (up to 5s) —
+    /// calling the sync version from SwiftUI `body` froze Settings on every keystroke.
+    nonisolated static func claudeCLIFoundAsync(override: String?) async -> Bool {
+        await Task.detached { ClaudeCodeRunner.locateBinary(override: override) != nil }.value
+    }
+    nonisolated static func codexCLIFoundAsync(override: String?) async -> Bool {
+        await Task.detached { CodexRunner.locateBinary(override: override) != nil }.value
+    }
 }

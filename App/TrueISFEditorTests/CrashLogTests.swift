@@ -12,10 +12,23 @@ final class CrashLogTests: XCTestCase {
         let dir = tempDir()
         let log = CrashLog(directory: dir)
         log.record(CrashEvent(kind: .compile, message: "boom", context: "ShaderA"))
+        log.flush()
         let reloaded = CrashLog(directory: dir)
         XCTAssertEqual(reloaded.events.count, 1)
         XCTAssertEqual(reloaded.events.first?.message, "boom")
         XCTAssertEqual(reloaded.events.first?.context, "ShaderA")
+    }
+
+    /// M36 — record() must not rewrite the whole pretty-printed file per event (alternating compile
+    /// errors while typing defeated the consecutive-dedup); persistence is debounced, flush forces it.
+    func test_recordIsDebounced_untilFlush() {
+        let dir = tempDir()
+        let log = CrashLog(directory: dir)
+        log.record(CrashEvent(kind: .compile, message: "boom"))
+        XCTAssertTrue(CrashLog(directory: dir).events.isEmpty,
+                      "persist must be debounced, not synchronous per event")
+        log.flush()
+        XCTAssertEqual(CrashLog(directory: dir).events.count, 1)
     }
 
     func test_consecutiveDuplicatesDeduped() {

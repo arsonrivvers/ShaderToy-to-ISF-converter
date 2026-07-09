@@ -69,7 +69,8 @@ final class ClaudeCodeRunner: AssistProvider {
     }
 
     /// Resolve the claude binary: explicit override → known paths → login-shell `command -v`.
-    static func locateBinary(override: String?) -> URL? {
+    /// nonisolated: pure filesystem/process work, callable off the main actor (Settings probes async).
+    nonisolated static func locateBinary(override: String?) -> URL? {
         BinaryLocator.locate(name: "claude", override: override,
                              extraPaths: ["\(NSHomeDirectory())/.local/bin/claude"])
     }

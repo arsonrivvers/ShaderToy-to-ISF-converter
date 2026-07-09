@@ -179,7 +179,10 @@ void main() {
     }
 
     var body: some Scene {
-        WindowGroup {
+        // `Window`, not `WindowGroup`: the editor binds app-singleton NSViews (editor webView,
+        // preview nsView) that can only live in one hierarchy — WindowGroup's default ⌘N "New
+        // Window" made two windows steal them back and forth.
+        Window("TrueISFEditor", id: "main") {
             EditorScreen(library: library, vm: vm)
         }
         .commands {

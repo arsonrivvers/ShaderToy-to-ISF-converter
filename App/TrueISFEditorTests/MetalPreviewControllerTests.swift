@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 
 @MainActor
 final class MetalPreviewControllerTests: XCTestCase {
@@ -25,6 +26,22 @@ final class MetalPreviewControllerTests: XCTestCase {
         c.load(isf: es3ISF)
         try await waitUntil { c.compileValid == true }
         XCTAssertTrue(c.compileValid, "ISFMSLKit should accept ES3 dynamic loops")
+    }
+
+    /// M25 — a compile still in flight when a newer load() starts must be dropped, not published:
+    /// loading bad-then-good back-to-back may never surface the stale bad result. (Both loads happen
+    /// before either applyCompile lands, so without a generation token the bad error publishes
+    /// transiently over the good source.)
+    func testStaleCompileFromSupersededLoad_isNeverPublished() async throws {
+        let c = MetalPreviewController()
+        var publishedErrors: [String] = []
+        let sub = c.$compileError.sink { if let e = $0 { publishedErrors.append(e) } }
+        defer { sub.cancel() }
+        c.load(isf: "/*{ \"ISFVSN\":\"2\" }*/ void main(){ this is not glsl }")
+        c.load(isf: goodISF)   // supersedes before the bad compile can land
+        try await waitUntil { c.compileValid == true }
+        XCTAssertTrue(publishedErrors.isEmpty,
+                      "superseded load's error leaked through: \(publishedErrors)")
     }
 
     func testBadISFReportsError() async throws {

@@ -26,10 +26,13 @@ final class OutputWindowManager: ObservableObject {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Push a new source if the window is open; no-op otherwise.
+    /// Push a new source if the window is open; no-op otherwise. Debounced — this is fed from the
+    /// editor's per-keystroke onChange, and each load is a full GLSL→SPIRV→MSL transpile (the inline
+    /// preview already debounces 300ms; without this the pop-out recompiled on every keystroke).
+    private let updateDebouncer = Debouncer(delayNanos: 300_000_000)
     func update(source: String) {
         guard window?.isVisible == true else { return }
-        coordinator.load(isf: source)
+        updateDebouncer.call { [weak self] in self?.coordinator.load(isf: source) }
     }
 
     /// Apply output dimensions to the render buffer and size the window to match (1:1) when fixed.

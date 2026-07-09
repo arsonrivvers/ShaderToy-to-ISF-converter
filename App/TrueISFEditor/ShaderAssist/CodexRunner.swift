@@ -13,7 +13,7 @@ final class CodexRunner: AssistProvider {
         self.makeProcess = process
     }
 
-    static func locateBinary(override: String?) -> URL? {
+    nonisolated static func locateBinary(override: String?) -> URL? {
         BinaryLocator.locate(name: "codex", override: override)
     }
 

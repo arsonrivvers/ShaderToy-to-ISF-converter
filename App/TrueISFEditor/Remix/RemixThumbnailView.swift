@@ -28,12 +28,23 @@ struct RemixThumbnailView: NSViewRepresentable {
         let controller = context.coordinator.controller
         if context.coordinator.loadedISF != isf {
             context.coordinator.loadedISF = isf
+            context.coordinator.sourceChanged()   // re-arm the compile report for the new source
             controller.load(isf: isf)
         }
-        // Freeze when not animating: PAUSE the loop (so GPU work actually stops) and show one frame.
+        // Freeze when not animating: PAUSE the loop (so GPU work actually stops) and show one frame —
+        // but only on the animating→frozen TRANSITION. `updateNSView` runs on every model republish
+        // (per transcript line during generation), so an unconditional draw forced one GPU frame per
+        // paused card per line. (A frozen card's post-compile frame is pushed by the observe sink.)
+        let wasAnimating = context.coordinator.animating
         context.coordinator.animating = animating
         controller.setPaused(!animating)
-        if !animating { controller.drawOneFrame() }
+        if Self.shouldPushFrozenFrame(wasAnimating: wasAnimating, animating: animating) {
+            controller.drawOneFrame()
+        }
+    }
+
+    static func shouldPushFrozenFrame(wasAnimating: Bool, animating: Bool) -> Bool {
+        wasAnimating && !animating
     }
 
     @MainActor
@@ -44,12 +55,16 @@ struct RemixThumbnailView: NSViewRepresentable {
         var loadedISF: String?
         var animating = true
         private var bag = Set<AnyCancellable>()
-        private var reported = false
+        private(set) var reported = false
 
         init(onCompile: @escaping (Bool, String?) -> Void, onSnapshot: ((CGImage) -> Void)?) {
             self.onCompile = onCompile
             self.onSnapshot = onSnapshot
         }
+
+        /// SwiftUI recycles coordinators across node changes (LazyVGrid, tree slots) — re-arm the
+        /// fire-once compile report so the NEW source's result and snapshot are delivered.
+        func sourceChanged() { reported = false }
 
         func observe(_ c: MetalPreviewController) {
             // Fire once when compile resolves (valid true, or an error string appears).

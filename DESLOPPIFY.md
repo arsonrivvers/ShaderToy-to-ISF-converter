@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open / 31 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 35 open / 42 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -288,7 +288,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open /
 - **Safe to fix now?** yes.
 
 ### M25 — Stale compile results race in `MetalPreviewController.load` (no generation token)
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Monotonic `loadGeneration` in MetalPreviewController; `applyCompile` drops results from superseded loads. Test proves a bad-then-good load burst never publishes the stale error. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/MetalPreviewController.swift:60-81`
 - **Why it matters:** `load(B)` resets state synchronously, but a still-in-flight `applyCompile` for A (posted from `transpileQueue`) can land after — A's scene/inputs/diagnostics briefly published as valid for B, and `imageSources.updateInputs` gets the wrong input set. Self-correcting but visible.
 - **Recommend:** Monotonic load ID captured per compile; `applyCompile` drops results whose ID ≠ current.
@@ -302,21 +303,24 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open /
 - **Safe to fix now?** yes — render-path change: one change, observe on-device, revert if black.
 
 ### M27 — SettingsView can run a blocking login-shell CLI probe on the main thread per keystroke
-- **Status:** todo
+- **Status:** done
+- **Resolved:** SettingsView probes CLI presence async (`task(id:)` + 250ms debounce + `Task.detached`; `locateBinary` made nonisolated on both runners); status row shows a checking state. No more login-shell on the main thread per keystroke. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/SettingsView.swift:29,38` → `BinaryLocator.locate` (`ShaderAssist/ClaudeCodeRunner.swift:167-173`: `/bin/zsh -lc "command -v …"`, 5s timeout) inside SwiftUI `body`
 - **Why it matters:** When the CLI isn't at a known path, every keystroke in the path field re-runs a synchronous login shell — slow shells (nvm etc.) freeze Settings.
 - **Recommend:** Compute found-status async on appear + debounced path changes into `@State`.
 - **Safe to fix now?** yes.
 
 ### M28 — `RemixThumbnailView.Coordinator.reported` never resets on source change
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `Coordinator.sourceChanged()` re-arms the fire-once compile report when `loadedISF` changes; test proves a recycled coordinator reports the new source's compile. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/Remix/RemixThumbnailView.swift:29-31,59` (+ identity reuse at `RemixLineageTreeView.swift:117`)
 - **Why it matters:** A recycled coordinator never delivers the new shader's compile result or snapshot — a newly promoted parent keeps the old tree swatch, and a bad replacement is reported as the previous result.
 - **Recommend:** Reset `reported = false` (and re-arm the snapshot) when `loadedISF` changes in `updateNSView`.
 - **Safe to fix now?** yes.
 
 ### M29 — One forced GPU frame per paused Remix card per transcript line
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `shouldPushFrozenFrame(wasAnimating:animating:)` — frozen cards get one frame on the animating→frozen transition only (post-compile push unchanged). 4-case test. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/Remix/RemixThumbnailView.swift:34-36`
 - **Why it matters:** `updateNSView` calls `drawOneFrame()` whenever `!animating`; during generation every transcript append republishes the model → one forced frame per paused card per line, thousands of times per batch — quietly undoing M8's thermal win.
 - **Recommend:** `drawOneFrame()` only on an actual `animating` true→false transition (track previous value in the coordinator).
@@ -330,21 +334,24 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open /
 - **Safe to fix now?** yes.
 
 ### M31 — Pop-out output window recompiles on every keystroke
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `OutputWindowManager.update` routes through a new `Debouncer` (300ms, matching the inline preview); Debouncer unit-tested (burst→one call, spaced→both, cancel). App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/Views/EditorScreen.swift:96` → `OutputWindow.swift:30-33` (no debounce; the inline preview debounces 300ms at `EditorViewModel.swift:186`)
 - **Why it matters:** With the pop-out open, typing runs a full GLSL→SPIRV→MSL transpile per keystroke.
 - **Recommend:** Route both consumers through one debounced compiled-source event from `EditorViewModel`.
 - **Safe to fix now?** yes.
 
 ### M32 — WebKit runtime errors are swallowed by the diagnostics pipeline
-- **Status:** todo
+- **Status:** done
+- **Resolved:** WebKit `runtime` messages now set `compileValid = false` so EditorViewModel's diagnostics mapping surfaces them; delegate body extracted to testable `handleScriptMessage`. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/WebKitPreviewController.swift:87-88` (`"runtime"` message sets `compileError` but leaves `compileValid == true`); `EditorViewModel.swift:193-195`
 - **Why it matters:** Runtime errors never reach the diagnostics panel or gutter — the user sees a broken render with "No diagnostics". The exact silent-failure UX this app exists to prevent.
 - **Recommend:** Set `compileValid = false` on runtime error, or publish runtime errors on their own channel.
 - **Safe to fix now?** yes.
 
 ### M33 — SuggestionGoalSheet burns a ~30s LLM run on every open and can't be cancelled by dismissal
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Sheet `.onDisappear` calls new `cancelSuggestionGoalsIfRunning()` — cancels only `running(.suggestionGoals)` so an Apply-started rewrite is never killed. Goal-CACHING half intentionally deferred (interacts with the fingerprint flow). App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/Views/SuggestionGoalSheet.swift:64-66`
 - **Why it matters:** `onAppear` unconditionally calls `requestSuggestionGoals` — reopening via "Change Goal"/"Start Over" discards prior goals and spends a subscription CLI run even if immediately cancelled; `dismiss()` leaves `state == .running`, keeping main-screen buttons disabled until the CLI finishes on its own.
 - **Recommend:** Cancel the run on dismiss now; cache goals per source fingerprint (wait — interacts with the fingerprint flow).
@@ -358,14 +365,16 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open /
 - **Safe to fix now?** wait — needs engine support; document meanwhile.
 
 ### M35 — `WindowGroup` + app-singleton NSViews breaks "New Window"
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `Window("TrueISFEditor", id: "main")` replaces WindowGroup — ⌘N can no longer spawn a second window that steals the singleton NSViews. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/TrueISFEditorApp.swift:182`; `ISFPreviewView.swift:10-14`
 - **Why it matters:** macOS offers ⌘N "New Window" on WindowGroups by default; `vm.editor.webView` / `vm.preview.nsView` can only live in one hierarchy, so two windows steal the views back and forth.
 - **Recommend:** `Window` scene instead of `WindowGroup` (one line) unless multi-window is actually planned.
 - **Safe to fix now?** yes.
 
 ### M36 — CrashLog rewrites the whole pretty-printed file on the main thread per event
-- **Status:** todo
+- **Status:** done
+- **Resolved:** CrashLog persistence debounced (500ms) with `flush()` + NSApplication.willTerminate flush; hard crashes unaffected (async-signal-safe pending file). Tests updated + debounce test. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/CrashLog.swift:29-36,50-53`
 - **Why it matters:** Consecutive-identical dedup doesn't cover alternating errors — two different compile errors while typing defeat it, rewriting a 500-event JSON file on every debounce tick.
 - **Recommend:** Debounce persistence; write on termination + periodic flush.
@@ -550,14 +559,16 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 46 open /
 - **Safe to fix now?** yes, opportunistically.
 
 ### N23 — Import log attributes the previous fetch's HTTP status to the current failure
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `lastResponseStatus` reset to -1 at the start of every `fetchShader` — no more previous-fetch status attributed to the current failure. (One-line; not unit-harnessable — WKWebView-driven.) App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/AppModel.swift:59` (reads `webFetcher.lastResponseStatus`, which persists from the prior fetch)
 - **Why it matters:** A challenge-timeout on fetch N+1 logs fetch N's status — actively misleading when debugging Cloudflare issues.
 - **Recommend:** Clear `lastResponseStatus` at fetch start (or scope it per-fetch).
 - **Safe to fix now?** yes.
 
 ### N24 — KeychainStore save failure is silent in release builds
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `KeychainStore.save` returns the OSStatus, `saveErrorMessage(for:)` maps it (unit-tested, no live keychain writes), `SettingsStore.keySaveError` publishes it, SettingsView shows it in red. App suite 193 tests green.
 - **Where:** `App/TrueISFEditor/KeychainStore.swift:22-24` (`assertionFailure` is a no-op in release)
 - **Why it matters:** A failed save silently drops the API key for shipped users; they'll re-enter it and lose it again.
 - **Recommend:** Return the `OSStatus` and surface failure in Settings.

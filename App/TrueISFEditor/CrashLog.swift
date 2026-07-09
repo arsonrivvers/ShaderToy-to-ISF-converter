@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Combine
 
 /// Persistent, in-memory-mirrored crash/failure log. Singleton (`CrashLog.shared`) because the crash
@@ -24,6 +25,13 @@ final class CrashLog: ObservableObject {
         self.pendingURL = dir.appendingPathComponent("pending-crash.log")
         load()
         ingestPending()
+        // Debounced writes need a final flush at exit. (Hard crashes don't come through here —
+        // they use the async-signal-safe pending file, ingested above.)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flush() }
+        }
     }
 
     func record(_ event: CrashEvent) {
@@ -32,7 +40,26 @@ final class CrashLog: ObservableObject {
            last.message == event.message, last.context == event.context { return }
         events.append(event)
         if events.count > maxEvents { events.removeFirst(events.count - maxEvents) }
+        // Debounced: alternating compile errors while typing defeat the consecutive-dedup, and a
+        // synchronous rewrite of a 500-event pretty-printed file per debounce tick is main-thread I/O.
+        schedulePersist()
+    }
+
+    /// Force any pending debounced write to disk now (termination, tests).
+    func flush() {
+        persistTask?.cancel()
+        persistTask = nil
         persist()
+    }
+
+    private var persistTask: Task<Void, Never>?
+    private func schedulePersist() {
+        persistTask?.cancel()
+        persistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if Task.isCancelled { return }
+            self?.persist()
+        }
     }
 
     func clear() {

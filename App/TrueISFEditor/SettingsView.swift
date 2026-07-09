@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var draftProvider: String = "claude"
     @State private var draftClaudeModel: String = "sonnet"
     @State private var draftCodexModel: String = ""
+    // Probed async (nil = checking): the sync locate can run a 5s login-shell `command -v`, and
+    // calling it from `body` froze Settings on every keystroke in the path field.
+    @State private var claudeFound: Bool?
+    @State private var codexFound: Bool?
 
     private let claudeModels = ["opus", "sonnet", "haiku"]
 
@@ -26,7 +30,7 @@ struct SettingsView: View {
                     Picker("Claude model", selection: $draftClaudeModel) {
                         ForEach(claudeModels, id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    statusRow(found: SettingsStore.claudeCLIFound(override: draftClaudePath),
+                    statusRow(found: claudeFound,
                               cli: "claude", hint: "Run `claude` once in Terminal to sign in.")
                     TextField("/path/to/claude (blank = auto-detect)", text: $draftClaudePath)
                 } else {
@@ -35,7 +39,7 @@ struct SettingsView: View {
                         TextField("default (recommended)", text: $draftCodexModel).frame(width: 200)
                     }
                     Text("Leave blank to use your Codex default model.").font(.caption2).foregroundStyle(.secondary)
-                    statusRow(found: SettingsStore.codexCLIFound(override: draftCodexPath),
+                    statusRow(found: codexFound,
                               cli: "codex", hint: "Run `codex login` in Terminal to sign in with ChatGPT.")
                     TextField("/path/to/codex (blank = auto-detect)", text: $draftCodexPath)
                 }
@@ -47,6 +51,9 @@ struct SettingsView: View {
                 Text("API Key (optional — Advanced)").font(.headline)
                 Text("Leave blank to fetch via the built-in browser (no account needed). An API key is only for Shadertoy Silver/Gold members.").font(.caption).foregroundStyle(.secondary)
                 SecureField("Shadertoy API key", text: $draftKey)
+                if let err = store.keySaveError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
 
                 HStack {
                     Spacer()
@@ -74,14 +81,35 @@ struct SettingsView: View {
             draftClaudeModel = store.assistClaudeModel.isEmpty ? "sonnet" : store.assistClaudeModel
             draftCodexModel = store.assistCodexModel
         }
+        // task(id:) cancels + restarts on each path edit; the short sleep debounces typing so a
+        // login-shell probe isn't launched per keystroke.
+        .task(id: draftClaudePath) {
+            claudeFound = nil
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            claudeFound = await SettingsStore.claudeCLIFoundAsync(override: draftClaudePath)
+        }
+        .task(id: draftCodexPath) {
+            codexFound = nil
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            codexFound = await SettingsStore.codexCLIFoundAsync(override: draftCodexPath)
+        }
     }
 
-    @ViewBuilder private func statusRow(found: Bool, cli: String, hint: String) -> some View {
+    @ViewBuilder private func statusRow(found: Bool?, cli: String, hint: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: found ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(found ? .green : .orange)
-            Text(found ? "`\(cli)` CLI found" : "`\(cli)` CLI not found — \(hint)")
-                .font(.caption)
+            switch found {
+            case nil:
+                ProgressView().controlSize(.mini)
+                Text("Checking for `\(cli)` CLI…").font(.caption).foregroundStyle(.secondary)
+            case true?:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("`\(cli)` CLI found").font(.caption)
+            case false?:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("`\(cli)` CLI not found — \(hint)").font(.caption)
+            }
         }
     }
 }

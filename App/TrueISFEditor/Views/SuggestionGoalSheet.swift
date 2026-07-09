@@ -64,6 +64,9 @@ struct SuggestionGoalSheet: View {
         .onAppear {
             model.requestSuggestionGoals(source: source, diagnostics: diagnostics)
         }
+        // Dismissing mid-run abandons the sheet's goals call — kill the CLI instead of letting it
+        // burn a ~30s subscription run and keep the main-screen buttons disabled until it finishes.
+        .onDisappear { model.cancelSuggestionGoalsIfRunning() }
     }
 
     /// The AI-suggested goals (or the loading / error / empty states for that call).

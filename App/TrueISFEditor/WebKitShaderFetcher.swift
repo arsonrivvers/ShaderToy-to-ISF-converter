@@ -82,6 +82,9 @@ final class WebKitShaderFetcher: NSObject {
     }
 
     func fetchShader(id: String) async throws -> Shader {
+        // Reset per fetch: a stale value would attribute the PREVIOUS fetch's HTTP status to this
+        // one in the import log (e.g. a challenge-timeout logging the prior fetch's 200).
+        lastResponseStatus = -1
         guard let url = URL(string: "https://www.shadertoy.com/view/\(id)") else { throw WebFetchError.badID }
         window.title = "Fetching from Shadertoy… (if a checkbox appears, click it)"
         window.makeKeyAndOrderFront(nil)

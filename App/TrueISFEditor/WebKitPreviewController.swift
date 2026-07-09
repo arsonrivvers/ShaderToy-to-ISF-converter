@@ -67,7 +67,12 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
 
     // MARK: WKScriptMessageHandler
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let dict = message.body as? [String: Any], let type = dict["type"] as? String else { return }
+        handleScriptMessage(message.body)
+    }
+
+    /// Split from the delegate method so tests can drive it (WKScriptMessage isn't constructible).
+    func handleScriptMessage(_ body: Any) {
+        guard let dict = body as? [String: Any], let type = dict["type"] as? String else { return }
         switch type {
         case "ready":
             ready = true
@@ -85,7 +90,11 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
                                 values: ($0["VALUES"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue })
             } ?? []
         case "runtime":
+            // Route through the same path the diagnostics pipeline reads: EditorViewModel maps
+            // compileError to the gutter only when compileValid is false — leaving it true showed
+            // a broken render with "No diagnostics".
             compileError = dict["error"] as? String
+            compileValid = false
         default: break
         }
     }

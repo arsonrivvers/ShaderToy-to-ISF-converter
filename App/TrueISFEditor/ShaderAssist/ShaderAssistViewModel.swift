@@ -231,6 +231,12 @@ final class ShaderAssistViewModel: ObservableObject {
         }
     }
 
+    /// Cancel only when the goal sheet's own goals call is running — dismissing the sheet must not
+    /// kill a rewrite the user just started via Apply Selected.
+    func cancelSuggestionGoalsIfRunning() {
+        if case .running(.suggestionGoals) = state { cancel() }
+    }
+
     func cancel() {
         task?.cancel()
         if let lastSuggestions {
