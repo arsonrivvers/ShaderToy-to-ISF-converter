@@ -47,7 +47,7 @@ public enum ISFConverter {
             var code = GLSLLineContinuation.splice(pass.code)
             // Detection scans run on comment-blanked code — `// TODO try iChannel2` must not
             // invent inputs. The rewrites below still run on the real `code`.
-            let detectable = GLSLComments.strip(code)
+            let detectable = GLSLScanner.strip(code)
             if detectable.range(of: #"\biMouse\b"#, options: .regularExpression) != nil { includeMouse = true }
             if detectable.contains("iChannelResolution") { usesChannelResolution = true }
 
@@ -87,7 +87,7 @@ public enum ISFConverter {
         // some shaders thread the uniforms through helpers as parameters, which the per-pass
         // whole-string rewriter would corrupt.
         let splicedCommon = GLSLLineContinuation.splice(plan.commonCode)
-        let detectableCommon = GLSLComments.strip(splicedCommon)
+        let detectableCommon = GLSLScanner.strip(splicedCommon)
         if detectableCommon.contains("iChannelResolution") { usesChannelResolution = true }
         // iMouse referenced only in the Common tab must still declare the mouse input — the
         // file-scope rewrite happens in CommonUniformRewriter below, but the header flag is set here.
