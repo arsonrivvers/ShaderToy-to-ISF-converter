@@ -1502,6 +1502,149 @@ In `GLSLFunctionDedup.dedup`, keep names with the globals and dedup removals by 
 
 ---
 
+### Task 12b: ZeroInitLocals — zero-initialize uninitialized local declarators [CORPUS]
+
+_(Added at the Task-1 checkpoint with Conner's approval, 2026-07-09: triage attributed 6/10 BLACKs to this class. ANGLE zero-initializes locals on WebGL; Metal does not — golf shaders (`float i, d, z, r;` + `for(O*=i; i++<9e1;)`, `for (float i; i<…;)`) read garbage guards and render black.)_
+
+**Files:**
+- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/ZeroInitLocals.swift`
+- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/ZeroInitLocalsTests.swift`
+- Modify: `ISFConverter.swift` (per-pass + Common, stage 8c alongside 8b; stage-list comment)
+- Modify: `ISFConverterTests.swift` (pipeline test)
+
+**Interfaces:**
+- Consumes: `GLSLScanner.strip/braceDepth/statementEnd/braceMatchEnd`, `GLSLGlobalScanner`-style declarator logic, `RewriteResult`.
+- Produces: `ZeroInitLocals.rewrite(_ code: String) -> RewriteResult` (info note listing initialized names when any).
+
+**Design constraints (all asserted by tests):**
+- Only LOCAL statement declarations (brace depth ≥ 1) and `for (TYPE i; …)` / `for (TYPE i, j; …)` init-less loop declarations.
+- Only whitelisted zeroable types: `float→0.0`, `int→0`, `uint→0u`, `bool→false`, `vec2/3/4→vecN(0.0)` (same for `ivec/uvec/bvec` with their scalar), `mat2/3/4→matN(0.0)` (matches ANGLE's zero matrices, NOT identity). Any other type (user structs, samplers): declarator untouched.
+- Only declarators WITHOUT an initializer; declarators with `[` array suffix untouched (array constructors are noisy and absent from the golf idiom).
+- `const` declarations untouched (valid GLSL const declarators are always initialized anyway).
+- **struct bodies excluded**: declarations inside `struct … { … }` spans (found via `\bstruct\b[^{;]*\{` + `GLSLScanner.braceMatchEnd`) must NOT gain initializers — member initializers are illegal.
+- Comment-masked matching; edits applied to the original back-to-front.
+- Runs per pass body AND on Common (helpers use the same idiom).
+
+- [ ] **Step 1: Write failing tests** (representative set — the executor writes these exactly):
+
+```swift
+import XCTest
+@testable import ShadertoyISFKit
+
+final class ZeroInitLocalsTests: XCTestCase {
+    func test_commaDeclaredScalars_initialized() {
+        let out = ZeroInitLocals.rewrite("void f(){ float t = 1.0,i,z,d; }")
+        XCTAssertEqual(out.code, "void f(){ float t = 1.0,i = 0.0,z = 0.0,d = 0.0; }")
+        XCTAssertEqual(out.warnings.count, 1)
+        XCTAssertTrue(out.warnings[0].message.contains("i, z, d"))
+    }
+
+    func test_vectorLocals_initialized() {
+        XCTAssertEqual(ZeroInitLocals.rewrite("void f(){ vec4 o, P; }").code,
+                       "void f(){ vec4 o = vec4(0.0), P = vec4(0.0); }")
+    }
+
+    func test_initlessForLoopVar_initialized() {
+        XCTAssertEqual(ZeroInitLocals.rewrite("void f(){ for (float i; i < 8.; i++) {} }").code,
+                       "void f(){ for (float i = 0.0; i < 8.; i++) {} }")
+    }
+
+    func test_fileScopeGlobals_untouched() {
+        let src = "float g;\nvoid f(){ }"
+        XCTAssertEqual(ZeroInitLocals.rewrite(src).code, src)
+    }
+
+    func test_structMembers_untouched() {
+        let src = "void f(){ struct S { float a, b; }; S s = S(1., 2.); }"
+        XCTAssertEqual(ZeroInitLocals.rewrite(src).code, src)
+    }
+
+    func test_constAndInitialized_untouched() {
+        let src = "void f(){ const float c = 1.0; float x = 2.0; }"
+        XCTAssertEqual(ZeroInitLocals.rewrite(src).code, src)
+    }
+
+    func test_arrayAndUserStructDeclarators_untouched() {
+        let src = "void f(){ float arr[4]; MyType m; }"
+        XCTAssertEqual(ZeroInitLocals.rewrite(src).code, src)
+    }
+
+    func test_commentedDeclaration_untouched() {
+        let src = "void f(){ // float i, j;\n float k = 1.; }"
+        XCTAssertEqual(ZeroInitLocals.rewrite(src).code, src)
+    }
+}
+```
+
+- [ ] **Step 2:** Run → FAIL (type undefined).
+- [ ] **Step 3: Implement** `ZeroInitLocals.rewrite`: masked = strip(code); struct spans precomputed; two match passes over masked — (a) statement declarations `(?m)(?<![\w.])(float|int|uint|bool|[iub]?vec[234]|mat[234])[ \t]+` at braceDepth≥1 whose statement (to `statementEnd`) splits into declarators (reuse the declarator-split approach from Task 12, generalized to also return each declarator's range and has-initializer flag); (b) for-init declarations `for[ \t]*\([ \t]*(TYPE)[ \t]+…;` handled by the same declarator splitter bounded by the first `;` at paren depth 1. For each uninitialized, non-array declarator of a whitelisted type not inside a struct span: insert ` = <zero>` right after the declarator name. Apply inserts back-to-front. Emit one info `ConversionWarning` naming the initialized identifiers (context filled by the converter call site).
+- [ ] **Step 4: Wire into `ISFConverter`** as stage 8c beside 8b (per pass with pass-name context, plus Common), stage-list comment updated.
+- [ ] **Step 5: Pipeline test** (`ISFConverterTests`): the 3XBBWD golf shape `void mainImage( out vec4 o, in vec2 I ){ float t = iTime,i,z,d; for(o*=i;i++<80.;){} }` converts with `i = 0.0` present and an info warning.
+- [ ] **Step 6:** Kit suite, **corpus gate** — expect the six zero-init BLACKs (`wc33RN wX33zX XXVfRV wfX3WX lcXXzM 33jcRR 3XBBWD` minus any that also need more) to flip; pass-list otherwise identical.
+- [ ] **Step 7: Commit** — `fix(conv): zero-initialize uninitialized locals — Metal lacks ANGLE's zero-init; flips the golf-shader black class`
+
+---
+
+### Task 12c: InjectedNameGuard — user identifiers colliding with ISF-injected names [CORPUS]
+
+_(Added at the Task-1 checkpoint: tXfBz2's `vec2 mouse = iMouse.xy` — the iMouse rewrite makes the initializer reference the ISF `mouse` input, which the just-declared local shadows self-referentially.)_
+
+**Files:**
+- Create: `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/InjectedNameGuard.swift`
+- Create: `ShadertoyISFKit/Tests/ShadertoyISFKitTests/InjectedNameGuardTests.swift`
+- Modify: `ISFConverter.swift` (stage 1b, right after splice, before any uniform rewriting; stage-list comment)
+- Modify: `ISFConverterTests.swift`
+
+**Interfaces:**
+- Consumes: `GLSLScanner.strip`.
+- Produces: `InjectedNameGuard.Result { passBodies: [String]; commonCode: String; warnings: [ConversionWarning] }`, `rewrite(passBodies:commonCode:) -> Result`.
+
+**Design:** guarded names = identifiers our output injects references to at user scope: `mouse`, `RENDERSIZE`, `TIME`, `TIMEDELTA`, `FRAMEINDEX`, `DATE`, `PASSINDEX`. None mean anything in Shadertoy GLSL, so ANY whole-word occurrence in the ORIGINAL source is the user's identifier. Decision is per-shader: if a name occurs (comment-masked) in any pass or Common, rename every occurrence in ALL passes + Common to `usr_<name>` (`GLSLReservedIdentifierRewriter.prefix` convention — cross-tab helpers keep working). Emit one info warning per renamed name. Runs BEFORE uniform rewriting so the rewrites' injected references can never be shadowed.
+
+- [ ] **Step 1: Failing tests:**
+
+```swift
+import XCTest
+@testable import ShadertoyISFKit
+
+final class InjectedNameGuardTests: XCTestCase {
+    func test_userMouseLocal_renamedEverywhere() {
+        let r = InjectedNameGuard.rewrite(
+            passBodies: ["void mainImage(out vec4 O, in vec2 U){ vec2 mouse = iMouse.xy; O = vec4(mouse, 0, 1); }"],
+            commonCode: "")
+        XCTAssertTrue(r.passBodies[0].contains("vec2 usr_mouse = iMouse.xy"), r.passBodies[0])
+        XCTAssertTrue(r.passBodies[0].contains("vec4(usr_mouse, 0, 1)"), r.passBodies[0])
+        XCTAssertEqual(r.warnings.count, 1)
+    }
+
+    func test_commonHelperNamedTIME_renamedInPassToo() {
+        let r = InjectedNameGuard.rewrite(
+            passBodies: ["void mainImage(out vec4 O, in vec2 U){ O = vec4(TIME(1.)); }"],
+            commonCode: "float TIME(float x){ return x; }")
+        XCTAssertTrue(r.commonCode.contains("float usr_TIME(float x)"))
+        XCTAssertTrue(r.passBodies[0].contains("usr_TIME(1.)"))
+    }
+
+    func test_nameOnlyInComment_notRenamed() {
+        let r = InjectedNameGuard.rewrite(
+            passBodies: ["// mouse driven\nvoid mainImage(out vec4 O, in vec2 U){ O = vec4(1); }"],
+            commonCode: "")
+        XCTAssertEqual(r.passBodies[0], "// mouse driven\nvoid mainImage(out vec4 O, in vec2 U){ O = vec4(1); }")
+        XCTAssertTrue(r.warnings.isEmpty)
+    }
+
+    func test_noCollisions_identity() {
+        let r = InjectedNameGuard.rewrite(passBodies: ["void mainImage(out vec4 O, in vec2 U){ O = vec4(1); }"],
+                                          commonCode: "")
+        XCTAssertTrue(r.warnings.isEmpty)
+    }
+}
+```
+
+- [ ] **Step 2:** Run → FAIL. **Step 3: Implement** (masked whole-word detection per name across all codes; masked-match + original back-to-front rename in each). **Step 4: Wire** as stage 1b in `ISFConverter` (after all per-pass splices and the Common splice — restructure: splice everything first, then guard, then proceed; keep the detection scans reading the GUARDED code). **Step 5:** pipeline test: tXfBz2 shape converts with `usr_mouse` and compiles the `mouse * RENDERSIZE` rewrite un-shadowed. **Step 6:** kit suite + **corpus gate** (tXfBz2 → OK expected). **Step 7: Commit** — `fix(conv): guard ISF-injected names against user identifier collisions (tXfBz2 mouse-shadowing class)`
+
+---
+
 ### Task 13: Full gates, DESLOPPIFY close-out, docs
 
 **Files:**
