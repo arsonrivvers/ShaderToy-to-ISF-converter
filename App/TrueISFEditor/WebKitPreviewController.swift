@@ -5,7 +5,7 @@ import Combine
 import VVMetalKit
 
 @MainActor
-final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate, PreviewEngine {
+final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, PreviewEngine {
     @Published var compileValid = false
     @Published var compileError: String?
     @Published var compileErrorLine: Int?
@@ -31,7 +31,6 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.configuration.userContentController.add(self, name: "isf")
-        webView.navigationDelegate = self
         if let url = Bundle.main.url(forResource: "isf-preview", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }

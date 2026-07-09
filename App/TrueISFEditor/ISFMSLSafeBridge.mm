@@ -54,6 +54,13 @@ id<MTLTexture> _Nullable ISFMSLSafeRender(ISFMSLScene *scene,
     if (errorOut) { *errorOut = nil; }
     try {
         id<VVMTLTextureImage> img = [scene createAndRenderToTextureSized:size inCommandBuffer:commandBuffer];
+        if (img == nil) { return nil; }
+        // VVMTLRecycleable returns the backing texture to VVMTLPool when the wrapper deallocates
+        // (VVMTLRecycleable.h: "returned to this pool upon deletion") — dropping `img` at scope
+        // end would let the pool recycle the texture while this command buffer is still rendering
+        // into it and the caller is still displaying it. Keep the wrapper alive until the GPU is
+        // done with the frame.
+        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull cb) { (void)img; }];
         return img.texture;
     }
     catch (const std::exception &e) {

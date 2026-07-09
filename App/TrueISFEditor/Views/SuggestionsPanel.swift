@@ -11,17 +11,6 @@ struct SuggestionsPanel: View {
     let onChangeGoal: () -> Void
     let onStartOver: () -> Void
 
-    init(result: AISuggestionsResult, onJump: @escaping (Int) -> Void) {
-        self.init(result: result,
-                  selectedIDs: [],
-                  onToggle: { _ in },
-                  onJump: onJump,
-                  onApply: {},
-                  onRerun: {},
-                  onChangeGoal: {},
-                  onStartOver: {})
-    }
-
     init(result: AISuggestionsResult,
          selectedIDs: Set<String>,
          onToggle: @escaping (String) -> Void,

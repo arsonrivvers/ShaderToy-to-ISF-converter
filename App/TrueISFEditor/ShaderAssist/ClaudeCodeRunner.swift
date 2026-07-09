@@ -19,12 +19,16 @@ extension ProcessRunning {
 
 /// Maps a non-zero CLI exit to an AssistRunError (auth vs generic failure).
 enum AssistErrorMapper {
+    /// Known CLI sign-in phrasings only — a bare substring like "auth" also matched "author" in
+    /// shader text echoed to output, misreporting real failures as "isn't signed in".
+    private static let signInSignals = [
+        "not authenticated", "please run /login", "please log in", "please sign in", "sign in",
+        "not logged in", "invalid api key", "api key not", "oauth token", "codex login",
+    ]
+
     static func error(stderr: String, stdout: String) -> AssistRunError {
         let lower = (stderr + stdout).lowercased()
-        if lower.contains("login") || lower.contains("not authenticated") ||
-           lower.contains("api key") || lower.contains("auth") || lower.contains("sign in") {
-            return .notAuthenticated
-        }
+        if signInSignals.contains(where: lower.contains) { return .notAuthenticated }
         return .processFailed(stderr.isEmpty ? stdout : stderr)
     }
 }

@@ -78,17 +78,8 @@ void main() {
 
                 let controller = WebKitPreviewController()
 
-                // Wait for harness to become ready (poll up to 5s)
-                var waited = 0
-                while waited < 50 {
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                    waited += 1
-                    // Once ready, the controller will have processed the "ready" message
-                    // We detect readiness via a brief extra sleep after first check
-                    if waited == 5 { break }
-                }
-                // Give the harness a generous startup window
-                try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5s
+                // Give the harness a generous startup window (loads are queued until "ready").
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
 
                 print("=== DEBUG PREVIEW: loading good ISF ===")
                 controller.load(isf: goodISF)
@@ -136,10 +127,11 @@ void main() {
                 // Shadertoy results page instead of reading a file (no ID-guessing).
                 var ids: [String]
                 if idsPath.hasPrefix("browse:") {
+                    // `browse:<anything>:<count>` — the middle segment is legacy (the browse SPA
+                    // renders its default popular grid; a sort param was never honored).
                     let parts = idsPath.split(separator: ":").map(String.init)
-                    let sort = parts.count > 1 ? parts[1] : "popularity"
                     let count = parts.count > 2 ? (Int(parts[2]) ?? 60) : 60
-                    ids = await fetcher.harvestShaderIDs(sort: sort, count: count)
+                    ids = await fetcher.harvestShaderIDs(count: count)
                     print("HARVESTED \(ids.count) ids: \(ids.joined(separator: ","))")
                 } else {
                     ids = ((try? String(contentsOfFile: idsPath, encoding: .utf8)) ?? "")

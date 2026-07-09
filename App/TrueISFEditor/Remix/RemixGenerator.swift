@@ -85,7 +85,9 @@ final class RemixGenerator {
             while launched < min(maxConcurrent, batchSize) { launch(launched); launched += 1 }
             for await node in group {
                 onChild(node)
-                if launched < batchSize { launch(launched); launched += 1 }
+                // Don't backfill after cancellation — each launch spawns a real CLI process that
+                // would exist only to be killed by the cancellation handler.
+                if !Task.isCancelled, launched < batchSize { launch(launched); launched += 1 }
             }
         }
     }

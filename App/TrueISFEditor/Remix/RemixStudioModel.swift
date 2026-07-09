@@ -61,6 +61,7 @@ final class RemixStudioModel: ObservableObject {
     /// `label` is the human display name for the tree (library entry name / "editor" / "pasted").
     func setParent(_ slot: ParentSlot, isf: String, label: String? = nil) {
         let id = "seed-\(seedCounter)"; seedCounter += 1
+        // Round-0 seeds have no generation mode; .crossover is a placeholder value, not lineage fact.
         let node = RemixNode(id: id, isfSource: isf, parents: [], mode: .crossover,
                              steer: "", directive: "seed", round: 0, status: .compiled, label: label)
         lineage.insert(node)
@@ -102,7 +103,8 @@ final class RemixStudioModel: ObservableObject {
         // Seed the gallery with .generating placeholders up front so cards (⚙) and the "N generating"
         // header appear immediately — otherwise nothing shows until a child returns (~37s+ each).
         let pool = RemixDirectives.catalog.filter(crossoverSettings.enabledDirectives.contains)
-        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool)
+        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool,
+                                             mode: mode)
         await generator.generate(
             parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
             settings: crossoverSettings, pool: pool,
@@ -126,10 +128,11 @@ final class RemixStudioModel: ObservableObject {
 
     /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives
     /// the generator will use — so each placeholder is replaced in place when its child lands.
-    static func makePlaceholders(round: Int, size: Int, parents: [String], pool: [String]) -> [RemixNode] {
+    static func makePlaceholders(round: Int, size: Int, parents: [String], pool: [String],
+                                 mode: RemixMode) -> [RemixNode] {
         let directives = RemixDirectives.pick(size, seed: round, from: pool)
         return (0..<size).map { slot in
-            RemixNode(id: "r\(round)-\(slot)", isfSource: "", parents: parents, mode: .crossover,
+            RemixNode(id: "r\(round)-\(slot)", isfSource: "", parents: parents, mode: mode,
                       steer: "", directive: directives[slot], round: round, status: .generating)
         }
     }
@@ -140,10 +143,15 @@ final class RemixStudioModel: ObservableObject {
         }
     }
 
+    /// Monotonic count of transcript lines dropped from the front — lets the view build STABLE row
+    /// ids (`dropped + offset`); raw enumeration offsets shift once the bound starts dropping.
+    private(set) var transcriptDropped = 0
+
     /// Append one provider output line to the merged terminal, tagged by child id and memory-bounded.
     func appendLog(_ id: String, _ line: String) {
-        transcript.append("[\(id)] \(line)")
-        if transcript.count > 2000 { transcript.removeFirst(transcript.count - 2000) }
+        let before = transcript.count
+        transcript.appendBounded("[\(id)] \(line)", max: 2000)
+        transcriptDropped += before + 1 - transcript.count
     }
 
     /// Card preview reports the real compile outcome; update status in the batch and the lineage.

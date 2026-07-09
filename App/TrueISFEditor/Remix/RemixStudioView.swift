@@ -65,13 +65,17 @@ struct RemixStudioView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(model.transcript.enumerated()), id: \.offset) { idx, line in
-                                Text(line)
+                            // Stable row ids: `transcriptDropped + offset` — raw offsets shift once
+                            // the 2000-line bound starts dropping from the front, breaking identity.
+                            ForEach(Array(model.transcript.enumerated())
+                                        .map { (id: model.transcriptDropped + $0.offset, line: $0.element) },
+                                    id: \.id) { row in
+                                Text(row.line)
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.secondary)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id(idx)
+                                    .id(row.id)
                             }
                             if model.transcript.isEmpty {
                                 Text(model.isGenerating ? "Waiting for output…" : "No activity yet — hit Generate.")
@@ -84,7 +88,9 @@ struct RemixStudioView: View {
                     .frame(height: 150)
                     .onChange(of: model.transcript.count) { _ in
                         if let last = model.transcript.indices.last {
-                            withAnimation(.linear(duration: 0.1)) { proxy.scrollTo(last, anchor: .bottom) }
+                            withAnimation(.linear(duration: 0.1)) {
+                                proxy.scrollTo(model.transcriptDropped + last, anchor: .bottom)
+                            }
                         }
                     }
                 }

@@ -23,8 +23,7 @@ final class ImportLog: ObservableObject {
 
     /// No de-dup: distinct attempts are individually meaningful (unlike per-keystroke compile spam).
     func record(_ event: ImportEvent) {
-        events.append(event)
-        if events.count > maxEvents { events.removeFirst(events.count - maxEvents) }
+        events.appendBounded(event, max: maxEvents)
         persist()
     }
 

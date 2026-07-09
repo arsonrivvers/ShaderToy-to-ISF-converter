@@ -31,6 +31,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     /// Passthrough pipeline that displays the engine's output texture (any pixel format) by sampling
     /// it into the drawable. Built lazily on first frame.
     private var blitPipeline: MTLRenderPipelineState?
+    private var blitPipelineFormat: MTLPixelFormat = .invalid
 
     override init() {
         let props = RenderProperties.global()
@@ -338,7 +339,12 @@ extension MetalPreviewController: MTKViewDelegate {
         // This converts ANY source pixel format (incl. 32-bit float, which CAMetalLayer can't accept
         // as a drawable) and scales to fit — no colorPixelFormat juggling, no cross-format-blit
         // assert, no NSException abort.
-        if blitPipeline == nil { blitPipeline = makeBlitPipeline(colorFormat: view.colorPixelFormat) }
+        // Rebuild when the view's pixel format changes — a pipeline built for the first format
+        // would render through a mismatched attachment description.
+        if blitPipeline == nil || blitPipelineFormat != view.colorPixelFormat {
+            blitPipeline = makeBlitPipeline(colorFormat: view.colorPixelFormat)
+            blitPipelineFormat = view.colorPixelFormat
+        }
         guard let pipeline = blitPipeline,
               let rpd = view.currentRenderPassDescriptor else { cb.commit(); return }
         rpd.colorAttachments[0].loadAction = .clear

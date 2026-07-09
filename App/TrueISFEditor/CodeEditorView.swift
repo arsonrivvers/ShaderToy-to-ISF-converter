@@ -11,7 +11,7 @@ struct EditorDiagnostic: Codable, Equatable {
 /// Owns the WKWebView hosting CodeMirror 6 and bridges text + diagnostics to/from Swift.
 /// Mirrors `WebKitPreviewController`'s ready-gating + message-handler pattern.
 @MainActor
-final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
+final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHandler {
     let webView: WKWebView
     /// Called when the user edits in the editor (not when text is pushed programmatically).
     var onChange: ((String) -> Void)?
@@ -27,7 +27,6 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.configuration.userContentController.add(self, name: "editor")
-        webView.navigationDelegate = self
         if let url = Bundle.main.url(forResource: "code-editor", withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }

@@ -247,8 +247,7 @@ final class ShaderAssistViewModel: ObservableObject {
     }
 
     private func appendTranscript(_ line: String) {
-        transcript.append(line)
-        if transcript.count > 2000 { transcript.removeFirst(transcript.count - 2000) }   // bound memory
+        transcript.appendBounded(line, max: 2000)   // bound memory
     }
 
     private static func message(for e: AssistRunError, provider: AssistProviderKind) -> String {

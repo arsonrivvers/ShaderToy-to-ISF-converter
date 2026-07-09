@@ -38,8 +38,7 @@ final class CrashLog: ObservableObject {
         // De-dup consecutive identical failures (e.g. the same compile error on every keystroke).
         if let last = events.last, last.kind == event.kind,
            last.message == event.message, last.context == event.context { return }
-        events.append(event)
-        if events.count > maxEvents { events.removeFirst(events.count - maxEvents) }
+        events.appendBounded(event, max: maxEvents)
         // Debounced: alternating compile errors while typing defeat the consecutive-dedup, and a
         // synchronous rewrite of a 500-event pretty-printed file per debounce tick is main-thread I/O.
         schedulePersist()
@@ -96,8 +95,7 @@ final class CrashLog: ObservableObject {
             message: "App crashed last session (\(name))",
             context: nil, detail: detail)
         // Bypass de-dup: always surface a hard crash.
-        events.append(event)
-        if events.count > maxEvents { events.removeFirst(events.count - maxEvents) }
+        events.appendBounded(event, max: maxEvents)
         persist()
         crashedLastSession = true
         try? FileManager.default.removeItem(at: pendingURL)

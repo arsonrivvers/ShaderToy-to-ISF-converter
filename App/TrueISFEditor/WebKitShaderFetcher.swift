@@ -54,9 +54,10 @@ final class WebKitShaderFetcher: NSObject {
 
     /// Harvests real public shader IDs from Shadertoy's results page (for the conversion-conformance
     /// corpus). Scrapes `/view/<id>` links from the rendered page — no ID-guessing. Best-effort.
-    func harvestShaderIDs(sort: String = "popularity", count: Int = 60) async -> [String] {
+    // (No sort parameter: the browse SPA renders its default popular grid — a sort option was
+    // never honored, and the parameter only made the signature lie.)
+    func harvestShaderIDs(count: Int = 60) async -> [String] {
         guard let url = URL(string: "https://www.shadertoy.com/browse") else { return [] }
-        _ = sort; _ = count   // browse SPA renders a default popular grid; params not used on this path
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         defer { window.orderOut(nil) }

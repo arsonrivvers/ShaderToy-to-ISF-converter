@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open / 51 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 20 open / 57 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -389,7 +389,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open /
 - **Safe to fix now?** wait — touches the router's synchronous fallback contract; do deliberately.
 
 ### M38 — ISFMSLSafeRender drops the VVMTLTextureImage wrapper immediately (possible pool recycle mid-read)
-- **Status:** todo
+- **Status:** done
+- **Resolved:** INVESTIGATED — risk confirmed real: VVMTLRecycleable.h documents that the wrapper returns its texture to VVMTLPool on deallocation, so dropping it at scope end could recycle a texture mid-render/mid-display. Fixed: `ISFMSLSafeRender` retains the wrapper in a commandBuffer addCompletedHandler (strictly extends lifetime). Covered by the real-render tests; include in the next on-device render sweep alongside M8/M26. App suite 200 tests green.
 - **Where:** `App/TrueISFEditor/ISFMSLSafeBridge.mm:56-57`
 - **Why it matters:** Returns the bare `MTLTexture` and releases the wrapper; if VVMTLPool recycles backing textures on wrapper dealloc, an in-flight read can see next-frame reuse — same family as C9.
 - **Recommend:** Verify VVMetalKit's pool semantics first; if real, retain the wrapper until command-buffer completion.
@@ -444,7 +445,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open /
 - **Safe to fix now?** wait — confirm no test references the `model:` init first.
 
 ### N6 — Repeated transcript/log bounding logic
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `Array.appendBounded(_:max:)` (new BoundedArray.swift, unit-tested) replaces all five hand-rolled copies: ShaderAssist transcript, Remix transcript, CrashLog ×2, ImportLog. App suite 200 tests green.
 - **Where:** `App/TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift:251`, `Remix/RemixStudioModel.swift:132`, `CrashLog.swift:34,73`, `ImportLog.swift:27` — all hand-roll `if count > N { removeFirst(count - N) }`
 - **Recommend:** An `Array.boundedAppend(_:max:)` helper or a `RingBuffer`.
 - **Safe to fix now?** yes.
@@ -457,7 +459,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open /
 - **Safe to fix now?** yes.
 
 ### N8 — Fragile substring-based auth error classification
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `AssistErrorMapper` matches a curated sign-in phrase list ("please run /login", "invalid api key", "oauth token", "codex login", …) instead of bare substrings — "author" in shader output no longer misclassifies as not-authenticated. 2 new tests. App suite 200 tests green.
 - **Where:** `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift:14-21` (`AssistErrorMapper`)
 - **Why it matters:** Any non-zero exit whose output merely *contains* "auth"/"login"/"api key" is reported as "isn't signed in" — even when the real failure is unrelated (a shader comment or error text with one of those tokens misfires).
 - **Recommend:** Tighten to known CLI auth phrasings/exit codes, or append it as a hint rather than replacing the real message; add a unit test.
@@ -549,7 +552,8 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open /
 - **Safe to fix now?** yes.
 
 ### N20 — App dead-code cluster
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Deleted: SuggestionsPanel's zero-call-site 2-arg init; both empty WKNavigationDelegate conformances + delegate assignments; the no-op 5s poll loop in the debug preview harness; `harvestShaderIDs`' never-honored `sort` parameter (call site updated, browse:<x>:<count> middle segment documented as legacy). App suite 200 tests green.
 - **Where:** `App/TrueISFEditor/Views/SuggestionsPanel.swift:14-23` (two-arg init, zero call sites); empty `WKNavigationDelegate` conformances (`WebKitPreviewController.swift:8`, `CodeEditorView.swift:14`); `TrueISFEditorApp.swift:77-84` (no-op "poll up to 5s" loop that always breaks at 5); `WebKitShaderFetcher.swift:59` (`harvestShaderIDs(sort:count:)` ignores `sort` — misleading signature)
 - **Recommend:** Delete / fix signatures.
 - **Safe to fix now?** yes.
@@ -584,13 +588,15 @@ _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 26 open /
 - **Safe to fix now?** yes.
 
 ### N25 — Remix cosmetics cluster
-- **Status:** todo
+- **Status:** done
+- **Resolved:** Placeholders take the real generation `mode` (mutate lineage no longer records crossover); seed-node mode documented as a placeholder value; transcript rows get stable ids (`transcriptDropped + offset`) so identity survives the 2000-line bound; RemixGenerator stops backfilling launches after cancellation (no more spawn-to-kill CLIs). Snapshots/history growth ACCEPTED (session-scoped, tiny entries). App suite 200 tests green.
 - **Where:** `Remix/RemixStudioModel.swift:64,132` (placeholders + seed nodes hardcode `mode: .crossover` — mutate-mode lineage records the wrong mode); `snapshots`/`history` grow unbounded; `RemixStudioView.swift:68` (transcript `ForEach(id: \.offset)` breaks row identity once the 2000-line bound starts dropping from the front); `RemixGenerator.swift:86-89` (on cancel, not-yet-launched slots still spawn a CLI process just to kill it — check `Task.isCancelled` before launching)
 - **Recommend:** Fix as one small Remix-polish pass.
 - **Safe to fix now?** yes.
 
 ### N26 — blitPipeline built once for the first colorPixelFormat, never invalidated
-- **Status:** todo
+- **Status:** done
+- **Resolved:** `blitPipelineFormat` tracked; the passthrough pipeline rebuilds when the view's colorPixelFormat changes instead of serving the first-built format forever. App suite 200 tests green.
 - **Where:** `App/TrueISFEditor/MetalPreviewController.swift:330`
 - **Why it matters:** A view whose pixel format changes after first build renders through a mismatched pipeline.
 - **Recommend:** Rebuild when `colorPixelFormat` differs from the cached one.

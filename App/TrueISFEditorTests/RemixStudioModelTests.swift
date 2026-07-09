@@ -131,7 +131,7 @@ final class RemixStudioModelTests: XCTestCase {
     }
 
     func test_makePlaceholders_areGenerating_withMatchingIdsAndDirectives() {
-        let ps = RemixStudioModel.makePlaceholders(round: 2, size: 3, parents: ["seed-0"], pool: RemixDirectives.catalog)
+        let ps = RemixStudioModel.makePlaceholders(round: 2, size: 3, parents: ["seed-0"], pool: RemixDirectives.catalog, mode: .crossover)
         XCTAssertEqual(ps.count, 3)
         XCTAssertEqual(ps.map(\.id), ["r2-0", "r2-1", "r2-2"])          // ids match the generator
         XCTAssertTrue(ps.allSatisfy { $0.status == .generating })
@@ -219,7 +219,7 @@ final class RemixStudioModelTests: XCTestCase {
 
     func test_makePlaceholders_directivesMatchGenerator_forReducedPool() {
         let pool = ["lean minimal and restrained", "emphasize bold color and palette shifts"]
-        let placeholders = RemixStudioModel.makePlaceholders(round: 2, size: 4, parents: [], pool: pool)
+        let placeholders = RemixStudioModel.makePlaceholders(round: 2, size: 4, parents: [], pool: pool, mode: .mutate)
         let generatorDirectives = RemixDirectives.pick(4, seed: 2, from: pool)
         XCTAssertEqual(placeholders.map(\.directive), generatorDirectives)
     }

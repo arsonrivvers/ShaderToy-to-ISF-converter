@@ -55,6 +55,7 @@ targets:
       - TrueISFEditor/PreviewCoordinator.swift
       - TrueISFEditor/ISFPreviewInput.swift
       - TrueISFEditor/CrashEvent.swift
+      - TrueISFEditor/BoundedArray.swift
       - TrueISFEditor/CrashLog.swift
       - TrueISFEditor/MetalPreviewController.swift
       - TrueISFEditor/WebKitPreviewController.swift

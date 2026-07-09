@@ -138,6 +138,35 @@ final class CodexRunnerTests: XCTestCase {
         catch let e as AssistRunError { XCTAssertEqual(e, .binaryNotFound) }
         catch { XCTFail("wrong error") }
     }
+
+    // N8 — the auth classifier must match known CLI sign-in phrasings, not bare substrings:
+    // "auth" also matched "author" in shader text echoed to output, misreporting real failures
+    // as "isn't signed in".
+    func testAuthorInOutput_isNotMisclassifiedAsAuthFailure() {
+        let e = AssistErrorMapper.error(stderr: "shader by author xyz: compile failed", stdout: "")
+        guard case .processFailed = e else { return XCTFail("misclassified as auth: \(e)") }
+    }
+    func testKnownSignInPhrasings_classifyAsNotAuthenticated() {
+        for out in ["Please run /login", "Not authenticated. Run codex login.",
+                    "Invalid API key provided", "OAuth token has expired — please sign in"] {
+            XCTAssertEqual(AssistErrorMapper.error(stderr: out, stdout: ""), .notAuthenticated,
+                           "should classify as auth: \(out)")
+        }
+    }
+}
+
+// N6 — one bounded-append everywhere (transcripts, logs) instead of five hand-rolled copies.
+final class BoundedAppendTests: XCTestCase {
+    func testDropsFromTheFrontAtCap() {
+        var a: [Int] = []
+        for i in 0..<10 { a.appendBounded(i, max: 4) }
+        XCTAssertEqual(a, [6, 7, 8, 9])
+    }
+    func testUnderCapKeepsEverything() {
+        var a: [Int] = []
+        for i in 0..<3 { a.appendBounded(i, max: 4) }
+        XCTAssertEqual(a, [0, 1, 2])
+    }
 }
 
 final class SkillPreambleTests: XCTestCase {
