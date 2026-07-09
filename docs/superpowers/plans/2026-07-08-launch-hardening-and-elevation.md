@@ -66,7 +66,7 @@ Gate: app tests green; manual spot-checks per item.
 
 ## Phase 3 — Structural bet (ordering is the point)
 
-**Task 3.1 — Pixel-truth render gate FIRST.** Extend corpus harness + import report: render 2–3 frames offscreen (`drawOneFrame`/`TextureSnapshot` exist), flag black/NaN/constant frames. This is the safety net every "wait: validate against corpus" item depends on — a compile-only corpus cannot see the bugs M1/M2/M3/C5 cause.
+**Task 3.1 — Pixel-truth render gate FIRST.** ✅ **DONE 2026-07-09** (spec `docs/superpowers/specs/2026-07-09-pixel-truth-render-gate-design.md`, plan `2026-07-09-pixel-truth-render-gate.md`). `runPixelGate()` renders 3 frames at t=0/0.5/1.5 via a crash-safe `atTime:` bridge, deterministic pattern bound to image inputs, CPU readback; BLACK/NAN fail, STATIC warns. Wired into the discovery corpus, `CorpusRenderTests`, and the Import Log (`.rendered` events). **Pixel baseline: compile 74/78 (unchanged) · pixel 64/78 (50 OK + 14 STATIC); 10 BLACK** — see `docs/corpus-analysis-2026-07-09-pixel-baseline.txt`. Unlocks 3.2.
 **Task 3.2 — Shared `GLSLScanner` + rewriter protocol (M3 + N1), absorbing** C5 (scope-aware uniform rewriting), M14 (comment-position checks), M18 (Common-aware macro scoper), M19 (detection comment-stripping), M20 (paste-path scope awareness), N2. Then M1 (per-pass lint) + M2 (multi-declarator scanner).
 Gate: full suite + corpus with pixel gate; any pass-list regression blocks.
 

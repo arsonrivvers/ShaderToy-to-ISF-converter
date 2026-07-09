@@ -2,6 +2,8 @@
 
 _Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 20 open / 57 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
+_Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-list unchanged) · **pixel 64/78 OK** = 50 OK + 14 STATIC(warn); **10 BLACK fails** (`wc33RN wX33zX M3BfzG XtdSDn XXVfRV wfX3WX lcXXzM 33jcRR tXfBz2 3XBBWD`) — the compile-clean/black-render class C5/M1/M2 cause, now visible. Baseline report: `docs/corpus-analysis-2026-07-09-pixel-baseline.txt`. C5/M1/M2/M3 (Task 3.2) are now unblocked; any pixel pass-list regression blocks._
+
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
 > Pick an item by ID to work it next (e.g. "let's do C1").

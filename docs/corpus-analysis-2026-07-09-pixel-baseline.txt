@@ -1,0 +1,79 @@
+=== CORPUS compile 74/78 · pixel 64/78 OK ===
+t3tyDM	FAIL	program_source:199:11: warning: unused variable 'v' [-Wunused-variable]
+3Xf3Rf	OK	pixel=OK	warnings=1
+W3X3zl	OK	pixel=OK	warnings=0
+wc33RN	FAIL	pixel=BLACK
+wX33zX	FAIL	pixel=BLACK
+w3GGRy	FAIL	Shader failed to compile.
+WXGcRW	OK	pixel=OK	warnings=0
+33ycRW	OK	pixel=STATIC	warnings=1
+4f3GzB	OK	pixel=OK	warnings=1
+t3ycDR	OK	pixel=OK	warnings=3
+MslGRn	OK	pixel=OK	warnings=1
+3fc3WS	OK	pixel=OK	warnings=2
+4ffSWH	OK	pixel=OK	warnings=1
+mslGRX	OK	pixel=OK	warnings=3
+Xtc3RS	OK	pixel=OK	warnings=1
+7l3yz4	OK	pixel=OK	warnings=4
+Nl3czM	OK	pixel=OK	warnings=3
+tltfz4	OK	pixel=OK	warnings=1
+fl3yRl	OK	pixel=OK	warnings=3
+3XG3Rw	OK	pixel=OK	warnings=0
+WtsfzS	OK	pixel=OK	warnings=1
+WdySDm	OK	pixel=OK	warnings=0
+3sGSDm	OK	pixel=OK	warnings=0
+WXByWt	OK	pixel=OK	warnings=1
+XftGRj	OK	pixel=OK	warnings=1
+WcXXWf	OK	pixel=STATIC	warnings=0
+MdKyRw	OK	pixel=OK	warnings=0
+3cSSRh	OK	pixel=STATIC	warnings=0
+lXVyDy	OK	pixel=OK	warnings=2
+tXlfzr	OK	pixel=OK	warnings=0
+t3ySzG	OK	pixel=OK	warnings=2
+w3sfR8	OK	pixel=OK	warnings=2
+M3BfzG	FAIL	pixel=BLACK
+lllSWr	OK	pixel=OK	warnings=0
+33dGDn	OK	pixel=OK	warnings=1
+ss3BzH	OK	pixel=OK	warnings=0
+4lffWs	OK	pixel=STATIC	warnings=0
+XlBcRV	OK	pixel=OK	warnings=5
+MdcSDB	OK	pixel=OK	warnings=2
+XdlfWj	OK	pixel=OK	warnings=2
+XtdSDn	FAIL	pixel=BLACK
+4tfBRB	OK	pixel=OK	warnings=2
+MstXWS	OK	pixel=OK	warnings=0
+td3Xzr	OK	pixel=OK	warnings=0
+tscBz7	OK	pixel=OK	warnings=1
+tlX3zs	OK	pixel=OK	warnings=0
+MssyDf	OK	pixel=STATIC	warnings=0
+XXVfRV	FAIL	pixel=BLACK
+wfX3WX	FAIL	pixel=BLACK
+43KyRW	OK	pixel=STATIC	warnings=3
+4fsSWn	OK	pixel=STATIC	warnings=1
+lcXXzM	FAIL	pixel=BLACK
+wXffDH	OK	pixel=OK	warnings=0
+3dK3DV	OK	pixel=OK	warnings=1
+tsXBzS	OK	pixel=OK	warnings=0
+33jcRR	FAIL	pixel=BLACK
+ftGXzz	OK	pixel=OK	warnings=6
+dlf3D2	OK	pixel=OK	warnings=0
+dsjXWw	OK	pixel=OK	warnings=1
+4XXGDl	OK	pixel=STATIC	warnings=5
+lstcW2	OK	pixel=STATIC	warnings=1
+Xsyczc	OK	pixel=STATIC	warnings=1
+XdGyzc	OK	pixel=STATIC	warnings=1
+tXGSWK	OK	pixel=OK	warnings=0
+tXfBz2	FAIL	pixel=BLACK
+4ldGDB	OK	pixel=STATIC	warnings=5
+3XBBWD	FAIL	pixel=BLACK
+Ndc3zj	OK	pixel=OK	warnings=7
+ftt3Dr	OK	pixel=OK	warnings=7
+M3cGW2	OK	pixel=STATIC	warnings=3
+WdtXzs	OK	pixel=OK	warnings=1
+MsGSRd	OK	pixel=STATIC	warnings=2
+33sXWf	OK	pixel=OK	warnings=1
+ctsBzN	OK	pixel=OK	warnings=5
+3cyGWG	FAIL	ERR: 234: 'iChannel0' : undeclared identifier 
+tcKGWD	FAIL	ERR: 228: 'iChannel0' : undeclared identifier 
+W3Vyzc	OK	pixel=OK	warnings=6
+3XGBWw	OK	pixel=OK	warnings=1
