@@ -20,30 +20,63 @@ enum GLSLFunctionScanner {
     /// deduping that "function" would corrupt the keyword. None are valid function names.
     private static let controlKeywords: Set<String> = ["if", "for", "while", "switch", "do", "else", "return"]
 
-    /// All top-level function definitions in `code`, in source order.
-    static func defs(in code: String) -> [Def] {
+    /// A top-level function definition with its parameter NAMES — the C5/M20 scope model.
+    struct FunctionDef { let name: String; let paramNames: [String]; let start: Int; let end: Int }
+
+    /// All top-level function definitions in `code`, in source order. Header matching runs on
+    /// comment-masked text (M14: a commented-out function can't become a Def); ranges index into
+    /// the original, which is offset-identical.
+    static func functionDefs(in code: String) -> [FunctionDef] {
         let re = try! NSRegularExpression(pattern: headerPattern)
-        let s = code as NSString
-        var out: [Def] = []
-        for m in re.matches(in: code, range: NSRange(location: 0, length: s.length)) {
+        let masked = GLSLScanner.strip(code)
+        let ms = masked as NSString
+        var out: [FunctionDef] = []
+        for m in re.matches(in: masked, range: NSRange(location: 0, length: ms.length)) {
             let bracePos = m.range.location + m.range.length - 1   // the `{`
-            guard let end = braceMatchEnd(s, openBrace: bracePos) else { continue }
-            let header = s.substring(with: m.range)
+            guard let end = GLSLScanner.braceMatchEnd(code, openBrace: bracePos) else { continue }
+            let header = ms.substring(with: m.range)               // masked: params are comment-free
             guard let name = lastIdentifierBeforeParen(header) else { continue }
             if controlKeywords.contains(name) { continue }   // `else if (...)` etc. — not a function
-            out.append(Def(name: name, start: m.range.location, end: end))
+            out.append(FunctionDef(name: name, paramNames: paramNames(inHeader: header),
+                                   start: m.range.location, end: end))
         }
         return out
     }
 
-    /// Key on CODE only: strip // and /* */ comments and collapse whitespace, so two tab copies
-    /// that differ only in comments/formatting compare equal (identical code → safe to treat as one).
+    /// All top-level function definitions (legacy shape for Dedup/Namespace).
+    static func defs(in code: String) -> [Def] {
+        functionDefs(in: code).map { Def(name: $0.name, start: $0.start, end: $0.end) }
+    }
+
+    /// Key on CODE only: blank comment content (shared scanner) and collapse whitespace plus the
+    /// kept delimiter tokens, so two copies differing only in comments/formatting compare equal.
     static func normalize(_ block: String) -> String {
-        block
-            .replacingOccurrences(of: "//[^\\n]*", with: "", options: .regularExpression)
-            .replacingOccurrences(of: "/\\*[\\s\\S]*?\\*/", with: "", options: .regularExpression)
+        GLSLScanner.strip(block)
+            .replacingOccurrences(of: "//", with: " ")
+            .replacingOccurrences(of: "/*", with: " ")
+            .replacingOccurrences(of: "*/", with: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Parameter NAMES from a (masked) definition header: text between the first `(` and last `)`,
+    /// split on commas (GLSL params contain no parens), each param's name = its last identifier
+    /// before any `[` array suffix. `()`/`(void)` → [].
+    private static func paramNames(inHeader header: String) -> [String] {
+        guard let open = header.firstIndex(of: "("), let close = header.lastIndex(of: ")"),
+              open < close else { return [] }
+        let inner = header[header.index(after: open)..<close]
+        let idRe = try! NSRegularExpression(pattern: "[A-Za-z_]\\w*")
+        var names: [String] = []
+        for piece in inner.split(separator: ",") {
+            let text = String(piece)
+            let beforeArray = text.firstIndex(of: "[").map { String(text[..<$0]) } ?? text
+            let ns = beforeArray as NSString
+            let ids = idRe.matches(in: beforeArray, range: NSRange(location: 0, length: ns.length))
+                .map { ns.substring(with: $0.range) }
+            if let last = ids.last, last != "void" { names.append(last) }
+        }
+        return names
     }
 
     /// The function name = the last identifier immediately before the `(` in a definition header.
@@ -53,25 +86,4 @@ enum GLSLFunctionScanner {
         return ids.last.map(String.init)
     }
 
-    /// Index just past the `}` matching the `{` at `openBrace`, skipping // and /* */ comments.
-    static func braceMatchEnd(_ s: NSString, openBrace: Int) -> Int? {
-        let slash: unichar = 47, star: unichar = 42, nl: unichar = 10
-        let open: unichar = 123, close: unichar = 125
-        var depth = 0, i = openBrace, mode = 0   // 0 normal, 1 line comment, 2 block comment
-        while i < s.length {
-            let c = s.character(at: i)
-            let n: unichar? = i + 1 < s.length ? s.character(at: i + 1) : nil
-            switch mode {
-            case 1: if c == nl { mode = 0 }
-            case 2: if c == star, n == slash { mode = 0; i += 2; continue }
-            default:
-                if c == slash, n == slash { mode = 1 }
-                else if c == slash, n == star { mode = 2 }
-                else if c == open { depth += 1 }
-                else if c == close { depth -= 1; if depth == 0 { return i + 1 } }
-            }
-            i += 1
-        }
-        return nil
-    }
 }
