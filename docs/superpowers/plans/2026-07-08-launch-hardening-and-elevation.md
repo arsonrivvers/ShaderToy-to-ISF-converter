@@ -72,6 +72,8 @@ Gate: full suite + corpus with pixel gate; any pass-list regression blocks.
 
 **Exit criteria:** one scanner primitive; C5/M1/M2/M14/M18/M19/M20/N2 closed; corpus pixel-pass count ≥ baseline.
 
+✅ **DONE 2026-07-09** (spec `2026-07-09-shared-glsl-scanner-design.md`, plan `2026-07-09-shared-glsl-scanner.md`). One `GLSLScanner` primitive, all six walkers deleted; C5/M1/M2/M3/M14/M18/M20/N1/N2 closed. **Triage falsified the C5/M1/M2 BLACK hypothesis** — the real classes were two NEW bugs, fixed as `ZeroInitLocals` (M40: Metal lacks ANGLE's local zero-init — the golf-shader class, 6/10) and `InjectedNameGuard` (M41: user `mouse` shadowing the injected ISF input, 1/10). Kit 302 + app 227 tests green, Release build green; corpus: zero regressions, **BLACK→OK flips confirmed: XXVfRV, 33jcRR, 3XBBWD, wfX3WX** (+ lcXXzM/tXfBz2 pending a fetch window; wc33RN/wX33zX still black — second cause suspected, follow-up filed; M3BfzG needs live mouse = gate limitation; XtdSDn unknown). Also new: `SHADERTOY_DEBUG_GATE_TIMES` triage override; the 14 STATIC warns re-verified genuine at t≤8s.
+
 ## Phase 4 — Evolution (post-launch, leverage order)
 
 1. **ISF Library Modernizer** — batch "modernize folder" running the existing rewriters over legacy `.fs` files with per-file diff/report (~776→~860/896; headline feature). Prereq: 3.1.

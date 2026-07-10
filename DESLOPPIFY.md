@@ -1,8 +1,8 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · 20 open / 57 done (M8 + M12-probe still STAGED) · rescan added C4–C11, M14–M39, N12–N27; Tasks 1.1 (C4/C6/C7/M17) + 1.2/1.2b (M15/M16/M21–M24, N15–N17, C5-interim warning) fixed same day — 223 tests green, corpus 74/78 baseline pass list · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · **9 open / 70 done** (M8 + M12-probe still STAGED) · Task 3.2 (2026-07-09) closed C5/M1/M2/M3/M14/M18/M20/N1/N2 + found-and-fixed M40/M41; M42 filed (3 unflipped BLACKs) · kit 302 + app 227 tests green · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
-_Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-list unchanged) · **pixel 64/78 OK** = 50 OK + 14 STATIC(warn); **10 BLACK fails** (`wc33RN wX33zX M3BfzG XtdSDn XXVfRV wfX3WX lcXXzM 33jcRR tXfBz2 3XBBWD`) — the compile-clean/black-render class C5/M1/M2 cause, now visible. Baseline report: `docs/corpus-analysis-2026-07-09-pixel-baseline.txt`. C5/M1/M2/M3 (Task 3.2) are now unblocked; any pixel pass-list regression blocks._
+_Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcRR 3XBBWD wfX3WX** (lcXXzM pending a Cloudflare fetch window, expected flip); zero pass-list regressions across all runs. Still BLACK: wc33RN wX33zX tXfBz2 (second cause each — M42), M3BfzG (needs live mouse — gate limitation), XtdSDn (unknown). 14 STATIC re-verified genuine at t≤8s (`SHADERTOY_DEBUG_GATE_TIMES`). Reports: `docs/corpus-analysis-2026-07-09-pixel-baseline.txt` (before) · `docs/corpus-analysis-2026-07-09-task32.txt` (after; 7 ids FETCH-FAIL rate-limited). Reconciled best-known pixel: **68/78 OK.**_
 
 > How this works: items are grouped Critical → Medium → Nice-to-have. Each has a stable ID
 > (permanent — never reused). Status is one of: `todo`, `in-progress`, `done`, `wont-fix`.
@@ -48,7 +48,8 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 - **Safe to fix now?** yes — one line each, no ordering implications.
 
 ### C5 — Common helper bodies never receive uniform rewrites → `iTime` inside a Common function ships raw
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** Scope-aware rewrite shipped (Task 3.2): `UniformRewriter.rewriteScoped` protects a uniform inside a function ONLY when that function's own param list declares it (via `GLSLFunctionScanner.functionDefs` param capture); unshadowed Common bodies now rewrite. The interim warning became a post-rewrite tripwire (`unresolvedUniformUses`). CommonUniformRewriter deleted. Kit 302 tests green; corpus pass-list unchanged.
 - **Interim (2026-07-08, plan Task 1.2b):** `CommonUniformRewriter.unrewrittenBodyUniforms` detects body-scope uniform uses with no param declaration anywhere and ISFConverter emits a loud warning-severity ConversionWarning — the failure is no longer silent. Real scope-aware rewrite still pending (Phase 3, behind the pixel gate). PM requires an explicit ship/hold call on this for launch.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/CommonUniformRewriter.swift:27`
 - **Why it matters:** The param-shadow protection is indiscriminate — **all** brace-depth>0 code is skipped, not just shadowed names. `float n(vec2 p){ return sin(p.x + iTime); }` — extremely common in real Common tabs — reaches the final `.fs` with `iTime` intact → transpile fail → black import. Tests only cover the param-shadow case. Likely a real slice of remaining corpus failures.
@@ -104,21 +105,24 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 ## Medium
 
 ### M1 — OutputInitializer runs on the merged multi-pass file → cross-pass false negative → NaN/black pass
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** OutputInitializer moved to stage 8b — runs on each ISOLATED pass body + Common BEFORE concatenation (after HeaderMacroExpander so expanded signatures are seen). Pipeline test pins the pass-0-plain/pass-1-compound shape.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLLint.swift:24-37` (consumed by `OutputInitializer.swift:18`, invoked at `ISFConverter.swift:139,144` — line refs drifted; re-verified 2026-07-08, still reproduces; C4 compounds this same code)
 - **Why it matters:** Uninitialized-accumulator detection scans the whole concatenated file and dedups output names. Multipass shaders almost always name the output `O`/`fragColor` in every pass; if pass 0 plainly assigns `O` and pass 1 accumulates into `O` before assigning, the global "first plain `=` before first compound" test sees pass 0's plain assignment first → pass 1 is **not** flagged or auto-initialized → it stays NaN/black. Silent, and exactly the bug this file exists to fix.
 - **Recommend:** Run the detector per-pass body (before `GLSLBodyBuilder` concatenation, while each pass's `mainImage` is isolated).
 - **Safe to fix now?** wait — depends on reordering relative to `GLSLBodyBuilder`; validate against the corpus.
 
 ### M2 — GLSLGlobalScanner misses comma-separated / multi-line globals → silent cross-pass collision
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** GLSLGlobalScanner now emits one Def PER DECLARATOR (`float a, b = 2., c;` → a, b, c sharing the statement range); header pattern accepts `,` with a paren-depth guard against multi-line signature params; GLSLFunctionDedup keys globals per-declarator (name+statement) and dedups removals by range. Tests across scanner/dedup/namespace suites.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLGlobalScanner.swift:22-23`
 - **Why it matters:** The header pattern needs `TYPE NAME (=|;)` on one line. `float a, b, c;` matches only up to `a`, sees `,`, and **fails entirely** → the declaration is invisible to `GLSLFunctionDedup` and `GLSLPassNamespace`. If two passes both declare `float a, b;`, the cross-pass collision those rewriters exist to prevent slips through to the transpiler as a redefinition error. (Re-verified 2026-07-08: additionally, `float a = 1., b = 2.;` matches as a single Def named `a` — namespacing renames `a` and leaves `b` colliding.)
 - **Recommend:** Handle multi-declarator lists in the scanner, or emit a conversion warning when a depth-0 comma-list declaration is detected so the failure isn't silent.
 - **Safe to fix now?** wait — changing the scanner shifts dedup/namespace behavior; validate against the corpus.
 
 ### M3 — Five duplicate hand-rolled GLSL char-scanners (comment/brace/paren) that disagree
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** One `GLSLScanner` primitive (UTF-16 cursor: comment/directive flags + brace/paren depth, before-effect semantics) with helpers (`strip`, `braceDepth`, `depths`, `statementEnd`, `braceMatchEnd`, `splitArgs`). All six walkers deleted: GLSLComments, both GLSLCallParser loops, GLSLGlobalScanner's depth/statementEnd, GLSLFunctionScanner.braceMatchEnd (+ its regex `normalize` strip), CommonUniformRewriter.walkRuns. The masked-match idiom (structure on `strip`-blanked text, edits on the original at identical UTF-16 offsets) is the house pattern. 22-test state-transition matrix.
 - **Where:** `Rewriters/GLSLGlobalScanner.swift:40,63`, `Rewriters/GLSLFunctionScanner.swift:57`, `Rewriters/CommonUniformRewriter.swift:42-84`, `Rewriters/GLSLCallParser.swift:45`, `ShaderAssist/ShaderAssistResponseParser.swift:17`
 - **Why it matters:** Five separate state machines each walk characters tracking "in `//` / `/* */` / paren depth / brace depth," and they don't agree on what they handle (some skip comments, `GLSLCallParser.parseArgs` ignores them — see C1). A fix to comment-handling has to be made in up to five places and they silently diverge — the accumulation pattern that already produces this engine's bugs. (Re-verified 2026-07-08: **divergence has grown since the C1 fix** — CallParser is now comment-aware but Global/Function scanners still accept match positions inside block comments (M14); `CommonChannelRewriter.chan` vs `SamplerRewriter.binding` disagree on trailing-comment args (M16); only ShaderAssistResponseParser handles string literals. A shared scanner structurally absorbs C5's design, M14, M18, M19, and N2.)
 - **Recommend:** Extract one `GLSLScanner` primitive (a cursor yielding chars with `inLineComment`/`inBlockComment`/`braceDepth`/`parenDepth` flags) and build all five consumers on it. C1 and N2 fold into this.
@@ -206,7 +210,8 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 - **Safe to fix now?** wait — pure refactor but must preserve exact order; do under the corpus.
 
 ### M14 — Global/Function scanners accept regex matches inside block comments → phantom defs
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** Global/Function scanners match on comment-masked text — a commented-out global/function can't become a Def. Direct test nets added for both scanners (previously zero direct coverage).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLGlobalScanner.swift:30-36`, `Rewriters/GLSLFunctionScanner.swift:28-36`
 - **Why it matters:** `depth()`/`braceMatchEnd()` skip comments when counting, but nothing checks whether the match position itself sits inside `/* … */`. A commented-out helper/global becomes a Def → spurious cross-pass renames; worst case `GLSLFunctionDedup` deletes the **real** definition and keeps the commented text. Commented-out variants are common in Shadertoy source.
 - **Recommend:** "In-comment at position" check from the shared scanner.
@@ -237,7 +242,8 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 - **Safe to fix now?** yes.
 
 ### M18 — Pass-vs-Common macro collisions unscoped
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** `GLSLPassMacroScoper.scope(_:commonCode:)` — Common macros join collision detection; a pass redefining one gets `#undef` immediately BEFORE its redefinition and the Common definition restored after its body. Mention detection is comment-masked (spurious #undefs from comment prose gone; commented-out #defines no longer collected).
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLPassMacroScoper.swift:22` (takes only `passBodies`)
 - **Why it matters:** Common `#define A …` + a pass `#define A …` → "macro redefined; different substitutions" — the exact class the scoper exists to fix, across a boundary it can't see.
 - **Recommend:** Plumb `commonCode` into the scoper.
@@ -252,7 +258,8 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 - **Safe to fix now?** wait — fold into M3 (interim strip acceptable earlier).
 
 ### M20 — Paste path routes helper params through the unprotected whole-string UniformRewriter
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** Stage 2 now uses the same scope-aware `UniformRewriter.rewriteScoped` as Common — paste-path helpers with uniform-named params are protected, call sites still rewritten. Pipeline test pins the shape.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/ShaderFactory.swift:33-38` (markerless paste = whole blob as one Image pass) + `ISFConverter.swift:51`; assumption documented at `ISFConverter.swift:89-92`
 - **Why it matters:** The "pass bodies don't declare uniform-named parameters" assumption only holds when helpers live in Common. A full shader pasted as one blob with a `vec2 iResolution`-style helper param emits `vec2 vec3(RENDERSIZE, 1.0)` → syntax error. Loud, but it's the fallback path users hit when Cloudflare blocks the fetch.
 - **Recommend:** Use the scope-aware rewriter for pass bodies too (with C5's redesign).
@@ -408,15 +415,34 @@ _Pixel gate live 2026-07-09 (plan Task 3.1, app 224 tests): compile 74/78 (pass-
 
 ## Nice-to-have
 
-### N1 — Rewriters share no protocol; return shapes are ad hoc
+
+### M40 — Uninitialized locals render black on Metal (WebGL zero-init parity) — FOUND + FIXED in Task 3.2 triage
+- **Status:** done
+- **Resolved (2026-07-09):** Task-1 triage attributed 6/10 pixel-gate BLACKs to golf shaders reading uninitialized locals (`float i, d, z, r;` + `for(O*=i; i++<9e1;)`, `for (float i; …)`). ANGLE zero-initializes locals; Metal does not → loop guards read garbage → black while compile-clean. New `ZeroInitLocals` (stage 8c) zero-initializes uninitialized local declarators of whitelisted types (statement decls at brace≥1/paren==0 + init-less for-loop vars; struct bodies/arrays/params excluded). 12 unit tests + pipeline test.
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/ZeroInitLocals.swift`
+
+### M41 — User identifiers shadow ISF-injected names (`vec2 mouse = iMouse.xy`) — FOUND + FIXED in Task 3.2 triage
+- **Status:** done
+- **Resolved (2026-07-09):** tXfBz2: the iMouse rewrite expands to an expression referencing the ISF `mouse` input, which a user local named `mouse` shadows self-referentially → garbage → black. New `InjectedNameGuard` (stage 1b) renames user occurrences of mouse/RENDERSIZE/TIME/TIMEDELTA/FRAMEINDEX/DATE/PASSINDEX to `usr_*` per shader BEFORE any rewriting (none of these mean anything in Shadertoy GLSL, so any original occurrence is the user's). 5 unit tests + pipeline test.
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/InjectedNameGuard.swift`
+
+### M42 — Three corpus BLACKs persist after the M40/M41 fixes → second cause per shader, needs render-level debugging
 - **Status:** todo
+- **Where:** corpus ids `wc33RN`, `wX33zX` (both fixed for uninit locals yet still black — accumulator math or tone-map suspected), `tXfBz2` (mouse-shadowing fixed yet still black — camera path suspected)
+- **Why it matters:** These compile clean and now have WebGL-parity locals + un-shadowed inputs, but still render black on Metal — meaning at least one more silent divergence class exists. Each needs per-shader render debugging (frame captures / intermediate-value dumps), not static analysis — Task-1 triage showed static attribution can fix A cause without fixing THE cause.
+- **Recommend:** Debug one (wc33RN) end-to-end with `SHADERTOY_DEBUG_ISFMSL` + frame capture; the class found will likely explain the other two.
+- **Safe to fix now?** yes — investigation only until the class is identified.
+### N1 — Rewriters share no protocol; return shapes are ad hoc
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** `RewriteResult { code, warnings }` shared by every warning-carrying stage (SamplerRewriter/GLSLCompat structs merged; OutputInitializer `notes`→`warnings`); convention documented on the type (pure String→String transforms stay bare-String; GLSLLint stays detection-only).
 - **Where:** across `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/` — `GLSLCompat.swift:39`/`SamplerRewriter.swift:6` return a `Result` struct; `UniformRewriter.swift:15`/`GLSLFunctionDedup.swift:14`/`GLSLReservedIdentifierRewriter.swift:25` return bare `String`; `GLSLPassNamespace.swift:20`/`GLSLPassMacroScoper.swift:22` return `[String]`
 - **Why it matters:** Wiring a new rewriter into the pipeline means re-learning each one's shape (carries warnings? takes all passes or one body?). A `GLSLRewriter` protocol would make the pipeline composable and the convention discoverable.
 - **Recommend:** Define a common rewriter signature; converge the return shapes.
 - **Safe to fix now?** wait — broad but mechanical; do once, behind tests.
 
 ### N2 — GLSLReservedIdentifierRewriter rewrites reserved words inside comments
-- **Status:** todo
+- **Status:** done
+- **Resolved (2026-07-09, Task 3.2):** Reserved-word matching runs on comment-masked text; edits applied to the original back-to-front. `// new approach` stays prose.
 - **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/GLSLReservedIdentifierRewriter.swift:25-34`
 - **Why it matters:** The `\b…\b` replace runs over the whole body including comments, so `// new approach` becomes `// usr_new approach` — harmless to compilation but pollutes the output a user reads/edits.
 - **Recommend:** Skip comment spans (folds into M3's shared scanner).

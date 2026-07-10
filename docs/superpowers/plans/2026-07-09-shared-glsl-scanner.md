@@ -141,6 +141,8 @@ Record which flip STATIC→OK (feedback shaders needing warm-up; note them — n
 
 STATIC flips at extended times (`0,0.75,2,4,8`): **none** — all 14 remain STATIC; the labels are genuine (truly static or input-content-static shaders), not warm-up artifacts.
 
+**Final outcome (post-Tasks 12b/12c, consolidated gate):** BLACK→OK flips confirmed: **XXVfRV, 33jcRR, 3XBBWD, wfX3WX** (lcXXzM pending a Cloudflare fetch window, expected flip). Zero pass-list regressions across every run. Still black: wc33RN, wX33zX (locals fixed — second cause remains), tXfBz2 (shadowing fixed — second cause remains) → filed as DESLOPPIFY **M42** (render-level debugging, static attribution exhausted); M3BfzG (gate has no mouse binding) and XtdSDn (unknown) as triaged. Lesson recorded: static attribution can fix *a* cause without fixing *the* cause — only the pixel gate settles it.
+
 **Consequence for exit criteria:** C5/M1/M2/M20 remain correct structural fixes but flip zero of these BLACKs. The BLACK-flipping payoff requires two NEW rewriters (decision checkpoint with Conner recorded below): **ZeroInitLocals** (Task 12b) and **InjectedNameGuard** (Task 12c) — both consumers of M2's declarator machinery.
 
 ```bash
