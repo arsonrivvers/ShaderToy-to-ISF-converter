@@ -51,6 +51,8 @@ Gate: app tests + on-device observation (camera denied → test pattern; close p
 **Task 1.5 — App batch C (UX honesty + waste).** M32 (runtime errors reach diagnostics), M27 (async CLI probe), M28 (thumbnail `reported` reset), M29 (draw on transition only), M30 (controls-state reset), M31 (debounced output window), M33 cancel-on-dismiss, M35 (`Window` scene), M36 (CrashLog debounce), N23, N24.
 Gate: app tests green; manual spot-checks per item.
 
+**Task 1.6 — Live FPS / render-time readout (Conner, requested 2026-07-11).** Every live view surfaces frame rate + GPU render time: the editor's ISF preview panel first, then Remix Studio (at minimum the live/promoted child card) and the pop-out output window. Sketch: draw-cadence FPS measured in `MetalPreviewController.draw(in:)` + GPU ms via `commandBuffer.addCompletedHandler` (pairs naturally with C9's completed-handler work in Task 1.4 — build together); small toggleable overlay/status readout. Gate: on-device observation on a heavy shader.
+
 **Exit criteria (Phase 1):** all listed items `done` in DESLOPPIFY.md; kit + app suites green; corpus non-regressed; render-path items CONFIRMED on-device.
 
 ## Phase 2 — Launch pack (public GitHub release)
@@ -106,7 +108,7 @@ Everything else in `DESLOPPIFY.md` (N-tier clusters N19–N22, N25–N27, M34, M
 3. **Ship target date** for the public launch (template placeholder was unfilled; June 15 slipped).
 4. **Codex provider at launch:** keep (documented weaker posture) or Claude-only for v1? CSO is fine with either; product call.
 5. **Scope check:** approve/reorder Phase 4 ranking (Modernizer first?).
-6. **C5 launch call (PM-flagged):** ship v1 with C5 open (mitigated by the Task 1.2b loud warning, real fix in Phase 3) — or pull the full scope-aware rewrite forward, accepting corpus-regression risk without the pixel gate? Recommendation: warning now, fix in Phase 3.
+6. **C5 launch call (PM-flagged):** ship v1 with C5 open (mitigated by the Task 1.2b loud warning, real fix in Phase 3) — or pull the full scope-aware rewrite forward, accepting corpus-regression risk without the pixel gate? Recommendation: warning now, fix in Phase 3. ✅ **CLOSED 2026-07-11 — MOOT/SHIPPED-FIXED:** the full scope-aware rewrite landed in Task 3.2 (`UniformRewriter.rewriteScoped`, 2026-07-09) behind the pixel gate, zero corpus regressions; C5 is `done` in DESLOPPIFY.md.
 
 ## Cost lens (CFO)
 

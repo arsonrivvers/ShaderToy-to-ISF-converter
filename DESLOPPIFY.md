@@ -1,6 +1,6 @@
 # DESLOPPIFY — Cleanup Backlog
 
-_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · **9 open / 70 done** (M8 + M12-probe still STAGED) · Task 3.2 (2026-07-09) closed C5/M1/M2/M3/M14/M18/M20/N1/N2 + found-and-fixed M40/M41; M42 filed (3 unflipped BLACKs) · kit 302 + app 227 tests green · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
+_Last scan: 2026-07-08 (full refresh) · branch: desloppify-cleanup · **14 open / 68 done** (recount 2026-07-11 — prior "9/70" header was stale; M8 + M6/M7 CONFIRMED on-device 2026-07-11; M12 probe WAIVED by Conner 2026-07-11; M43/N28 filed from the CS UX pass; M44 found+fixed in the Mechanic manual review — 14 open / 69 done after) · Task 3.2 (2026-07-09) closed C5/M1/M2/M3/M14/M18/M20/N1/N2 + found-and-fixed M40/M41; M42 filed (3 unflipped BLACKs) · kit 302 + app 227 tests green · CSO re-verdict: **SHIP** (C2/M11/M12/N10 fixes hold, test-pinned; only pre-launch ask = `#if DEBUG`-gate the debug env affordances → N9/N11)_
 
 _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcRR 3XBBWD wfX3WX** (lcXXzM pending a Cloudflare fetch window, expected flip); zero pass-list regressions across all runs. Still BLACK: wc33RN wX33zX tXfBz2 (second cause each — M42), M3BfzG (needs live mouse — gate limitation), XtdSDn (unknown). 14 STATIC re-verified genuine at t≤8s (`SHADERTOY_DEBUG_GATE_TIMES`). Reports: `docs/corpus-analysis-2026-07-09-pixel-baseline.txt` (before) · `docs/corpus-analysis-2026-07-09-task32.txt` (after; 7 ids FETCH-FAIL rate-limited). Reconciled best-known pixel: **68/78 OK.**_
 
@@ -146,7 +146,7 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 
 ### M6 — Cancelling a ShaderAssist/Remix run doesn't kill the CLI subprocess
 - **Status:** done
-- **Resolved:** Added `ProcessRunning.cancel()` (default no-op for test doubles); `RealProcess` is now a class tracking the live `Process` and `cancel()` does SIGTERM→SIGKILL. Both runners wrap the detached await in `withTaskCancellationHandler { … } onCancel: { proc.cancel() }` and throw `CancellationError` instead of mapping the killed-process exit to a failure. `ShaderAssistViewModel` catch guards on `Task.isCancelled`. New `testCancellationTerminatesProcessAndDoesNotReportFailure` proves the wiring. **STAGED:** the live SIGTERM-kills-the-real-CLI behavior wants one on-device smoke (unit test uses a double).
+- **Resolved:** Added `ProcessRunning.cancel()` (default no-op for test doubles); `RealProcess` is now a class tracking the live `Process` and `cancel()` does SIGTERM→SIGKILL. Both runners wrap the detached await in `withTaskCancellationHandler { … } onCancel: { proc.cancel() }` and throw `CancellationError` instead of mapping the killed-process exit to a failure. `ShaderAssistViewModel` catch guards on `Task.isCancelled`. New `testCancellationTerminatesProcessAndDoesNotReportFailure` proves the wiring. ~~STAGED~~ **CONFIRMED on-device 2026-07-11:** Cancel kills the live `claude` process (Activity Monitor check).
 - **Where:** `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift:72-74`, `CodexRunner.swift:35-37`, abandoned by `ShaderAssist/ShaderAssistViewModel.swift:240-247` (run at `:190`)
 - **Why it matters:** `provider.run` runs inside `Task.detached{…}.value`; a detached task isn't cancelled by parent cancellation and awaiting `.value` doesn't resume early. So `cancel()` only *abandons the result* — the `claude`/`codex` CLI runs to completion or the 240s timeout, burning subscription tokens + CPU. Hitting "run" again spawns a second CLI while the first is alive (they stack). The SIGTERM→SIGKILL path only fires on timeout, never on user cancel.
 - **Recommend:** Give `ProcessRunning.run` a cancellation hook (retain the `Process`, `terminate()` via `withTaskCancellationHandler` on Task cancel); at minimum terminate the live process in `ShaderAssistViewModel.cancel()`.
@@ -154,16 +154,16 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 
 ### M7 — Remix Studio batch has no Stop control
 - **Status:** done
-- **Resolved:** `RemixStudioModel` now owns the generation `Task` via `startGeneration()`/`cancelGeneration()`; cancelling propagates through the generator's `withTaskGroup` to each provider's cancellation handler (M6) and terminates the CLIs. `RemixGenerator` labels a cancelled child `.failed("cancelled")`. Added a destructive **Stop** button shown while `isGenerating`. **STAGED:** Stop-button UX + live batch-termination need on-device confirmation.
+- **Resolved:** `RemixStudioModel` now owns the generation `Task` via `startGeneration()`/`cancelGeneration()`; cancelling propagates through the generator's `withTaskGroup` to each provider's cancellation handler (M6) and terminates the CLIs. `RemixGenerator` labels a cancelled child `.failed("cancelled")`. Added a destructive **Stop** button shown while `isGenerating`. ~~STAGED~~ **CONFIRMED on-device 2026-07-11:** Stop mid-batch terminates the live CLIs; UX good.
 - **Where:** `App/TrueISFEditor/Remix/RemixStudioModel.swift:80-111`, `Remix/RemixStudioView.swift:132-155`
 - **Why it matters:** `generate()` awaits the whole `withTaskGroup`; `isGenerating` stays true until every child returns or times out. With batchSize up to 8, maxConcurrent 2, 420s per-child timeout, a wedged provider locks the studio for up to ~4×420s with no escape — and per M6 those CLIs can't be killed either.
 - **Recommend:** Hold the generation `Task`, add a model `cancel()` + a Stop button, propagate cancellation into the runner.
 - **Safe to fix now?** wait — depends on M6's cancellation plumbing.
 
 ### M8 — Live-preview "freeze" cap never pauses the MTKView → all cards render full-rate
-- **Status:** done (STAGED — on-device verification REQUIRED before closing)
+- **Status:** done (**CONFIRMED on-device 2026-07-11** — Conner ran a Remix batch on the fresh 11:18 build: cards freeze when non-live, show compiled frames, resume on promote; "worked amazing")
 - **Resolved:** Added `MetalPreviewController.setPaused(_:)` (sets `mtkView.isPaused`) and `drawOneFrame()`. `RemixThumbnailView` now pauses non-animating cards (so GPU work actually stops) and pushes a single frame — including when a frozen card finishes compiling, so it shows its result rather than pre-compile black. Builds + 166 tests green.
-- **STAGED / on-device test needed** (render-path change, unobservable in unit tests): (1) non-live cards visibly freeze and drop GPU/thermal load; (2) frozen cards show their compiled frame, not black; (3) promoting a card to favorite/live resumes animation. Per render-path rule: if any card goes black, revert this item.
+- ~~STAGED / on-device test needed~~ **All three observations CONFIRMED 2026-07-11:** (1) non-live cards visibly freeze; (2) frozen cards show their compiled frame, not black; (3) promote resumes animation.
 - **Where:** `App/TrueISFEditor/MetalPreviewController.swift:52-55` vs `Remix/RemixThumbnailView.swift:27-35`, `Remix/RemixStudioModel.swift:148-157`
 - **Why it matters:** Each child card hosts its own `MetalPreviewController` whose `MTKView` is created `isPaused = false` with no pause API, so `draw(in:)` runs continuously at display refresh **regardless of the `animating` flag**. The `maxLivePreviews`/`shouldAnimate` cap only governs an *additional* `renderOnce()`; it never pauses the view. A batch of 8 children + 2 parents all render full-rate — exactly the thermal/battery load the cap was meant to prevent (LazyVGrid recycling compounds it).
 - **Recommend:** Add `setPaused(_:)` to `MetalPreviewController` (sets `mtkView.isPaused`); in `RemixThumbnailView.updateNSView`, pause when `!animating` and render a single frame.
@@ -195,7 +195,7 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 
 ### M12 — Tool-restriction defense depends on un-pinned external CLI flag semantics (fail-open on update)
 - **Status:** done
-- **Resolved:** Added `ClaudeCodeRunner.minVerifiedVersion = (2,1,175)`, `parseVersion`, and `isBelowVerifiedFloor` (true only when the version parses AND is below floor — unknown format never cries wolf). `run()` does an off-main best-effort `claude --version` probe (injectable; the app factory wires the real probe, tests inject nil/stub) and emits a one-time non-gating "SECURITY: CLI older than verified" transcript warning when confidently below floor. 5 tests cover the parser + below/at-floor wiring. **Minor STAGED note:** the exact real `claude --version` output format is assumed `…M.N.P…`; confirm once on-device that a genuinely-old CLI triggers the warning (low risk — non-gating, silent on unrecognized format). A hard version-gate or capability self-test was deliberately NOT taken (would block runs + needs a UX decision).
+- **Resolved:** Added `ClaudeCodeRunner.minVerifiedVersion = (2,1,175)`, `parseVersion`, and `isBelowVerifiedFloor` (true only when the version parses AND is below floor — unknown format never cries wolf). `run()` does an off-main best-effort `claude --version` probe (injectable; the app factory wires the real probe, tests inject nil/stub) and emits a one-time non-gating "SECURITY: CLI older than verified" transcript warning when confidently below floor. 5 tests cover the parser + below/at-floor wiring. **Minor STAGED note — WAIVED by Conner 2026-07-11** (would require manufacturing a stale `claude` binary; non-gating warning, low risk, silent on unrecognized format — accepted as-is for launch). A hard version-gate or capability self-test was deliberately NOT taken (would block runs + needs a UX decision).
 - **Where:** `App/TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift:62-64` (see the v2.1.175 note at `:49-51`)
 - **Why it matters:** The trifecta is broken today only because `--tools ""`/`--disallowedTools LSP` do what was verified on claude CLI **v2.1.175** — the code comment itself records that `--tools ""` alone left LSP exposed until patched, proving semantics shift between versions. The app runs the *user's* auto-updating CLI, so a future flag rename/default change would silently re-arm the removed legs with zero code change and no signal.
 - **Recommend:** Fail-closed — detect CLI version (`claude --version`) and refuse/warn outside a known-good range, or run a one-shot capability self-test confirming a tool invocation is actually rejected before enabling assist.
@@ -432,6 +432,28 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Why it matters:** These compile clean and now have WebGL-parity locals + un-shadowed inputs, but still render black on Metal — meaning at least one more silent divergence class exists. Each needs per-shader render debugging (frame captures / intermediate-value dumps), not static analysis — Task-1 triage showed static attribution can fix A cause without fixing THE cause.
 - **Recommend:** Debug one (wc33RN) end-to-end with `SHADERTOY_DEBUG_ISFMSL` + frame capture; the class found will likely explain the other two.
 - **Safe to fix now?** yes — investigation only until the class is identified.
+
+### M43 — Imported document keeps the "Untitled.fs" title while the banner names the real shader
+- **Status:** todo
+- **Where:** `App/TrueISFEditor/EditorViewModel.swift` (`loadImported` path) — title bar shows `Untitled.fs` while the import banner + status bar both say "Imported More -cubes- for the cube lovers.fs" (CS screenshot, 2026-07-11)
+- **Why it matters:** A stranger imports a shader, sees the right name in the banner, then hits Save and gets `Untitled.fs` — provenance lost, and the mismatch reads as a bug. First-session UX on the app's headline flow.
+- **Recommend:** Adopt the imported shader's (sanitized) name as the document display name / default save filename.
+- **Safe to fix now?** yes — small, but touch the dirty-document/save path with a test (C8's choke point lives there).
+
+### M44 — `rewriteScoped` queues nested edits: word-rule uniform inside an indexed access corrupts output
+- **Status:** done (found + fixed 2026-07-11, Mechanic manual review `7817e94e`)
+- **Resolved:** word-rule matches whose location falls inside an already-claimed indexed-edit range are skipped — the indexed replacement consumes the whole access. 2 regression tests (`test_wordRuleInsideIndexedAccess…`, `test_iTimeInsideChannelTimeIndex…`); kit 304 green. Corpus gate deferred to the consolidated pre-merge run (narrow fix, test-pinned).
+- **Where:** `ShadertoyISFKit/Sources/ShadertoyISFKit/Rewriters/UniformRewriter.swift` (`rewriteScoped`)
+- **Why it matters:** `iChannelResolution[iFrame % 2]` queued BOTH the indexed edit and the nested `iFrame` word edit; descending-location application produced `vec3(RENDERSIZE, 1.0)% 2];` — garbage → compile error on import. The legacy `rewrite()` was immune (sequential whole-string passes); only the new scoped path (Task 3.2) had it.
+- **Safe to fix now?** fixed.
+
+### N28 — ShaderAssist Activity pane shows raw stream-JSON (tokens, costUSD, uuid) to end users
+- **Status:** todo
+- **Where:** ShaderAssist Activity disclosure (CS screenshot, 2026-07-11): 28 lines of raw `{"ephemeral_5m_input_tokens":…,"costUSD":0.56663,"uuid":…}` under "Using Claude · opus"
+- **Why it matters:** Dev-facing internals in a user surface — fine for you, noise for a public v1. Copy button on raw JSON suggests it's a debugging affordance that escaped.
+- **Recommend:** Render a human summary line (model, duration, cost) and collapse the raw JSON behind a "Show raw" disclosure (or `#if DEBUG` it).
+- **Safe to fix now?** yes — presentation-only.
+
 ### N1 — Rewriters share no protocol; return shapes are ad hoc
 - **Status:** done
 - **Resolved (2026-07-09, Task 3.2):** `RewriteResult { code, warnings }` shared by every warning-carrying stage (SamplerRewriter/GLSLCompat structs merged; OutputInitializer `notes`→`warnings`); convention documented on the type (pure String→String transforms stay bare-String; GLSLLint stays detection-only).
