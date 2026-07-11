@@ -58,11 +58,16 @@ public enum UniformRewriter {
                 edits.append((m.range, f.replacement))
             }
         }
+        // A word-rule uniform can sit INSIDE an indexed access's index (`iChannelResolution[iFrame % 2]`);
+        // the indexed edit consumes the whole access, so a nested word edit would corrupt the output
+        // when both are applied (M44).
+        let claimed = edits.map(\.0)
         for (from, to) in rules {
             let re = try! NSRegularExpression(
                 pattern: "\\b" + NSRegularExpression.escapedPattern(for: from) + "\\b")
             for m in re.matches(in: masked, range: NSRange(location: 0, length: mns.length))
-            where !isProtected(m.range.location, from) {
+            where !isProtected(m.range.location, from)
+                && !claimed.contains(where: { NSLocationInRange(m.range.location, $0) }) {
                 edits.append((m.range, to))
             }
         }

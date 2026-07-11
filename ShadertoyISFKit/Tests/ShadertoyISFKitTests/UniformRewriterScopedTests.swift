@@ -132,4 +132,19 @@ final class UniformRewriterScopedTests: XCTestCase {
         let out = UniformRewriter.rewriteScoped("vec2 f(vec2 iResolution){ return iResolution.xy; }")
         XCTAssertTrue(UniformRewriter.unresolvedUniformUses(out).isEmpty)
     }
+
+    // MARK: - nested-edit safety (M44)
+
+    /// A word-rule uniform INSIDE an indexed access's index (`iChannelResolution[iFrame % 2]`)
+    /// must not queue a second, nested edit — the indexed replacement consumes the whole access.
+    /// (Descending-location application of overlapping ranges corrupts the trailing character.)
+    func test_wordRuleInsideIndexedAccess_noNestedEditCorruption() {
+        let out = UniformRewriter.rewriteScoped("vec3 r = iChannelResolution[iFrame % 2];")
+        XCTAssertEqual(out, "vec3 r = vec3(RENDERSIZE, 1.0);")
+    }
+
+    func test_iTimeInsideChannelTimeIndex_noNestedEditCorruption() {
+        let out = UniformRewriter.rewriteScoped("float t = iChannelTime[int(iTime)] + 1.0;")
+        XCTAssertEqual(out, "float t = TIME + 1.0;")
+    }
 }
