@@ -88,7 +88,9 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** yes — isolated to `CameraFrameProvider`.
 
 ### C10 — Camera permission denied → silent black forever; capture session never stops
-- **Status:** todo
+- **Status:** partial (denied half done 2026-07-14; session-stop still open)
+- **Done:** `SourceRouter.makeSource(.camera)` checks authorization (injectable `cameraBlocked` seam) and falls back to the default test pattern when denied/restricted — never black. `CameraFrameProvider` now starts permission + session LAZILY on first consumed frame (windowless import-gate/Remix controllers no longer light the camera). Became urgent because filters now default to `.camera`.
+- **Still open:** no "camera denied" hint in the source picker UI; session never stops once started (refcount design).
 - **Where:** `App/TrueISFEditor/CameraSource.swift:70-73` (init only fails on texture-cache alloc); `SourceRouter.swift:84-85` (fallback never triggers); no `stopRunning()` exists anywhere
 - **Why it matters:** On permission-denied the "camera unavailable ⇒ default pattern, never black" fallback never fires — the input renders black forever, the exact class this app's doctrine forbids. And once `SharedCamera` starts, the camera (and indicator light) stays on for the app's lifetime even after every input switches away — privacy + energy.
 - **Recommend:** Authorization-aware state (fallback to pattern + "camera denied" hint) now; stop-the-session-when-unused via a small refcount design after.
@@ -337,7 +339,8 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** yes.
 
 ### M30 — PreviewControlsView state dictionaries survive document changes
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14:** Conner hit this live ("gets hung up on the previous shader sliders"; the new value readouts made the stale dicts visible). `EditorViewModel.documentGeneration` bumps on the four document-replacing paths (open/new/import/example), and EditorScreen keys `HeaderPanelView.id(vm.documentGeneration)` — fresh @State per document, values survive same-doc recompiles. Test: `testDocumentGeneration_bumpsOnDocumentSwitch_notOnEdit`.
 - **Where:** `App/TrueISFEditor/Views/PreviewControlsView.swift:6-10`
 - **Why it matters:** `floats/bools/points/colors/longs` are keyed by input name and never cleared — load shader 2 with an input named like shader 1's and the slider shows the stale value; first drag jumps.
 - **Recommend:** Clear the dictionaries when `coordinator.inputs` identity changes.

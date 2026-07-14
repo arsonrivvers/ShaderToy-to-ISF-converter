@@ -78,6 +78,9 @@ struct EditorScreen: View {
                             .frame(minHeight: 200, maxHeight: .infinity)
                         HeaderPanelView(coordinator: vm.preview, model: vm.headerModel)
                             .frame(minHeight: 180, maxHeight: .infinity)
+                            // Fresh @State per document (M30): without this, a new shader whose
+                            // inputs share names with the old one keeps the old slider values.
+                            .id(vm.documentGeneration)
                     }
                 }
                 .frame(minWidth: 320)

@@ -13,12 +13,19 @@ final class EditorViewModel: ObservableObject {
     @Published var statusMessage: String = ""
     /// Set by the "New from Shadertoy…" command; the editor screen presents the sheet.
     @Published var requestImport = false
+    /// Bumped every time a DIFFERENT document replaces the current one (open/new/import/example) —
+    /// NOT on recompiles of the same document. EditorScreen keys the controls panel's identity on
+    /// this (M30): per-input control state must reset when the shader changes (same-named inputs
+    /// on the new shader otherwise show the previous shader's stale values), but must SURVIVE the
+    /// per-keystroke recompiles of normal editing.
+    @Published private(set) var documentGeneration = 0
 
     // Output dimensions. `fitToWindow` = render at the preview pane size (default);
     // otherwise render at renderWidth × renderHeight (becomes RENDERSIZE).
+    // 1920×1080 default: VJ-standard 16:9 — in fit mode the ASPECT is what shows on load.
     @Published var fitToWindow = true
-    @Published var renderWidth = 640
-    @Published var renderHeight = 480
+    @Published var renderWidth = 1920
+    @Published var renderHeight = 1080
 
     func halveRenderSize() {
         renderWidth = max(1, renderWidth / 2); renderHeight = max(1, renderHeight / 2)
@@ -114,6 +121,7 @@ final class EditorViewModel: ObservableObject {
         guard canReplaceDocument() else { return }
         do {
             file = try ISFFile(contentsOf: entry.url)
+            documentGeneration += 1
             conversionWarnings = []
             conversionReportTitle = nil
             statusMessage = "Opened \(file.displayName)"
@@ -128,6 +136,7 @@ final class EditorViewModel: ObservableObject {
     func newUntitled() {
         guard canReplaceDocument() else { return }
         file = .untitled(source: Self.blankTemplate)
+        documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = "New shader"
@@ -140,6 +149,7 @@ final class EditorViewModel: ObservableObject {
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
         guard canReplaceDocument() else { return }
         file = .untitled(source: isf)
+        documentGeneration += 1
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
         statusMessage = "Imported \(suggestedName)"
@@ -155,6 +165,7 @@ final class EditorViewModel: ObservableObject {
     func loadExample(name: String, source: String) {
         guard canReplaceDocument() else { return }
         file = .untitled(source: source)
+        documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = "Opened example: \(name)"

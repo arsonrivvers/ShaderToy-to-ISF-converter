@@ -34,8 +34,8 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
     // ── lock-guarded state ──
     private var scene: ISFMSLScene?
     private var imageInputNames: [String] = []
-    private var renderWidth = 640
-    private var renderHeight = 480
+    private var renderWidth = 1920   // matches EditorViewModel's 16:9 default
+    private var renderHeight = 1080
     private var fitToWindow = true
     private var statsAccumulator = RenderStatsAccumulator()
     private var statsWereLive = false   // avoid republishing nil every clear frame

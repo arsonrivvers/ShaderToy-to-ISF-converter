@@ -26,6 +26,30 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(vm.headerModel.header.inputs.map(\.name), ["gain"])
     }
 
+    // MARK: M30 — controls state must reset per document, survive same-doc edits
+
+    func testDocumentGeneration_bumpsOnDocumentSwitch_notOnEdit() {
+        let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate))
+        let g0 = vm.documentGeneration
+        vm.newUntitled()
+        XCTAssertEqual(vm.documentGeneration, g0 + 1, "new document must bump the generation")
+        vm.loadImported(isf: EditorViewModel.blankTemplate, warnings: [], suggestedName: "X")
+        XCTAssertEqual(vm.documentGeneration, g0 + 2, "import must bump the generation")
+        vm.loadExample(name: "ex", source: EditorViewModel.blankTemplate)
+        XCTAssertEqual(vm.documentGeneration, g0 + 3, "example must bump the generation")
+        // Same-document editing must NOT bump — slider state survives live recompiles.
+        vm.file.source = "// edited"
+        vm.replaceSourceFromAssist(EditorViewModel.blankTemplate)
+        XCTAssertEqual(vm.documentGeneration, g0 + 3, "same-doc edits must not bump")
+    }
+
+    func testDefaultRenderSizeIs1080p16x9() {
+        let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate))
+        XCTAssertEqual(vm.renderWidth, 1920)
+        XCTAssertEqual(vm.renderHeight, 1080)
+        XCTAssertTrue(vm.fitToWindow)
+    }
+
     // MARK: C8 — dirty-document guard (the library list is selection-driven; before the guard,
     // one stray click silently destroyed unsaved edits)
 

@@ -14,16 +14,18 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
     private var latest: MTLTexture?
     private var retained: CVMetalTexture?
 
+    private var startRequested = false   // guarded by `lock`
+
     init?(device: MTLDevice) {
         super.init()
         var c: CVMetalTextureCache?
         guard CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &c) == kCVReturnSuccess,
               let c else { return nil }
         cache = c
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-            guard granted, let self else { return }
-            self.queue.async { self.start() }
-        }
+        // Deliberately NO permission request / session start here: with camera as the default
+        // filter source, eager start would light the camera on every filter COMPILE — including
+        // windowless import-gate and Remix controllers that never draw. The session starts lazily
+        // on the first frame that actually consumes it (currentTexture).
     }
 
     private func start() {
@@ -54,9 +56,21 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
         lock.unlock()
     }
 
+    /// Latest captured frame; kicks off permission + capture on first call (any thread — the
+    /// render loop is the usual caller). Returns nil until frames flow (or forever, if denied).
     func currentTexture() -> MTLTexture? {
-        lock.lock(); defer { lock.unlock() }
-        return latest
+        lock.lock()
+        let needsStart = !startRequested
+        startRequested = true
+        let tex = latest
+        lock.unlock()
+        if needsStart {
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                guard granted, let self else { return }
+                self.queue.async { self.start() }
+            }
+        }
+        return tex
     }
 }
 

@@ -1,5 +1,6 @@
 import Metal
 import Combine
+import AVFoundation
 import ShadertoyISFKit
 
 /// The user's chosen source for one image input. `.library` carries a file URL (Slice 2);
@@ -45,12 +46,21 @@ final class SourceRouter: ObservableObject {
         return renderRoutes[name]
     }
 
+    /// True when camera access is denied/restricted → the camera default must fall back (C10:
+    /// never black). Injectable so tests can simulate a denied machine without TCC.
+    private let cameraBlocked: () -> Bool
+
     /// `camera` lets a single shared capture session be injected so inline + pop-out share one
     /// AVCaptureSession (and tests can inject a fake). Defaults to a per-router camera.
-    init(device: MTLDevice, queue: MTLCommandQueue, camera: ImageSource? = nil) {
+    init(device: MTLDevice, queue: MTLCommandQueue, camera: ImageSource? = nil,
+         cameraBlocked: (() -> Bool)? = nil) {
         self.device = device
         self.queue = queue
         self.injectedCamera = camera
+        self.cameraBlocked = cameraBlocked ?? {
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            return status == .denied || status == .restricted
+        }
     }
 
     /// Copy another router's selections onto this one (pop-out mirrors the inline preview's sources).
@@ -68,9 +78,12 @@ final class SourceRouter: ObservableObject {
         let nameSet = Set(names)
         selections = selections.filter { nameSet.contains($0.key) }
         sources = sources.filter { nameSet.contains($0.key) }
+        // Filters default to the live camera (Conner, 2026-07-14) — a filter should show SOMETHING
+        // moving on load, not a black unbound input. Camera-denied machines fall back to the test
+        // pattern inside makeSource; the session itself starts lazily on first consumed frame.
         for n in names where selections[n] == nil {
-            selections[n] = SourceSelection.none
-            sources[n] = NoneSource()
+            selections[n] = .camera
+            sources[n] = makeSource(.camera)
         }
     }
 
@@ -100,7 +113,9 @@ final class SourceRouter: ObservableObject {
             else { return defaultPatternSource() }
             return s
         case .camera:
-            return sharedCamera ?? defaultPatternSource()   // camera unavailable ⇒ default pattern, never black
+            // Denied/restricted or no camera ⇒ default pattern, never black (C10 denied half).
+            guard !cameraBlocked() else { return defaultPatternSource() }
+            return sharedCamera ?? defaultPatternSource()
         }
     }
 
