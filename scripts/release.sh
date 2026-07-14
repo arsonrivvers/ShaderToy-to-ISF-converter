@@ -52,6 +52,27 @@ ditto "${APP}" "${STAGE}/TrueISFEditor.app"
 ln -s /Applications "${STAGE}/Applications"
 cp "${REPO}/LICENSE" "${STAGE}/LICENSE.txt"
 
+# Friends-distribution path (decision 2026-07-14: no notarization). macOS quarantines any
+# downloaded unsigned app and blocks the first launch — and macOS 15 removed the right-click→Open
+# bypass — so the DMG carries first-launch instructions where a friend will actually see them.
+cat > "${STAGE}/FIRST LAUNCH — READ ME.txt" <<'READIT'
+TrueISFEditor — opening it the first time
+
+This app is shared friend-to-friend and isn't notarized by Apple, so macOS
+blocks the very first launch. Fix it once, either way below — after that it
+opens like any other app.
+
+The easy way:
+  1. Drag TrueISFEditor.app into Applications.
+  2. Open it once — macOS will refuse. That's expected.
+  3. System Settings → Privacy & Security → scroll down → click "Open Anyway".
+  4. Open it again. Done.
+
+The Terminal way (instant):
+  xattr -cr /Applications/TrueISFEditor.app
+Then open the app normally.
+READIT
+
 rm -f "${DMG}"
 hdiutil create -volname "TrueISFEditor ${VERSION}" -srcfolder "${STAGE}" -ov -format UDZO "${DMG}" > /dev/null
 echo "✓ DMG: ${DMG}"
@@ -63,7 +84,8 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
   xcrun stapler staple "${DMG}"
   echo "✓ Notarized + stapled: ${DMG}"
 else
-  echo "▷ NOTARY_PROFILE not set — skipping notarization (Gatekeeper will warn on other Macs)"
+  echo "▷ Not notarized (friends-distribution mode) — the DMG includes FIRST LAUNCH instructions"
+  echo "  (Privacy & Security → Open Anyway, or: xattr -cr /Applications/TrueISFEditor.app)"
 fi
 
 echo "▶ Verify on a clean account: open the DMG, drag to /Applications, launch, import a"

@@ -26,12 +26,17 @@ Output targets VDMX, CoGe, ISF Editor, and other ISF hosts.
 
 ## Install
 
-Download the latest DMG from [Releases](https://github.com/arsonrivvers/ShaderToy-to-ISF-converter/releases),
-drag TrueISFEditor to Applications, and launch. First run opens a bundled sample shader with live
-controls; the `samples/` gallery also appears in the library sidebar.
+Download the latest DMG from [Releases](https://github.com/arsonrivvers/ShaderToy-to-ISF-converter/releases)
+and drag TrueISFEditor to Applications. **The app isn't notarized** (it's shared friend-to-friend),
+so macOS blocks the first launch: open it once, then System Settings → Privacy & Security →
+"Open Anyway" — or run `xattr -cr /Applications/TrueISFEditor.app` in Terminal. The same
+instructions ship inside the DMG. After that it opens normally.
 
-To cut a release build locally: `./scripts/release.sh` (signing/notarization are env-gated — see
-the script header).
+First run opens a bundled sample shader with live controls; the `samples/` gallery also appears in
+the library sidebar.
+
+To cut a release build locally: `./scripts/release.sh` (produces the DMG; signing/notarization stay
+env-gated for whoever wants them — see the script header).
 
 ## Build
 
