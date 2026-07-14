@@ -140,6 +140,12 @@ conversion regression.
   Shadertoy shaders you convert yourself remain under their authors' terms (typically CC BY-NC-SA) —
   the app never bundles third-party Shadertoy content.
 
+## Privacy & Security
+
+Webcam frames are processed locally and never transmitted. ShaderAssist sends shader text only to
+your local `claude` CLI (tools disabled — pure text transform). See [SECURITY.md](SECURITY.md) for
+details and vulnerability reporting.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Bundled third-party components keep their own licenses; see
