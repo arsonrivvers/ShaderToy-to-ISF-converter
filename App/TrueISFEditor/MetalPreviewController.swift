@@ -275,6 +275,13 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         core.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)
     }
 
+    /// M34 override: ISFMSL event values are momentary by design (OffspringEngine precedent) —
+    /// one setValue latches until the next rendered frame consumes it, so a pulse can no longer
+    /// fall between frames the way the JSON true-then-false default could.
+    func pulseEvent(_ name: String) {
+        core.withScene { $0?.setValue(ISFMSLSceneVal.createWithEvent(), forInputNamed: name) }
+    }
+
     /// Pause/resume the live render loop. Pausing stops the display-link ticks entirely (or, in
     /// the no-link fallback, the MTKView's own loop), so this is what actually halts GPU work for
     /// off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.

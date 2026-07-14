@@ -148,9 +148,11 @@ final class RemixStudioModel: ObservableObject {
     private(set) var transcriptDropped = 0
 
     /// Append one provider output line to the merged terminal, tagged by child id and memory-bounded.
+    /// Raw stream-JSON is humanized first (N28) — internals never reach the user surface.
     func appendLog(_ id: String, _ line: String) {
+        guard let display = AssistTranscriptFormatter.display(line) else { return }
         let before = transcript.count
-        transcript.appendBounded("[\(id)] \(line)", max: 2000)
+        transcript.appendBounded("[\(id)] \(display)", max: 2000)
         transcriptDropped += before + 1 - transcript.count
     }
 

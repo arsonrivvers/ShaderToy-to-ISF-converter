@@ -81,16 +81,18 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** yes — additive, small, testable.
 
 ### C9 — CameraSource releases the previous CVMetalTexture while the GPU may still read it
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14:** CameraFrameProvider vends `PinnedFrame` (texture + CVMetalTexture); `CameraSource.texture` pins the backing in `cb.addCompletedHandler` until GPU completion. Test: `testIngestedFrameComesBackPinned` (via new `ingest(pixelBuffer:)` seam).
 - **Where:** `App/TrueISFEditor/CameraSource.swift:51-54` (vs `MetalPreviewController.swift:304-309` binding it in-flight)
 - **Why it matters:** Each new frame overwrites `retained` — the only strong ref to the previous `CVMetalTexture` — while a command buffer may still be reading its `MTLTexture`. Apple requires holding the CVMetalTexture until GPU completion; the cache can recycle the IOSurface mid-read → tearing/corruption.
 - **Recommend:** Small ring of recent CVMetalTextures, or release via `commandBuffer.addCompletedHandler`.
 - **Safe to fix now?** yes — isolated to `CameraFrameProvider`.
 
 ### C10 — Camera permission denied → silent black forever; capture session never stops
-- **Status:** partial (denied half done 2026-07-14; session-stop still open)
+- **Status:** partial (denied fallback + idle session-stop done 2026-07-14; picker "denied" hint still open)
 - **Done:** `SourceRouter.makeSource(.camera)` checks authorization (injectable `cameraBlocked` seam) and falls back to the default test pattern when denied/restricted — never black. `CameraFrameProvider` now starts permission + session LAZILY on first consumed frame (windowless import-gate/Remix controllers no longer light the camera). Became urgent because filters now default to `.camera`.
-- **Still open:** no "camera denied" hint in the source picker UI; session never stops once started (refcount design).
+- **Also done 2026-07-14:** idle session-stop — the capture session stops itself after 5s without a consumer (per-frame heartbeat checks last access; next consumer restarts transparently). Test: `testSessionIdleStopsAfterTimeoutAndRestartsOnAccess`.
+- **Still open:** a "camera denied" hint in the source picker UI (fallback is silent).
 - **Where:** `App/TrueISFEditor/CameraSource.swift:70-73` (init only fails on texture-cache alloc); `SourceRouter.swift:84-85` (fallback never triggers); no `stopRunning()` exists anywhere
 - **Why it matters:** On permission-denied the "camera unavailable ⇒ default pattern, never black" fallback never fires — the input renders black forever, the exact class this app's doctrine forbids. And once `SharedCamera` starts, the camera (and indicator light) stays on for the app's lifetime even after every input switches away — privacy + energy.
 - **Recommend:** Authorization-aware state (fallback to pattern + "camera denied" hint) now; stop-the-session-when-unused via a small refcount design after.
@@ -372,7 +374,8 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** cancel-on-dismiss yes; caching wait.
 
 ### M34 — Event-input pulse can be dropped before a frame renders
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14:** `PreviewEngine.pulseEvent` — Metal overrides with `ISFMSLSceneVal.createWithEvent()` (momentary by engine design, latches until the next rendered frame; OffspringEngine precedent); WebKit keeps the true-then-false default. Controls call `pulseEvent`.
 - **Where:** `App/TrueISFEditor/Views/PreviewControlsView.swift:131-137`
 - **Why it matters:** Sets `"true"` then `"false"` on the next main-queue turn; nothing guarantees a `draw(in:)` between the two — on a paused/slow view the event never fires.
 - **Recommend:** Engine-level auto-clear after one rendered frame (or reset via a draw-count hook).
@@ -438,7 +441,8 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** yes — investigation only until the class is identified.
 
 ### M43 — Imported document keeps the "Untitled.fs" title while the banner names the real shader
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14:** `ISFFile.suggestedName` (normalized to `.fs`); import/example paths pass their name; `displayName` prefers url → suggestedName → "Untitled.fs". Tests in Phase1TailTests.
 - **Where:** `App/TrueISFEditor/EditorViewModel.swift` (`loadImported` path) — title bar shows `Untitled.fs` while the import banner + status bar both say "Imported More -cubes- for the cube lovers.fs" (CS screenshot, 2026-07-11)
 - **Why it matters:** A stranger imports a shader, sees the right name in the banner, then hits Save and gets `Untitled.fs` — provenance lost, and the mismatch reads as a bug. First-session UX on the app's headline flow.
 - **Recommend:** Adopt the imported shader's (sanitized) name as the document display name / default save filename.
@@ -452,7 +456,8 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** fixed.
 
 ### N28 — ShaderAssist Activity pane shows raw stream-JSON (tokens, costUSD, uuid) to end users
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14:** `AssistTranscriptFormatter.display` humanizes stream-JSON (session started · model / assistant text + → tool / done in Xs) and drops token/cost/uuid internals; wired into both ShaderAssist `appendTranscript` and Remix `appendLog`. Formatter unit-tested.
 - **Where:** ShaderAssist Activity disclosure (CS screenshot, 2026-07-11): 28 lines of raw `{"ephemeral_5m_input_tokens":…,"costUSD":0.56663,"uuid":…}` under "Using Claude · opus"
 - **Why it matters:** Dev-facing internals in a user surface — fine for you, noise for a public v1. Copy button on raw JSON suggests it's a debugging affordance that escaped.
 - **Recommend:** Render a human summary line (model, duration, cost) and collapse the raw JSON behind a "Show raw" disclosure (or `#if DEBUG` it).

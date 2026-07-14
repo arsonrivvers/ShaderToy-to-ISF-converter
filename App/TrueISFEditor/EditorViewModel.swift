@@ -148,7 +148,7 @@ final class EditorViewModel: ObservableObject {
     /// Called by the Shadertoy import sheet on a successful conversion.
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
         guard canReplaceDocument() else { return }
-        file = .untitled(source: isf)
+        file = .untitled(source: isf, suggestedName: suggestedName)
         documentGeneration += 1
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
@@ -164,7 +164,7 @@ final class EditorViewModel: ObservableObject {
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
     func loadExample(name: String, source: String) {
         guard canReplaceDocument() else { return }
-        file = .untitled(source: source)
+        file = .untitled(source: source, suggestedName: name)
         documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil

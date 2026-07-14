@@ -6,18 +6,24 @@ struct ISFFile {
     private(set) var url: URL?
     var source: String { didSet { if source != oldValue { isDirty = true } } }
     private(set) var isDirty: Bool
+    /// Name carried by an unsaved document that came from somewhere named (a Shadertoy import) —
+    /// the title bar shows it instead of "Untitled.fs" (M43). Cleared implicitly on save (url wins).
+    private(set) var suggestedName: String?
 
-    /// File name for the title bar / library row; "Untitled.fs" when not yet saved.
-    var displayName: String { url?.lastPathComponent ?? "Untitled.fs" }
+    /// File name for the title bar / library row; "Untitled.fs" when not yet saved and unnamed.
+    var displayName: String { url?.lastPathComponent ?? suggestedName ?? "Untitled.fs" }
     /// True when a plain Save must fall back to Save As (no backing file yet).
     var needsSaveAs: Bool { url == nil }
 
-    private init(url: URL?, source: String, isDirty: Bool) {
+    private init(url: URL?, source: String, isDirty: Bool, suggestedName: String? = nil) {
         self.url = url; self.source = source; self.isDirty = isDirty
+        self.suggestedName = suggestedName
     }
 
-    static func untitled(source: String = "") -> ISFFile {
-        ISFFile(url: nil, source: source, isDirty: false)
+    static func untitled(source: String = "", suggestedName: String? = nil) -> ISFFile {
+        // Normalize to a .fs filename so the title reads like a file and Save As prefills right.
+        let named = suggestedName.map { $0.hasSuffix(".fs") ? $0 : $0 + ".fs" }
+        return ISFFile(url: nil, source: source, isDirty: false, suggestedName: named)
     }
 
     init(contentsOf url: URL) throws {

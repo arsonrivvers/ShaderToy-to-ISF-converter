@@ -167,10 +167,9 @@ struct PreviewControlsView: View {
 
     @ViewBuilder private func eventControl(_ input: ISFPreviewInput) -> some View {
         Button {
-            // ISF `event` inputs are true for a single frame. Pulse: set true now, reset false on the
-            // next runloop tick so the engine renders one frame with the event firing.
-            coordinator.setInput(input.name, "true")
-            DispatchQueue.main.async { coordinator.setInput(input.name, "false") }
+            // ISF `event` inputs are true for a single frame; the engine latches the pulse until
+            // the next rendered frame consumes it (M34).
+            coordinator.pulseEvent(input.name)
         } label: {
             Label(input.name, systemImage: "bolt.fill")
         }

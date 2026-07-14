@@ -247,7 +247,9 @@ final class ShaderAssistViewModel: ObservableObject {
     }
 
     private func appendTranscript(_ line: String) {
-        transcript.appendBounded(line, max: 2000)   // bound memory
+        // N28: the Activity pane is a user surface — humanize stream-JSON, drop the internals.
+        guard let display = AssistTranscriptFormatter.display(line) else { return }
+        transcript.appendBounded(display, max: 2000)   // bound memory
     }
 
     private static func message(for e: AssistRunError, provider: AssistProviderKind) -> String {

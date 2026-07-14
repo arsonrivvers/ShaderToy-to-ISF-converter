@@ -30,6 +30,7 @@ final class PreviewCoordinator: ObservableObject {
 
     func load(isf: String) { currentSource = isf; activeEngine.load(isf: isf) }
     func setInput(_ name: String, _ jsonValue: String) { activeEngine.setInput(name, jsonValue) }
+    func pulseEvent(_ name: String) { activeEngine.pulseEvent(name) }
     func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
         currentRenderSize = (width, height, fitToWindow)
         activeEngine.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)

@@ -26,8 +26,19 @@ protocol PreviewEngine: AnyObject {
 
     /// Live FPS / GPU-ms readout model, if this engine measures one (Metal does; WebKit doesn't).
     var liveRenderStats: RenderStatsModel? { get }
+
+    /// Fire an ISF `event` input for one frame.
+    func pulseEvent(_ name: String)
 }
 
 extension PreviewEngine {
     var liveRenderStats: RenderStatsModel? { nil }
+
+    /// Default (WebKit path): JSON true now, false on the next main-actor turn. With a render loop
+    /// that may not draw between those turns this can drop the pulse (M34) — engines with real
+    /// momentary event values override.
+    func pulseEvent(_ name: String) {
+        setInput(name, "true")
+        Task { @MainActor [weak self] in self?.setInput(name, "false") }
+    }
 }

@@ -73,6 +73,7 @@ targets:
       - TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift
       - TrueISFEditor/ShaderAssist/CodexRunner.swift
       - TrueISFEditor/ShaderAssist/SkillPreamble.swift
+      - TrueISFEditor/ShaderAssist/AssistTranscriptFormatter.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
       - TrueISFEditor/Remix/RemixNode.swift
       - TrueISFEditor/Remix/RemixDirectives.swift
