@@ -57,6 +57,7 @@ struct EditorScreen: View {
                         Text(vm.file.displayName).font(.headline)
                         if vm.file.isDirty { Text("•").foregroundStyle(.secondary) }
                         Spacer()
+                        RenderStatsSlot(coordinator: vm.preview)
                         Button {
                             output.show(source: vm.file.source)
                             applyResolution()
@@ -70,11 +71,14 @@ struct EditorScreen: View {
                     renderControlsBar
                         .padding(.horizontal, 6)
                         .padding(.bottom, 4)
-                    ISFPreviewView(coordinator: vm.preview)
-                        .frame(minHeight: 220)
-                    Divider()
-                    HeaderPanelView(coordinator: vm.preview, model: vm.headerModel)
-                        .frame(height: 210)
+                    // Preview over controls with a user-draggable divider — the controls panel
+                    // gets real vertical space (a fixed 210pt strip hid all but ~4 sliders).
+                    VSplitView {
+                        ISFPreviewView(coordinator: vm.preview)
+                            .frame(minHeight: 200, maxHeight: .infinity)
+                        HeaderPanelView(coordinator: vm.preview, model: vm.headerModel)
+                            .frame(minHeight: 180, maxHeight: .infinity)
+                    }
                 }
                 .frame(minWidth: 320)
             }

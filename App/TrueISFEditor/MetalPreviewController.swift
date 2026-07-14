@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Metal
 import MetalKit
+import QuartzCore
 import ISFMSLKit
 import VVMetalKit
 
@@ -11,6 +12,14 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     @Published private(set) var compileError: String?
     @Published private(set) var compileErrorLine: Int?
     @Published private(set) var inputs: [ISFPreviewInput] = []
+
+    /// Live FPS / GPU-ms readout (Task 1.6). Snapshots publish ~2×/sec from `draw(in:)`.
+    /// Stored as concrete + witnessed as optional: the protocol wants `RenderStatsModel?`, and a
+    /// same-name non-optional stored property would NOT witness it — protocol dispatch would fall
+    /// through to the extension default (nil) and the readout would silently never appear.
+    private let statsModel = RenderStatsModel()
+    var liveRenderStats: RenderStatsModel? { statsModel }
+    private var statsAccumulator = RenderStatsAccumulator()
 
     private let mtkView = MTKView()
     var nsView: NSView { mtkView }
@@ -269,6 +278,17 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     /// work for off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.
     func setPaused(_ paused: Bool) {
         mtkView.isPaused = paused
+        if paused {
+            // A paused loop stops producing frames; a stale readout would report the old rate.
+            statsAccumulator.reset()
+            statsModel.stats = nil
+        }
+    }
+
+    /// Record one completed command buffer's GPU duration. Called from the completed handler
+    /// (arbitrary thread) via a main-actor hop.
+    private func recordGPUTime(seconds: Double) {
+        statsAccumulator.addGPUTime(seconds: seconds)
     }
 
     /// Force one on-screen frame through the normal `draw(in:)` path. Used to show a single frozen
@@ -348,6 +368,12 @@ extension MetalPreviewController: MTKViewDelegate {
 
         // Compile-failure path: clear the drawable to opaque black and present.
         guard let scene = scene else {
+            // Black clear frames aren't shader frames — don't report an FPS for them. (Guarded:
+            // this path runs at display rate, and republishing nil every frame churns SwiftUI.)
+            if statsModel.stats != nil {
+                statsAccumulator.reset()
+                statsModel.stats = nil
+            }
             guard let rpd = view.currentRenderPassDescriptor,
                   let cb = renderQueue.makeCommandBuffer() else { return }
             rpd.colorAttachments[0].loadAction = .clear
@@ -410,6 +436,15 @@ extension MetalPreviewController: MTKViewDelegate {
             enc.endEncoding()
         }
         cb.present(drawable)
+        // GPU frame time (Task 1.6): the handler runs on a Metal completion thread, so hop to the
+        // main actor before touching the accumulator. Must be attached before commit.
+        cb.addCompletedHandler { [weak self] buf in
+            let seconds = buf.gpuEndTime - buf.gpuStartTime
+            Task { @MainActor in self?.recordGPUTime(seconds: seconds) }
+        }
         cb.commit()
+        if let snapshot = statsAccumulator.frame(at: CACurrentMediaTime()) {
+            statsModel.stats = snapshot
+        }
     }
 }

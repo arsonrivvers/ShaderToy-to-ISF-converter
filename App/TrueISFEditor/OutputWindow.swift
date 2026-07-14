@@ -57,5 +57,13 @@ private struct OutputWindowView: View {
     var body: some View {
         ISFPreviewView(coordinator: coordinator)
             .frame(minWidth: 320, minHeight: 240)
+            .overlay(alignment: .topTrailing) {
+                // No toolbar here, so the FPS readout rides as a capsule over the pixels.
+                RenderStatsSlot(coordinator: coordinator)
+                    .environment(\.colorScheme, .dark)   // capsule is black → keep .secondary legible in light mode
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(.black.opacity(0.55), in: Capsule())
+                    .padding(6)
+            }
     }
 }

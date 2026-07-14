@@ -53,6 +53,7 @@ targets:
       - TrueISFEditor/Models/LibraryModel.swift
       - TrueISFEditor/PreviewEngine.swift
       - TrueISFEditor/PreviewCoordinator.swift
+      - TrueISFEditor/RenderStats.swift
       - TrueISFEditor/ISFPreviewInput.swift
       - TrueISFEditor/CrashEvent.swift
       - TrueISFEditor/BoundedArray.swift

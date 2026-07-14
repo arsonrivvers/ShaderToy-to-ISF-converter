@@ -52,6 +52,7 @@ Gate: app tests + on-device observation (camera denied → test pattern; close p
 Gate: app tests green; manual spot-checks per item.
 
 **Task 1.6 — Live FPS / render-time readout (Conner, requested 2026-07-11).** Every live view surfaces frame rate + GPU render time: the editor's ISF preview panel first, then Remix Studio (at minimum the live/promoted child card) and the pop-out output window. Sketch: draw-cadence FPS measured in `MetalPreviewController.draw(in:)` + GPU ms via `commandBuffer.addCompletedHandler` (pairs naturally with C9's completed-handler work in Task 1.4 — build together); small toggleable overlay/status readout. Gate: on-device observation on a heavy shader.
+- **STAGED 2026-07-14 (unverified on-device):** editor preview readout (header row, "60 FPS · 1.3 ms GPU") + pop-out output window (capsule overlay) shipped — `RenderStats.swift` accumulator (windowed, ~2 Hz publish; 7 unit tests) fed from `MetalPreviewController.draw(in:)` + `addCompletedHandler`. Metal renderer only (WebKit shows nothing). Remix Studio card readout deferred. Same session: controls panel rebuilt crossfade-style (label + live value + compact slider, LazyVStack) and the fixed 210pt strip replaced with a draggable VSplitView. Gate open: observe FPS on a heavy shader + slider-drag smoothness on a high-input shader.
 
 **Exit criteria (Phase 1):** all listed items `done` in DESLOPPIFY.md; kit + app suites green; corpus non-regressed; render-path items CONFIRMED on-device.
 

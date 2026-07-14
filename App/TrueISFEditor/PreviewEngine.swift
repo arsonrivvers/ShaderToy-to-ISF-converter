@@ -23,4 +23,11 @@ protocol PreviewEngine: AnyObject {
 
     /// Publisher the coordinator subscribes to so it can re-publish this engine's compile state.
     var compileStateWillChange: ObservableObjectPublisher { get }
+
+    /// Live FPS / GPU-ms readout model, if this engine measures one (Metal does; WebKit doesn't).
+    var liveRenderStats: RenderStatsModel? { get }
+}
+
+extension PreviewEngine {
+    var liveRenderStats: RenderStatsModel? { nil }
 }

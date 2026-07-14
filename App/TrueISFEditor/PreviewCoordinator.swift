@@ -25,6 +25,8 @@ final class PreviewCoordinator: ObservableObject {
     var activeEngine: PreviewEngine { active == .metal ? metal : webkit }
     var nsView: NSView { activeEngine.nsView }
     var imageSources: SourceRouter { activeEngine.imageSources }
+    /// Live FPS/GPU-ms model of the active engine (nil when the engine doesn't measure — WebKit).
+    var renderStats: RenderStatsModel? { activeEngine.liveRenderStats }
 
     func load(isf: String) { currentSource = isf; activeEngine.load(isf: isf) }
     func setInput(_ name: String, _ jsonValue: String) { activeEngine.setInput(name, jsonValue) }

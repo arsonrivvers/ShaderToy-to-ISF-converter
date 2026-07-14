@@ -1,6 +1,11 @@
 import SwiftUI
 import AppKit
 
+/// Live ISF input controls, styled after the OffspringEngine parent panels: every row is
+/// label-left / monospaced-value-right with a compact full-width control below, in a LazyVStack —
+/// lazy is load-bearing, not cosmetic: a plain VStack lays out ALL rows on every main-thread layout
+/// pass, and with high-input shaders (80+) that starves the (also main-thread) MTKView render loop
+/// and visibly stutters the preview during slider drags.
 struct PreviewControlsView: View {
     @ObservedObject var coordinator: PreviewCoordinator
     @State private var floats: [String: Double] = [:]
@@ -11,7 +16,7 @@ struct PreviewControlsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: 10) {
                 if coordinator.inputs.isEmpty {
                     Text("No adjustable inputs").font(.caption).foregroundStyle(.secondary)
                 }
@@ -28,20 +33,37 @@ struct PreviewControlsView: View {
                         Text("\(input.name) (\(input.type))").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-            }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    /// Label-left / live-value-right header row shared by the slider controls.
+    private func labelRow(_ name: String, value: String) -> some View {
+        HStack {
+            Text(name).font(.caption).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Text(value)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func format(_ v: Double) -> String { String(format: "%.3g", v) }
 
     // MARK: float / bool
 
     @ViewBuilder private func floatControl(_ input: ISFPreviewInput) -> some View {
         let lo = (input.min as? Double) ?? 0, hi = (input.max as? Double) ?? 1
+        let current = floats[input.name] ?? (input.defaultValue as? Double) ?? lo
         let binding = Binding<Double>(
             get: { floats[input.name] ?? (input.defaultValue as? Double) ?? lo },
             set: { floats[input.name] = $0; coordinator.setInput(input.name, "\($0)") })
         VStack(alignment: .leading, spacing: 2) {
-            Text(input.name).font(.caption)
-            Slider(value: binding, in: lo...hi)
+            labelRow(input.name, value: format(current))
+            Slider(value: binding, in: lo...max(hi, lo + 0.0001))
+                .controlSize(.small)
         }
     }
 
@@ -49,7 +71,10 @@ struct PreviewControlsView: View {
         let binding = Binding<Bool>(
             get: { bools[input.name] ?? (input.defaultValue as? Bool ?? false) },
             set: { bools[input.name] = $0; coordinator.setInput(input.name, $0 ? "true" : "false") })
-        Toggle(input.name, isOn: binding).font(.caption)
+        Toggle(isOn: binding) {
+            Text(input.name).font(.caption).lineLimit(1)
+        }
+        .toggleStyle(.switch).controlSize(.mini)
     }
 
     // MARK: point2D
@@ -58,8 +83,9 @@ struct PreviewControlsView: View {
         let lo = doubles(input.min, fallback: [0, 0])
         let hi = doubles(input.max, fallback: [1, 1])
         let def = doubles(input.defaultValue, fallback: [lo[0], lo[1]])
+        let current = points[input.name] ?? def
         VStack(alignment: .leading, spacing: 2) {
-            Text("\(input.name) (point2D)").font(.caption)
+            labelRow(input.name, value: "(\(format(current[0])), \(format(current[1])))")
             ForEach(0..<2, id: \.self) { axis in
                 let binding = Binding<Double>(
                     get: { (points[input.name] ?? def)[axis] },
@@ -70,8 +96,10 @@ struct PreviewControlsView: View {
                         coordinator.setInput(input.name, "[\(p[0]), \(p[1])]")
                     })
                 HStack(spacing: 4) {
-                    Text(axis == 0 ? "x" : "y").font(.caption2).foregroundStyle(.secondary)
+                    Text(axis == 0 ? "x" : "y")
+                        .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                     Slider(value: binding, in: lo[axis]...max(hi[axis], lo[axis] + 0.0001))
+                        .controlSize(.mini)
                 }
             }
         }
@@ -91,7 +119,10 @@ struct PreviewControlsView: View {
                 colors[input.name] = rgba
                 coordinator.setInput(input.name, "[\(rgba[0]), \(rgba[1]), \(rgba[2]), \(rgba[3])]")
             })
-        ColorPicker(input.name, selection: binding, supportsOpacity: true).font(.caption)
+        ColorPicker(selection: binding, supportsOpacity: true) {
+            Text(input.name).font(.caption).lineLimit(1)
+        }
+        .controlSize(.small)
     }
 
     // MARK: long (integer / enum)
@@ -106,22 +137,28 @@ struct PreviewControlsView: View {
                 get: { longs[input.name] ?? def },
                 set: { longs[input.name] = $0; coordinator.setInput(input.name, "\(Int($0))") })
             VStack(alignment: .leading, spacing: 2) {
-                Text(input.name).font(.caption)
+                Text(input.name).font(.caption).lineLimit(1)
                 Picker("", selection: binding) {
                     ForEach(Array(zip(labels, values)), id: \.1) { label, value in
                         Text(label).tag(value)
                     }
-                }.labelsHidden().pickerStyle(.menu)
+                }.labelsHidden().pickerStyle(.menu).controlSize(.small)
             }
         } else {
-            // Plain integer: a stepper over [min, max].
-            let lo = Int((input.min as? Double) ?? 0)
-            let hi = Int((input.max as? Double) ?? 10)
-            let binding = Binding<Int>(
-                get: { Int(longs[input.name] ?? def) },
-                set: { longs[input.name] = Double($0); coordinator.setInput(input.name, "\($0)") })
-            Stepper(value: binding, in: lo...max(hi, lo)) {
-                Text("\(input.name): \(Int(current))").font(.caption)
+            // Plain integer: a stepped slider over [min, max] with a live value readout.
+            let lo = (input.min as? Double) ?? 0
+            let hi = max((input.max as? Double) ?? 10, lo + 1)
+            let binding = Binding<Double>(
+                get: { longs[input.name] ?? def },
+                set: { v in
+                    let snapped = v.rounded()
+                    longs[input.name] = snapped
+                    coordinator.setInput(input.name, "\(Int(snapped))")
+                })
+            VStack(alignment: .leading, spacing: 2) {
+                labelRow(input.name, value: "\(Int(current))")
+                Slider(value: binding, in: lo...hi, step: 1)
+                    .controlSize(.small)
             }
         }
     }
