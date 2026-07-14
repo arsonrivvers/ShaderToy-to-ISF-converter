@@ -308,7 +308,8 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Safe to fix now?** yes.
 
 ### M26 — Deactivated Metal engine and closed output window keep rendering forever
-- **Status:** todo
+- **Status:** done
+- **Resolved 2026-07-14 (by Task 1.7, structurally):** the display link now runs only while the MTKView sits in a window and isn't user-paused (`HostAwareMTKView.viewDidMoveToWindow` → `updateDriverRunning`). Switching to WebKit removes the Metal view from the hierarchy → link pauses; closing the pop-out window → link pauses; re-hosting resumes. No `switchEngine`/`willClose` special-casing needed. CONFIRMED on-device with Task 1.7.
 - **Where:** `App/TrueISFEditor/PreviewCoordinator.swift:56-62` (`switchEngine` never pauses Metal); `OutputWindow.swift` (no `willClose` handling; `isReleasedWhenClosed = false`)
 - **Why it matters:** `setPaused`/`drawOneFrame` are only called by `RemixThumbnailView` — switching to WebKit or closing the pop-out leaves an MTKView (internal timer; doesn't reliably stop when detached) driving `draw(in:)` with a loaded scene indefinitely. Invisible GPU/battery burn.
 - **Recommend:** Pause the deactivated engine in `switchEngine`; observe `NSWindow.willCloseNotification` in `OutputWindowManager` to pause/unload. **Bundle with M8's still-pending on-device verification** (same `setPaused` API).
