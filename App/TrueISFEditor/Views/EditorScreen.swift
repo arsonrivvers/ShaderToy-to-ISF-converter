@@ -99,6 +99,7 @@ struct EditorScreen: View {
         .onAppear {
             if library.sources.isEmpty { library.loadStandardLibraries() }
             applyResolution()
+            openSampleOnFirstRun()
         }
         .onChange(of: vm.file.source) { src in output.update(source: src) }
         .onChange(of: vm.fitToWindow) { _ in applyResolution() }
@@ -272,6 +273,18 @@ struct EditorScreen: View {
     private func applyResolution() {
         vm.preview.setRenderSize(width: vm.renderWidth, height: vm.renderHeight, fitToWindow: vm.fitToWindow)
         output.setRenderSize(width: vm.renderWidth, height: vm.renderHeight, fitToWindow: vm.fitToWindow)
+    }
+
+    /// First launch opens a bundled sample instead of a blank template — the first thing a new
+    /// user sees is a moving shader with live controls, not an empty editor (Task 2.5).
+    @AppStorage("hasOpenedFirstRunSample") private var hasOpenedFirstRunSample = false
+    private func openSampleOnFirstRun() {
+        guard !hasOpenedFirstRunSample else { return }
+        hasOpenedFirstRunSample = true
+        guard !vm.file.isDirty,
+              let dir = LibraryModel.bundledSamplesDir,
+              let entry = LibraryModel.scan(folder: dir).first else { return }
+        vm.open(entry)
     }
 
     private func addFolder() {

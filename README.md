@@ -8,18 +8,30 @@ The app is built for authoring, importing, testing, and remixing `.fs` shaders:
 
 - Shadertoy to ISF conversion, including Image, Common, Buffer A-D, audio channels, cubemaps as
   equirect inputs, and persistent float buffers.
-- Metal and WebKit preview engines with compiler diagnostics surfaced in the editor.
-- ISF library sidebar, save/open flow, output pop-out window, render-size controls, and image-source
-  routing for filter inputs.
+- Metal and WebKit preview engines with compiler diagnostics surfaced in the editor. The Metal
+  render loop runs off the main thread (CVDisplayLink), so dragging sliders never stutters the
+  preview, with a live FPS / GPU-frame-time readout on the preview and pop-out output window.
+- ISF library sidebar (with a bundled sample gallery), save/open flow, output pop-out window,
+  render-size controls (16:9 / 1920x1080 default), and image-source routing for filter inputs —
+  filters auto-load the webcam (falling back to a test pattern when camera access is unavailable).
 - Auto-generated live controls for common ISF inputs (`float`, `bool`, `long`, `point2D`, `color`,
-  `event`; image inputs are routed from the preview toolbar).
+  `event`; image inputs are routed from the preview toolbar), each with a live value readout.
 - Header authoring for Inputs and Passes, including persistent/float feedback buffers.
-- ShaderAssist, which runs local Claude or Codex CLI sessions with ISF-specific prompts for diagnose,
-  fix, and suggestion workflows.
-- Remix Studio for parent selection, Claude/Codex generation, compiled child previews, favorites, and
+- ShaderAssist, which runs local Claude CLI sessions with ISF-specific prompts for diagnose,
+  fix, and suggestion workflows (no API key — it uses your existing subscription).
+- Remix Studio for parent selection, AI generation, compiled child previews, favorites, and
   lineage tracking.
 
 Output targets VDMX, CoGe, ISF Editor, and other ISF hosts.
+
+## Install
+
+Download the latest DMG from [Releases](https://github.com/arsonrivvers/ShaderToy-to-ISF-converter/releases),
+drag TrueISFEditor to Applications, and launch. First run opens a bundled sample shader with live
+controls; the `samples/` gallery also appears in the library sidebar.
+
+To cut a release build locally: `./scripts/release.sh` (signing/notarization are env-gated — see
+the script header).
 
 ## Build
 
@@ -121,5 +133,14 @@ conversion regression.
 - The generated `App/TrueISFEditor.xcodeproj/` is ignored. Regenerate it with XcodeGen after source
   changes.
 - `ShadertoyISFKit/.build/`, DerivedData, vendored `node_modules`, and app build products are ignored.
-- ShaderAssist and Remix Studio use the user's local Claude/Codex CLI authentication; no API key is
-  stored by this repo for those workflows.
+- ShaderAssist and Remix Studio use the user's local Claude CLI authentication; no API key is
+  stored by this repo for those workflows. (Debug builds additionally expose a Codex provider for
+  development.)
+- Sample shaders in `samples/` are original work by ArsonRivvers, shipped under the repo license.
+  Shadertoy shaders you convert yourself remain under their authors' terms (typically CC BY-NC-SA) —
+  the app never bundles third-party Shadertoy content.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Bundled third-party components keep their own licenses; see
+[THIRD_PARTY_LICENSES/](THIRD_PARTY_LICENSES/) and the in-app Acknowledgements (Settings).

@@ -14,6 +14,10 @@ targets:
       - path: TrueISFEditor
       - path: TrueISFEditor/Resources
         buildPhase: resources
+      # Bundled sample gallery (repo /samples, folder reference → Resources/samples/*.fs).
+      - path: ../samples
+        buildPhase: resources
+        type: folder
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
@@ -74,6 +78,7 @@ targets:
       - TrueISFEditor/ShaderAssist/CodexRunner.swift
       - TrueISFEditor/ShaderAssist/SkillPreamble.swift
       - TrueISFEditor/ShaderAssist/AssistTranscriptFormatter.swift
+      - TrueISFEditor/Acknowledgements.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
       - TrueISFEditor/Remix/RemixNode.swift
       - TrueISFEditor/Remix/RemixDirectives.swift

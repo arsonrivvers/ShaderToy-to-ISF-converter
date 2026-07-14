@@ -27,6 +27,9 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
     private let queue = DispatchQueue(label: "trueisf.camera")
     private var cache: CVMetalTextureCache?
     private let now: () -> CFTimeInterval   // injectable clock for idle-stop tests
+    /// Injectable permission seam: production asks AVFoundation; tests inject a no-op so a unit
+    /// test can never start the real camera (real frames raced the injected clock and flaked).
+    private let requestAccess: (@escaping @Sendable (Bool) -> Void) -> Void
     private let lock = NSLock()
     // ── lock-guarded state ──
     private var latest: PinnedFrame?
@@ -34,8 +37,13 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
     private var sessionStopped = false      // idle-stopped; next consumer restarts
     private var lastAccess: CFTimeInterval = 0
 
-    init?(device: MTLDevice, now: @escaping () -> CFTimeInterval = { CACurrentMediaTime() }) {
+    init?(device: MTLDevice,
+          now: @escaping () -> CFTimeInterval = { CACurrentMediaTime() },
+          requestAccess: ((@escaping @Sendable (Bool) -> Void) -> Void)? = nil) {
         self.now = now
+        self.requestAccess = requestAccess ?? { completion in
+            AVCaptureDevice.requestAccess(for: .video, completionHandler: completion)
+        }
         super.init()
         var c: CVMetalTextureCache?
         guard CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &c) == kCVReturnSuccess,
@@ -105,7 +113,7 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
         let frame = latest
         lock.unlock()
         if needsStart {
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+            requestAccess { [weak self] granted in
                 guard granted, let self else { return }
                 self.queue.async { self.start() }
             }

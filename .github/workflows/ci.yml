@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Corpus conformance (scripts/corpus-run.sh) stays a local tool: it fetches live Shadertoy content
+# (ToS + Cloudflare) and its fixtures are deliberately not checked in. CI covers the deterministic
+# surface: the conversion kit's unit suite and the full app test suite.
+jobs:
+  kit-tests:
+    name: ShadertoyISFKit tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Run kit tests
+        working-directory: ShadertoyISFKit
+        run: swift test
+
+  app-tests:
+    name: App build + tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: App
+        run: xcodegen generate
+      - name: Build and test
+        working-directory: App
+        # GitHub's Apple-silicon runners have a real Metal device; tests that still can't get one
+        # guard with XCTSkip. CI=1 lets environment-sensitive tests detect the runner.
+        run: |
+          xcodebuild -project TrueISFEditor.xcodeproj -scheme TrueISFEditor \
+            -destination 'platform=macOS,arch=arm64' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tail -200
+        env:
+          CI: "1"
+
+  release-build:
+    name: Release configuration builds
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: App
+        run: xcodegen generate
+      - name: Build Release
+        working-directory: App
+        run: |
+          xcodebuild -project TrueISFEditor.xcodeproj -scheme TrueISFEditor \
+            -configuration Release -destination 'generic/platform=macOS' \
+            ARCHS=arm64 build | tail -50

@@ -53,8 +53,17 @@ final class LibraryModel: ObservableObject {
     }
 
     /// First-launch: auto-load the standard ISF directories (no prompt) plus any user-added folders.
+    /// The app-bundled sample gallery (repo `/samples`, shipped as a folder reference). Nil in
+    /// contexts without the resource (unit tests against the bare module).
+    static var bundledSamplesDir: URL? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("samples"),
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     func loadStandardLibraries() {
         let fm = FileManager.default
+        if let samples = Self.bundledSamplesDir { addFolder(samples, title: "Samples") }
         if fm.fileExists(atPath: Self.userISFDir.path) { addFolder(Self.userISFDir, title: "User") }
         if fm.fileExists(atPath: Self.systemISFDir.path) { addFolder(Self.systemISFDir, title: "System") }
         for path in (UserDefaults.standard.array(forKey: defaultsKey) as? [String] ?? []) {
@@ -64,7 +73,11 @@ final class LibraryModel: ObservableObject {
     }
 
     private func persist() {
-        let standardPaths = [Self.userISFDir.path, Self.systemISFDir.path]
+        // Bundled samples must never persist as a user-added folder — the bundle path changes
+        // per install location and would accumulate stale entries.
+        let optionalPaths: [String?] = [Self.userISFDir.path, Self.systemISFDir.path,
+                                        Self.bundledSamplesDir?.path]
+        let standardPaths = optionalPaths.compactMap { $0 }
         let added = sources.map(\.url.path).filter { !standardPaths.contains($0) }
         UserDefaults.standard.set(added, forKey: defaultsKey)
     }

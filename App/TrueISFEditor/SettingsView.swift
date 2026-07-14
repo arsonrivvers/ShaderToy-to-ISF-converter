@@ -20,13 +20,17 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("ShaderAssist (AI)").font(.headline)
-                Picker("Provider", selection: $draftProvider) {
-                    Text("Claude (subscription)").tag("claude")
-                    Text("OpenAI · Codex (subscription)").tag("codex")
+                // Claude-only v1: the Codex option ships only in debug builds (see
+                // AssistProviderFactory.codexAvailable — release clamps a stale pref to claude).
+                if AssistProviderFactory.codexAvailable {
+                    Picker("Provider", selection: $draftProvider) {
+                        Text("Claude (subscription)").tag("claude")
+                        Text("OpenAI · Codex (subscription)").tag("codex")
+                    }
+                    .pickerStyle(.radioGroup)
                 }
-                .pickerStyle(.radioGroup)
 
-                if draftProvider == "claude" {
+                if draftProvider == "claude" || !AssistProviderFactory.codexAvailable {
                     Picker("Claude model", selection: $draftClaudeModel) {
                         ForEach(claudeModels, id: \.self) { Text($0.capitalized).tag($0) }
                     }
@@ -43,7 +47,9 @@ struct SettingsView: View {
                               cli: "codex", hint: "Run `codex login` in Terminal to sign in with ChatGPT.")
                     TextField("/path/to/codex (blank = auto-detect)", text: $draftCodexPath)
                 }
-                Text("Both providers run on your existing subscription via their CLI — no API key, no per-call cost. The ISF authoring skills are loaded into each session.")
+                Text(AssistProviderFactory.codexAvailable
+                     ? "Both providers run on your existing subscription via their CLI — no API key, no per-call cost. The ISF authoring skills are loaded into each session."
+                     : "Runs on your existing Claude subscription via the `claude` CLI — no API key, no per-call cost. The ISF authoring skills are loaded into each session.")
                     .font(.caption2).foregroundStyle(.secondary)
 
                 Divider()
@@ -54,6 +60,22 @@ struct SettingsView: View {
                 if let err = store.keySaveError {
                     Text(err).font(.caption).foregroundStyle(.red)
                 }
+
+                Divider()
+
+                // Attribution for bundled components (BSD/Apache require reproducing the license
+                // text in binary distributions). Content ships as a resource; see also the repo's
+                // THIRD_PARTY_LICENSES directory.
+                DisclosureGroup("Acknowledgements") {
+                    ScrollView {
+                        Text(Acknowledgements.text)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 180)
+                }
+                .font(.caption)
 
                 HStack {
                     Spacer()

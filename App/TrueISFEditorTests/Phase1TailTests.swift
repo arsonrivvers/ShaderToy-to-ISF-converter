@@ -19,7 +19,8 @@ final class Phase1TailTests: XCTestCase {
 
     func testIngestedFrameComesBackPinned() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("No Metal device") }
-        let provider = try XCTUnwrap(CameraFrameProvider(device: device))
+        // No-op access seam: the unit test must never start the real camera.
+        let provider = try XCTUnwrap(CameraFrameProvider(device: device, requestAccess: { _ in }))
         XCTAssertNil(provider.currentFrame(), "no frames ingested yet")
         provider.ingest(pixelBuffer: try makePixelBuffer())
         let frame = try XCTUnwrap(provider.currentFrame())
@@ -31,7 +32,10 @@ final class Phase1TailTests: XCTestCase {
     func testSessionIdleStopsAfterTimeoutAndRestartsOnAccess() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("No Metal device") }
         var clock: CFTimeInterval = 100
-        let provider = try XCTUnwrap(CameraFrameProvider(device: device, now: { clock }))
+        // No-op access seam: a granted permission here would start the REAL camera, whose frames
+        // race the injected clock (observed flake: a live frame re-tripped the idle stop).
+        let provider = try XCTUnwrap(CameraFrameProvider(device: device, now: { clock },
+                                                         requestAccess: { _ in }))
         _ = provider.currentFrame()                       // consumer touch at t=100
         provider.ingest(pixelBuffer: try makePixelBuffer())
         XCTAssertFalse(provider.isIdleStoppedForTesting, "recent access → keeps running")
