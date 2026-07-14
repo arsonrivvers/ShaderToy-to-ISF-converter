@@ -7,8 +7,10 @@ import ShadertoyISFKit
 /// An ImageSource backed by a second ISFMSLScene loaded from ISF source text. Powers both test
 /// patterns and library-shader chaining. Validated by rendering one probe frame on init; if that
 /// fails, init returns nil so the router can fall back. Renders into the caller's command buffer.
-@MainActor
-final class ISFSceneSource: ImageSource {
+///
+/// Threading: init runs on the main thread; after init, `texture(size:in:)` — and thus `lastGood`
+/// — is touched only by the single render-thread consumer (see ImageSource), so no lock is needed.
+final class ISFSceneSource: ImageSource, @unchecked Sendable {
     let displayName: String
     private let scene: ISFMSLScene
     private let tempURL: URL

@@ -25,7 +25,25 @@ final class SourceRouter: ObservableObject {
     /// Image-input names on the current shader, in declaration order (drives the UI).
     @Published private(set) var imageInputNames: [String] = []
     @Published private(set) var selections: [String: SourceSelection] = [:]
-    private var sources: [String: ImageSource] = [:]
+    private var sources: [String: ImageSource] = [:] {
+        didSet {
+            routesLock.lock()
+            renderRoutes = sources
+            routesLock.unlock()
+        }
+    }
+
+    /// Lock-protected mirror of `sources` for the render thread. Kept in sync by `sources.didSet`
+    /// (all writes are main-thread; the mirror exists so reads don't touch main-actor state).
+    private let routesLock = NSLock()
+    nonisolated(unsafe) private var renderRoutes: [String: ImageSource] = [:]
+
+    /// Render-thread accessor: the live source for an input, or nil if unrouted. Called per frame
+    /// by MetalRenderCore on the display-link thread.
+    nonisolated func renderSource(for name: String) -> ImageSource? {
+        routesLock.lock(); defer { routesLock.unlock() }
+        return renderRoutes[name]
+    }
 
     /// `camera` lets a single shared capture session be injected so inline + pop-out share one
     /// AVCaptureSession (and tests can inject a fake). Defaults to a per-router camera.

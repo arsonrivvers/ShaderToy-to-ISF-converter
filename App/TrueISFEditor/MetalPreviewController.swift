@@ -13,15 +13,14 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     @Published private(set) var compileErrorLine: Int?
     @Published private(set) var inputs: [ISFPreviewInput] = []
 
-    /// Live FPS / GPU-ms readout (Task 1.6). Snapshots publish ~2×/sec from `draw(in:)`.
+    /// Live FPS / GPU-ms readout (Task 1.6). Snapshots publish ~2×/sec from the render core.
     /// Stored as concrete + witnessed as optional: the protocol wants `RenderStatsModel?`, and a
     /// same-name non-optional stored property would NOT witness it — protocol dispatch would fall
     /// through to the extension default (nil) and the readout would silently never appear.
     private let statsModel = RenderStatsModel()
     var liveRenderStats: RenderStatsModel? { statsModel }
-    private var statsAccumulator = RenderStatsAccumulator()
 
-    private let mtkView = MTKView()
+    private let mtkView = HostAwareMTKView()
     var nsView: NSView { mtkView }
     var compileStateWillChange: ObservableObjectPublisher { objectWillChange }
 
@@ -29,24 +28,23 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
 
     private let device: MTLDevice
     private let renderQueue: MTLCommandQueue
-    private var scene: ISFMSLScene?
-    // Target resolution (also the aspect to preserve) + fit mode. See setRenderSize.
-    private var renderWidth = 640
-    private var renderHeight = 480
-    private var fitToWindow = true
+    /// Owns the scene + everything `draw(in:)` touches; the MTKView's delegate. All scene access
+    /// (frames on the display-link thread, edits/gates on main) serializes through its lock.
+    private let core: MetalRenderCore
+    /// Drives `mtkView.draw()` off the main thread (the OffspringEngine pattern) so SwiftUI/AppKit
+    /// layout during slider drags can't starve the render loop. Nil ⇒ CVDisplayLink creation
+    /// failed and the view self-drives on main (functional fallback, with the known drag-lag).
+    private var displayDriver: DisplayLinkDriver?
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
     private var lastLoadedSource: String?
-    /// Passthrough pipeline that displays the engine's output texture (any pixel format) by sampling
-    /// it into the drawable. Built lazily on first frame.
-    private var blitPipeline: MTLRenderPipelineState?
-    private var blitPipelineFormat: MTLPixelFormat = .invalid
 
     override init() {
         let props = RenderProperties.global()
         self.device = props.device
         self.renderQueue = props.renderQueue
         self.imageSources = SourceRouter(device: props.device, queue: props.renderQueue)
+        self.core = MetalRenderCore(device: props.device, renderQueue: props.renderQueue)
         // Global singletons ISFMSLKit needs BEFORE any scene work:
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: props.device) }
         if ISFMSLCache.primary == nil {
@@ -58,14 +56,57 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         self.tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("trueisf-live-\(UUID().uuidString).fs")
         super.init()
+        core.imageRouter = imageSources
+        core.callbacks = MetalRenderCore.Callbacks(
+            renderError: { [weak self] message in
+                Task { @MainActor in self?.handleRenderError(message) }
+            },
+            statsUpdate: { [weak self] snapshot in
+                Task { @MainActor in self?.statsModel.stats = snapshot }
+            })
         mtkView.device = props.device
-        mtkView.isPaused = false
         mtkView.enableSetNeedsDisplay = false
         mtkView.framebufferOnly = false
-        mtkView.delegate = self
+        mtkView.delegate = core
+        // Off-main render loop: the view never self-drives; the display link calls mtkView.draw()
+        // on its own thread. If link creation fails, fall back to the classic main-thread loop.
+        displayDriver = DisplayLinkDriver(view: mtkView)
+        mtkView.isPaused = (displayDriver != nil)
+        // The link runs ONLY while the view sits in a window (and isn't user-paused). Starting it
+        // at init let the link thread call view.draw() on an unhosted view during app launch —
+        // off-main AppKit layer setup that intermittently deadlocked startup (caught as the test
+        // host hanging "before establishing connection"). Windowless controllers (import pixel
+        // gate, tests) now never tick at all.
+        mtkView.onWindowChange = { [weak self] _ in self?.updateDriverRunning() }
     }
 
-    deinit { try? FileManager.default.removeItem(at: tempURL) }
+    /// Single decision point for whether the render loop runs: in a window AND not user-paused.
+    /// Called on window membership changes and setPaused. Fallback (no link): the MTKView
+    /// self-drives on main and manages window visibility itself, so only user-pause applies.
+    private func updateDriverRunning() {
+        guard let displayDriver else {
+            mtkView.isPaused = userPaused
+            return
+        }
+        let shouldRun = !userPaused && mtkView.window != nil
+        shouldRun ? displayDriver.start() : displayDriver.pause()
+    }
+    private var userPaused = false
+
+    deinit {
+        displayDriver?.invalidate()   // stop the link thread + release its self-retain
+        try? FileManager.default.removeItem(at: tempURL)
+    }
+
+    /// Render-thread render failure, marshalled to main by the core callback: publish the error
+    /// and log it. The core has already dropped the scene (next frame clears to black).
+    private func handleRenderError(_ message: String?) {
+        compileValid = false
+        compileError = message?.isEmpty == false ? message : "Render error."
+        CrashLog.shared.record(CrashEvent(kind: .render,
+            message: message?.isEmpty == false ? message! : "render error",
+            context: Self.shaderName(from: lastLoadedSource)))
+    }
 
     /// Monotonic load counter: a compile finishing for anything but the CURRENT generation is a
     /// superseded source and must be dropped, not published (its scene/inputs/diagnostics would
@@ -104,14 +145,14 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
                               generation: Int) {
         guard generation == loadGeneration else { return }   // superseded by a newer load()
         if let s, !hadError {
-            scene = s
             compileValid = true
             compileError = nil
             compileErrorLine = nil
             inputs = Self.mapInputs(s.inputs)
             imageSources.updateInputs(inputs)
+            core.setScene(s, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
         } else {
-            scene = nil
+            core.setScene(nil, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
             compileValid = false
             compileError = (message?.isEmpty == false ? message : "Shader failed to compile.")
             compileErrorLine = Self.parseLine(from: message)
@@ -201,7 +242,6 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     }
 
     func setInput(_ name: String, _ jsonValue: String) {
-        guard let scene else { return }
         // Parse the JSON fragment (bool/number/array).
         guard let data = jsonValue.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) else { return }
@@ -225,74 +265,33 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             }
         }
         if let val {
-            scene.setValue(val, forInputNamed: name)
+            // Field-proven ISFMSLScene semantics (OffspringEngine): setValue while the render
+            // thread draws the same scene is safe; the lock here only guards the scene REFERENCE
+            // against a concurrent swap, and is held for just the setValue call.
+            core.withScene { $0?.setValue(val, forInputNamed: name) }
         }
     }
     func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
-        renderWidth = max(width, 1)
-        renderHeight = max(height, 1)
-        self.fitToWindow = fitToWindow
+        core.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)
     }
 
-    private func targetSize() -> MTLSize {
-        if fitToWindow {
-            // Largest W×H-aspect rectangle that fits the drawable → crisp + aspect-locked.
-            return BlitFit.inscribe(aspect: Double(renderWidth) / Double(renderHeight),
-                                    in: mtkView.drawableSize)
-        }
-        return MTLSize(width: renderWidth, height: renderHeight, depth: 1)
-    }
-
-    /// Builds the passthrough display pipeline: a fullscreen triangle whose fragment shader samples
-    /// the engine output. Sampling converts ANY source pixel format (float16/float32/unorm/sRGB) to
-    /// the drawable format and scales to fit, so every shader displays without format juggling.
-    private func makeBlitPipeline(colorFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
-        let src = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct VOut { float4 pos [[position]]; float2 uv; };
-        // Fullscreen QUAD (triangle-strip, 4 verts) at the ±fit corners. A scaled quad letterboxes
-        // cleanly; a scaled fullscreen-triangle would expose its hypotenuse as a diagonal cut.
-        vertex VOut tisf_blit_v(uint vid [[vertex_id]], constant float2& fit [[buffer(0)]]) {
-            float2 corner = float2(float(vid & 1), float((vid >> 1) & 1)); // (0,0)(1,0)(0,1)(1,1)
-            VOut o;
-            o.pos = float4((corner * 2.0 - 1.0) * fit, 0.0, 1.0);
-            o.uv = float2(corner.x, 1.0 - corner.y);
-            return o;
-        }
-        fragment float4 tisf_blit_f(VOut v [[stage_in]], texture2d<float> tex [[texture(0)]]) {
-            constexpr sampler s(filter::linear, address::clamp_to_edge);
-            return tex.sample(s, v.uv);
-        }
-        """
-        guard let lib = try? device.makeLibrary(source: src, options: nil) else { return nil }
-        let desc = MTLRenderPipelineDescriptor()
-        desc.vertexFunction = lib.makeFunction(name: "tisf_blit_v")
-        desc.fragmentFunction = lib.makeFunction(name: "tisf_blit_f")
-        desc.colorAttachments[0].pixelFormat = colorFormat
-        return try? device.makeRenderPipelineState(descriptor: desc)
-    }
-
-    /// Pause/resume the live render loop. A paused view stops driving `draw(in:)` entirely (the
-    /// MTKView is created with `enableSetNeedsDisplay = false`), so this is what actually halts GPU
-    /// work for off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.
+    /// Pause/resume the live render loop. Pausing stops the display-link ticks entirely (or, in
+    /// the no-link fallback, the MTKView's own loop), so this is what actually halts GPU work for
+    /// off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.
     func setPaused(_ paused: Bool) {
-        mtkView.isPaused = paused
+        userPaused = paused
+        updateDriverRunning()
         if paused {
             // A paused loop stops producing frames; a stale readout would report the old rate.
-            statsAccumulator.reset()
+            core.resetStats()
             statsModel.stats = nil
         }
     }
 
-    /// Record one completed command buffer's GPU duration. Called from the completed handler
-    /// (arbitrary thread) via a main-actor hop.
-    private func recordGPUTime(seconds: Double) {
-        statsAccumulator.addGPUTime(seconds: seconds)
-    }
-
     /// Force one on-screen frame through the normal `draw(in:)` path. Used to show a single frozen
-    /// frame on a paused preview (e.g. after its shader finishes compiling) without resuming the loop.
+    /// frame on a paused preview (e.g. after its shader finishes compiling) without resuming the
+    /// loop. Only valid while paused — the core's lock serializes the draw itself, but concurrent
+    /// `MTKView.draw()` from two threads is not a supported MTKView pattern.
     func drawOneFrame() {
         mtkView.draw()
     }
@@ -300,12 +299,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     /// Test hook: render one frame into an offscreen texture and return it. No drawable involved.
     @discardableResult
     func renderOnce() -> MTLTexture? {
-        guard let scene = scene, let cb = renderQueue.makeCommandBuffer() else { return nil }
-        let size = targetSize()
-        var err: NSString?
-        let tex = ISFMSLSafeRender(scene, NSSize(width: size.width, height: size.height), cb, &err)
-        cb.commit()
-        return tex
+        core.renderOnce(drawableSize: mtkView.drawableSize)
     }
 
     /// Pixel-truth render gate: renders `times.count` frames offscreen at explicit times on the
@@ -315,136 +309,63 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     /// See docs/superpowers/specs/2026-07-09-pixel-truth-render-gate-design.md.
     func runPixelGate(size: CGSize = CGSize(width: 320, height: 180),
                       times: [Double] = [0.0, 0.5, 1.5]) -> PixelVerdict {
-        guard let scene = scene else { return .renderError }
-        // Bind the deterministic pattern to every image input (offscreen renders bind nothing,
-        // so texture-sampling shaders would false-fail as black).
-        if inputs.contains(where: { $0.type == "image" }) {
-            guard let pattern = GateInputPattern.makeTexture(device: device) else {
-                return .renderError   // don't silently render unbound
-            }
-            for input in inputs where input.type == "image" {
-                if let val = ISFMSLSceneVal.create(with: pattern) as? ISFMSLSceneVal {
-                    scene.setValue(val, forInputNamed: input.name)
+        // The whole gate runs inside withScene: the render lock is held across all probe frames,
+        // so the display-link thread can't interleave live frames (which would advance persistent
+        // buffers between probes) or swap the scene mid-gate. ~ms for 3 small frames.
+        core.withScene { scene in
+            guard let scene else { return .renderError }
+            // Bind the deterministic pattern to every image input (offscreen renders bind nothing,
+            // so texture-sampling shaders would false-fail as black).
+            if inputs.contains(where: { $0.type == "image" }) {
+                guard let pattern = GateInputPattern.makeTexture(device: device) else {
+                    return .renderError   // don't silently render unbound
+                }
+                for input in inputs where input.type == "image" {
+                    if let val = ISFMSLSceneVal.create(with: pattern) as? ISFMSLSceneVal {
+                        scene.setValue(val, forInputNamed: input.name)
+                    }
                 }
             }
-        }
-        var frames: [FramePixelStats?] = []
-        for t in times {
-            guard let cb = renderQueue.makeCommandBuffer() else { return .renderError }
-            var err: NSString?
-            guard let tex = ISFMSLSafeRenderAtTime(
-                scene, NSSize(width: size.width, height: size.height), t, cb, &err) else {
-                return .renderError
-            }
-            guard FramePixelStats.supports(tex.pixelFormat) else {
+            var frames: [FramePixelStats?] = []
+            for t in times {
+                guard let cb = renderQueue.makeCommandBuffer() else { return .renderError }
+                var err: NSString?
+                guard let tex = ISFMSLSafeRenderAtTime(
+                    scene, NSSize(width: size.width, height: size.height), t, cb, &err) else {
+                    return .renderError
+                }
+                guard FramePixelStats.supports(tex.pixelFormat) else {
+                    cb.commit()
+                    return .unsupported
+                }
+                // Blit into a CPU-readable copy — pool textures aren't guaranteed CPU-accessible.
+                let desc = MTLTextureDescriptor.texture2DDescriptor(
+                    pixelFormat: tex.pixelFormat, width: tex.width, height: tex.height, mipmapped: false)
+                desc.storageMode = .managed
+                guard let readback = device.makeTexture(descriptor: desc),
+                      let blit = cb.makeBlitCommandEncoder() else {
+                    cb.commit()
+                    return .renderError
+                }
+                blit.copy(from: tex, to: readback)
+                blit.synchronize(resource: readback)
+                blit.endEncoding()
                 cb.commit()
-                return .unsupported
+                cb.waitUntilCompleted()
+                frames.append(FramePixelStats.analyze(texture: readback))
             }
-            // Blit into a CPU-readable copy — pool textures aren't guaranteed CPU-accessible.
-            let desc = MTLTextureDescriptor.texture2DDescriptor(
-                pixelFormat: tex.pixelFormat, width: tex.width, height: tex.height, mipmapped: false)
-            desc.storageMode = .managed
-            guard let readback = device.makeTexture(descriptor: desc),
-                  let blit = cb.makeBlitCommandEncoder() else {
-                cb.commit()
-                return .renderError
-            }
-            blit.copy(from: tex, to: readback)
-            blit.synchronize(resource: readback)
-            blit.endEncoding()
-            cb.commit()
-            cb.waitUntilCompleted()
-            frames.append(FramePixelStats.analyze(texture: readback))
+            return PixelGate.verdict(frames)
         }
-        return PixelGate.verdict(frames)
     }
 }
 
-extension MetalPreviewController: MTKViewDelegate {
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-
-    func draw(in view: MTKView) {
-        guard let drawable = view.currentDrawable else { return }
-
-        // Compile-failure path: clear the drawable to opaque black and present.
-        guard let scene = scene else {
-            // Black clear frames aren't shader frames — don't report an FPS for them. (Guarded:
-            // this path runs at display rate, and republishing nil every frame churns SwiftUI.)
-            if statsModel.stats != nil {
-                statsAccumulator.reset()
-                statsModel.stats = nil
-            }
-            guard let rpd = view.currentRenderPassDescriptor,
-                  let cb = renderQueue.makeCommandBuffer() else { return }
-            rpd.colorAttachments[0].loadAction = .clear
-            rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-            let enc = cb.makeRenderCommandEncoder(descriptor: rpd)
-            enc?.endEncoding()
-            cb.present(drawable)
-            cb.commit()
-            return
-        }
-
-        // Single command buffer: scene render -> blit into drawable -> present -> commit.
-        guard let cb = renderQueue.makeCommandBuffer() else { return }
-        let size = targetSize()
-        // Bind each image input's routed source (rendered into the same command buffer, so the
-        // source render is encoded before the filter that reads it).
-        for input in inputs where input.type == "image" {
-            let src = imageSources.source(for: input.name)
-            if let tex = src.texture(size: size, in: cb),
-               let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {
-                scene.setValue(val, forInputNamed: input.name)
-            }
-        }
-        var renderErr: NSString?
-        guard let srcTex = ISFMSLSafeRender(
-            scene, NSSize(width: size.width, height: size.height), cb, &renderErr) else {
-            // Render-time C++ exception (a compiled-but-pathological shader threw mid-render).
-            // Invalidate the scene so we stop retrying and surface the error; do NOT commit the
-            // possibly-partially-encoded command buffer. Next frame hits the clear-on-fail path.
-            self.scene = nil
-            self.compileValid = false
-            self.compileError = (renderErr as String?) ?? "Render error."
-            CrashLog.shared.record(CrashEvent(kind: .render,
-                message: (renderErr as String?) ?? "render error",
-                context: Self.shaderName(from: lastLoadedSource)))
-            return
-        }
-
-        // Display: sample the engine's output texture into the drawable via a passthrough pass.
-        // This converts ANY source pixel format (incl. 32-bit float, which CAMetalLayer can't accept
-        // as a drawable) and scales to fit — no colorPixelFormat juggling, no cross-format-blit
-        // assert, no NSException abort.
-        // Rebuild when the view's pixel format changes — a pipeline built for the first format
-        // would render through a mismatched attachment description.
-        if blitPipeline == nil || blitPipelineFormat != view.colorPixelFormat {
-            blitPipeline = makeBlitPipeline(colorFormat: view.colorPixelFormat)
-            blitPipelineFormat = view.colorPixelFormat
-        }
-        guard let pipeline = blitPipeline,
-              let rpd = view.currentRenderPassDescriptor else { cb.commit(); return }
-        rpd.colorAttachments[0].loadAction = .clear
-        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        // Aspect-fit: letterbox/pillarbox the output texture into the drawable — never stretch.
-        var fit = BlitFit.scale(textureSize: size, drawableSize: view.drawableSize)
-        if let enc = cb.makeRenderCommandEncoder(descriptor: rpd) {
-            enc.setRenderPipelineState(pipeline)
-            enc.setVertexBytes(&fit, length: MemoryLayout<SIMD2<Float>>.stride, index: 0)
-            enc.setFragmentTexture(srcTex, index: 0)
-            enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
-            enc.endEncoding()
-        }
-        cb.present(drawable)
-        // GPU frame time (Task 1.6): the handler runs on a Metal completion thread, so hop to the
-        // main actor before touching the accumulator. Must be attached before commit.
-        cb.addCompletedHandler { [weak self] buf in
-            let seconds = buf.gpuEndTime - buf.gpuStartTime
-            Task { @MainActor in self?.recordGPUTime(seconds: seconds) }
-        }
-        cb.commit()
-        if let snapshot = statsAccumulator.frame(at: CACurrentMediaTime()) {
-            statsModel.stats = snapshot
-        }
+/// MTKView that reports window membership to its owner. The display link must run only while the
+/// view is actually hosted — ticking an unhosted view did off-main AppKit layer setup at launch.
+final class HostAwareMTKView: MTKView {
+    /// Called on the main thread whenever the view enters (true) or leaves (false) a window.
+    var onWindowChange: ((Bool) -> Void)?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?(window != nil)
     }
 }

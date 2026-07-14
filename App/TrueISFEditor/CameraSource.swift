@@ -60,9 +60,9 @@ final class CameraFrameProvider: NSObject, AVCaptureVideoDataOutputSampleBufferD
     }
 }
 
-/// A live-camera ImageSource. Thin @MainActor wrapper over CameraFrameProvider. Returns nil until a
+/// A live-camera ImageSource. Thin wrapper over CameraFrameProvider (which is internally locked, so
+/// the render thread can read `texture` while the capture queue writes frames). Returns nil until a
 /// frame arrives or if permission is denied (the router then falls back to the default test pattern).
-@MainActor
 final class CameraSource: ImageSource {
     var displayName: String { "Camera" }
     private let provider: CameraFrameProvider

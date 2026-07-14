@@ -59,6 +59,8 @@ targets:
       - TrueISFEditor/BoundedArray.swift
       - TrueISFEditor/CrashLog.swift
       - TrueISFEditor/MetalPreviewController.swift
+      - TrueISFEditor/MetalRenderCore.swift
+      - TrueISFEditor/DisplayLinkDriver.swift
       - TrueISFEditor/WebKitPreviewController.swift
       - TrueISFEditor/ISFMSLSafeBridge.mm
       - TrueISFEditor/FramePixelStats.swift
