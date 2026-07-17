@@ -40,6 +40,28 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(webkit.loadedISF, "SRC")
     }
 
+    // MARK: D0 — pause forwarding (pop-out editing mode)
+
+    func testSetPausedForwardsToActiveEngine() {
+        let fake = FakePreviewEngine()
+        let coord = PreviewCoordinator(metal: fake, webkit: FakePreviewEngine())
+        coord.setPaused(true)
+        XCTAssertEqual(fake.pausedStates, [true])
+        XCTAssertTrue(coord.isPaused)
+        coord.setPaused(false)
+        XCTAssertEqual(fake.pausedStates, [true, false])
+        XCTAssertFalse(coord.isPaused)
+    }
+
+    func testEngineSwitchReappliesPausedState() {
+        let metal = FakePreviewEngine(); let webkit = FakePreviewEngine()
+        let coord = PreviewCoordinator(metal: metal, webkit: webkit)
+        coord.setPaused(true)
+        coord.active = .webkit
+        XCTAssertEqual(webkit.pausedStates.last, true,
+                       "switching engines while paused must pause the new active engine")
+    }
+
     func testRealEnginesToggleWithoutCrash() async throws {
         let coord = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
         coord.load(isf: "/*{ \"ISFVSN\":\"2\" }*/ void main(){ gl_FragColor=vec4(1.0); }")

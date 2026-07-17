@@ -10,6 +10,8 @@ final class PreviewCoordinator: ObservableObject {
     @Published private(set) var compileError: String?
     @Published private(set) var compileErrorLine: Int?
     @Published private(set) var inputs: [ISFPreviewInput] = []
+    /// D0: true while the render loop is user/pop-out paused. Reapplied on engine switch.
+    @Published private(set) var isPaused = false
 
     private let metal: PreviewEngine
     private let webkit: PreviewEngine
@@ -41,6 +43,11 @@ final class PreviewCoordinator: ObservableObject {
     func pulseEvent(_ name: String) { activeEngine.pulseEvent(name) }
     /// B2: restart shader time (document switch / explicit reset).
     func resetTimeline() { activeEngine.resetTimeline() }
+    /// D0: pause/resume the active engine's render loop (pop-out editing mode).
+    func setPaused(_ paused: Bool) {
+        isPaused = paused
+        activeEngine.setPaused(paused)
+    }
     func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
         currentRenderSize = (width, height, fitToWindow)
         activeEngine.setRenderSize(width: width, height: height, fitToWindow: fitToWindow)
@@ -68,6 +75,7 @@ final class PreviewCoordinator: ObservableObject {
     }
     private func switchEngine() {
         subscribe()
+        activeEngine.setPaused(isPaused)
         activeEngine.setRenderSize(width: currentRenderSize.width, height: currentRenderSize.height,
                                    fitToWindow: currentRenderSize.fit)
         if let s = currentSource { activeEngine.load(isf: s) }

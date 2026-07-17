@@ -37,6 +37,10 @@ protocol PreviewEngine: AnyObject {
     /// B2: restart shader time at 0 (document switch / explicit reset). Engines whose clock is
     /// per-load (WebKit) may no-op.
     func resetTimeline()
+
+    /// D0: pause/resume this engine's live render loop (GPU work + clock). Engines without a
+    /// pausable loop no-op.
+    func setPaused(_ paused: Bool)
 }
 
 extension PreviewEngine {
@@ -44,6 +48,9 @@ extension PreviewEngine {
 
     /// Default: engines with per-load clocks (WebKit resets on every load) have nothing to do.
     func resetTimeline() {}
+
+    /// Default (WebKit path): no pausable loop to stop.
+    func setPaused(_ paused: Bool) {}
 
     /// Default (WebKit path): JSON true now, false on the next main-actor turn. With a render loop
     /// that may not draw between those turns this can drop the pulse (M34) — engines with real
