@@ -128,6 +128,18 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertNil(vm.conversionReportTitle)
     }
 
+    // MARK: B4 — render-size doubling is capped (uncapped doubling exhausted GPU memory)
+
+    func testDoubleRenderSizeIsCapped() {
+        let vm = EditorViewModel(file: .untitled(source: "x"))
+        vm.renderWidth = 8000; vm.renderHeight = 5000
+        vm.doubleRenderSize()
+        XCTAssertEqual(vm.renderWidth, EditorViewModel.maxRenderAxis)
+        XCTAssertEqual(vm.renderHeight, 10000 > EditorViewModel.maxRenderAxis ? EditorViewModel.maxRenderAxis : 10000)
+        vm.doubleRenderSize()
+        XCTAssertEqual(vm.renderWidth, EditorViewModel.maxRenderAxis, "cap must hold under repeat")
+    }
+
     // MARK: A4 — save failures must raise the (injectable) alert, not just the 5s toast
 
     func testSaveFailureRaisesAlert() {

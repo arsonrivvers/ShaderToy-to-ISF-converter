@@ -14,11 +14,17 @@ final class ISFSceneSource: ImageSource, @unchecked Sendable {
     let displayName: String
     private let scene: ISFMSLScene
     private let tempURL: URL
+    private let device: MTLDevice
+    /// B4: an OWNED copy of the last good frame. Caching the engine's raw output texture aliased
+    /// VVMTLPool memory — the pool could hand that texture to another render while we were still
+    /// displaying it as the fallback frame (torn/wrong content on the exact frame meant to hide
+    /// a glitch).
     private var lastGood: MTLTexture?
 
     /// Returns nil if the shader fails to compile or render a probe frame.
     init?(displayName: String, sourceText: String, device: MTLDevice, queue: MTLCommandQueue) {
         self.displayName = displayName
+        self.device = device
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("trueisf-src-\(UUID().uuidString).fs")
         self.tempURL = url
@@ -70,8 +76,26 @@ final class ISFSceneSource: ImageSource, @unchecked Sendable {
     func texture(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? {
         var err: NSString?
         let tex = ISFMSLSafeRender(scene, NSSize(width: size.width, height: size.height), cb, &err)
-        if let tex { lastGood = tex; return tex }
-        return lastGood   // keep-last-good on a transient render failure
+        if let tex {
+            // Blit into our OWN texture (same size/format) so keep-last-good never displays a
+            // pool-recycled texture (B4). Encoded on the caller's command buffer, before the
+            // consumer samples anything.
+            if lastGood == nil || lastGood!.width != tex.width || lastGood!.height != tex.height
+                || lastGood!.pixelFormat != tex.pixelFormat {
+                let d = MTLTextureDescriptor.texture2DDescriptor(
+                    pixelFormat: tex.pixelFormat, width: tex.width, height: tex.height,
+                    mipmapped: false)
+                d.usage = [.shaderRead]
+                d.storageMode = .private
+                lastGood = device.makeTexture(descriptor: d)
+            }
+            if let dst = lastGood, let blit = cb.makeBlitCommandEncoder() {
+                blit.copy(from: tex, to: dst)
+                blit.endEncoding()
+            }
+            return tex
+        }
+        return lastGood   // keep-last-good (owned copy) on a transient render failure
     }
 
     /// Render the default test pattern once to a standalone texture (for the nesting rule).

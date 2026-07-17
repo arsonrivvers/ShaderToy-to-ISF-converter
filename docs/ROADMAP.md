@@ -51,9 +51,13 @@ it. Reset becomes an explicit control (see D-transport)._
 **B3 — Pop-out parity.** Route ParamStore changes + event pulses to the output window's
 controller; stop double-transpiling (share the compile or forward the compiled scene).
 
-**B4 — Engine housekeeping (same area, cheap):** cap `doubleRenderSize()`; call
-`VVMTLPool.housekeeping` on shader switch/size change; pause render while the window is
-miniaturized/occluded; fix `ISFSceneSource.lastGood` aliasing a pool-recycled texture.
+**B4 — Engine housekeeping (same area, cheap):** cap `doubleRenderSize()`; pause render while
+the window is miniaturized/occluded; fix `ISFSceneSource.lastGood` aliasing a pool-recycled
+texture. _Pool `housekeeping()` DEFERRED (2026-07-17): calling it on compile/size-change crashed
+the full test suite — trimming the shared VVMTLPool races other live controllers' render threads
+holding in-flight pooled textures (inline + pop-out + nested-ISF render concurrently in
+production too). Needs a globally-quiescent hook (e.g. all drivers paused) before it's safe;
+the memory ratchet remains a known issue mitigated by the size cap._
 
 ## Phase D — Authoring UX (the "best ISF editor" tier)
 

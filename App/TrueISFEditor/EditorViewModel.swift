@@ -31,8 +31,12 @@ final class EditorViewModel: ObservableObject {
         renderWidth = max(1, renderWidth / 2); renderHeight = max(1, renderHeight / 2)
         fitToWindow = false
     }
+    /// B4: capped — repeated doubling reached 30K×17K fixed-size renders and exhausted GPU memory
+    /// (the texture pool retains every size ever used).
+    static let maxRenderAxis = 8192
     func doubleRenderSize() {
-        renderWidth *= 2; renderHeight *= 2
+        renderWidth = min(renderWidth * 2, Self.maxRenderAxis)
+        renderHeight = min(renderHeight * 2, Self.maxRenderAxis)
         fitToWindow = false
     }
 

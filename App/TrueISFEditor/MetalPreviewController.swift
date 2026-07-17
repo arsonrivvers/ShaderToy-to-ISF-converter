@@ -78,20 +78,37 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         // host hanging "before establishing connection"). Windowless controllers (import pixel
         // gate, tests) now never tick at all.
         mtkView.onWindowChange = { [weak self] _ in self?.updateDriverRunning() }
+        observeOcclusion()   // B4: pause the loop while minimized/covered
     }
 
-    /// Single decision point for whether the render loop runs: in a window AND not user-paused.
-    /// Called on window membership changes and setPaused. Fallback (no link): the MTKView
-    /// self-drives on main and manages window visibility itself, so only user-pause applies.
+    /// Single decision point for whether the render loop runs: in a window, not user-paused, and
+    /// (B4) not occluded — a minimized/covered window was burning GPU at full display cadence.
+    /// Called on window membership changes, occlusion changes, and setPaused. Fallback (no link):
+    /// the MTKView self-drives on main and manages window visibility itself, so only user-pause
+    /// applies.
     private func updateDriverRunning() {
         guard let displayDriver else {
             mtkView.isPaused = userPaused
             return
         }
-        let shouldRun = !userPaused && mtkView.window != nil
+        let occluded = mtkView.window.map { !$0.occlusionState.contains(.visible) } ?? false
+        let shouldRun = !userPaused && mtkView.window != nil && !occluded
         shouldRun ? displayDriver.start() : displayDriver.pause()
     }
     private var userPaused = false
+
+    /// B4: re-evaluate the render loop when OUR window's occlusion changes (minimize/cover/expose).
+    private var occlusionObserver: NSObjectProtocol?
+    private func observeOcclusion() {
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let w = note.object as? NSWindow, w === self.mtkView.window else { return }
+                self.updateDriverRunning()
+            }
+        }
+    }
 
     deinit {
         displayDriver?.invalidate()   // stop the link thread + release its self-retain
@@ -155,6 +172,11 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             inputs = Self.mapInputs(s.inputs)
             imageSources.updateInputs(inputs)
             core.setScene(s, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
+            // B4 NOTE: VVMTLPool.global.housekeeping() was tried here and on setRenderSize to stop
+            // the pool's memory ratchet, but trimming the SHARED pool while other live controllers'
+            // render threads hold in-flight pooled textures crashed the full test suite (and would
+            // crash production: inline + pop-out + nested-ISF sources render concurrently). Pool
+            // housekeeping needs a globally-quiescent hook — deferred; see ROADMAP B4.
             // B1c: a fresh scene boots at header defaults — let the ParamStore replay user values.
             onSceneInstalled?()
         } else {
