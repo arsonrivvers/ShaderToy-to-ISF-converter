@@ -33,10 +33,17 @@ protocol PreviewEngine: AnyObject {
     /// B1c: called after a successful compile installs a fresh scene — the hook the ParamStore
     /// uses to replay user values (a new scene boots at header defaults).
     var onSceneInstalled: (() -> Void)? { get set }
+
+    /// B2: restart shader time at 0 (document switch / explicit reset). Engines whose clock is
+    /// per-load (WebKit) may no-op.
+    func resetTimeline()
 }
 
 extension PreviewEngine {
     var liveRenderStats: RenderStatsModel? { nil }
+
+    /// Default: engines with per-load clocks (WebKit resets on every load) have nothing to do.
+    func resetTimeline() {}
 
     /// Default (WebKit path): JSON true now, false on the next main-actor turn. With a render loop
     /// that may not draw between those turns this can drop the pulse (M34) — engines with real

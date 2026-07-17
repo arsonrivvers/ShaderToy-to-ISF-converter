@@ -288,12 +288,19 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         core.withScene { $0?.setValue(ISFMSLSceneVal.createWithEvent(), forInputNamed: name) }
     }
 
+    /// B2: restart shader time at 0. Called on document switches (a new document gets fresh time);
+    /// recompiles of the SAME document keep the clock running — that's the point.
+    func resetTimeline() {
+        core.resetClock()
+    }
+
     /// Pause/resume the live render loop. Pausing stops the display-link ticks entirely (or, in
     /// the no-link fallback, the MTKView's own loop), so this is what actually halts GPU work for
     /// off-screen-cap previews — `renderOnce()` alone never stopped the continuous loop.
     func setPaused(_ paused: Bool) {
         userPaused = paused
         updateDriverRunning()
+        core.setClockPaused(paused)   // B2: pausing the loop also freezes TIME
         if paused {
             // A paused loop stops producing frames; a stale readout would report the old rate.
             core.resetStats()

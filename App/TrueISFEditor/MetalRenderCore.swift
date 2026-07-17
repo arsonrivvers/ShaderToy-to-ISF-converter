@@ -32,6 +32,8 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
 
     private let lock = NSLock()
     // ── lock-guarded state ──
+    /// B2: app-owned shader clock — survives scene swaps so recompiles don't restart TIME.
+    private let clock = RenderClock()
     private var scene: ISFMSLScene?
     private var imageInputNames: [String] = []
     private var renderWidth = 1920   // matches EditorViewModel's 16:9 default
@@ -70,6 +72,18 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
         return body(scene)
     }
 
+    /// B2: restart shader time at 0 (document switch or explicit user reset — NOT recompiles).
+    func resetClock() {
+        lock.lock(); defer { lock.unlock() }
+        clock.reset()
+    }
+
+    /// B2: freeze/unfreeze shader time with the render loop so pausing stops TIME too.
+    func setClockPaused(_ paused: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        if paused { clock.pause() } else { clock.resume() }
+    }
+
     /// Drop the stats window (render loop paused / renderer switched).
     func resetStats() {
         lock.lock(); defer { lock.unlock() }
@@ -90,7 +104,8 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
         guard let scene, let cb = renderQueue.makeCommandBuffer() else { return nil }
         let size = targetSizeLocked(drawableSize: drawableSize)
         var err: NSString?
-        let tex = ISFMSLSafeRender(scene, NSSize(width: size.width, height: size.height), cb, &err)
+        let tex = ISFMSLSafeRenderAtTime(scene, NSSize(width: size.width, height: size.height),
+                                         clock.now, cb, &err)
         cb.commit()
         return tex
     }
@@ -177,8 +192,10 @@ extension MetalRenderCore: MTKViewDelegate {
             }
         }
         var renderErr: NSString?
-        guard let srcTex = ISFMSLSafeRender(
-            scene, NSSize(width: size.width, height: size.height), cb, &renderErr) else {
+        // B2: explicit app-owned time (not the scene's internal timer) — a freshly swapped-in
+        // scene continues at the SAME time, so edits no longer restart the animation.
+        guard let srcTex = ISFMSLSafeRenderAtTime(
+            scene, NSSize(width: size.width, height: size.height), clock.now, cb, &renderErr) else {
             // Render-time C++ exception (a compiled-but-pathological shader threw mid-render).
             // Invalidate the scene so we stop retrying and surface the error; do NOT commit the
             // possibly-partially-encoded command buffer. Next frame hits the clear-on-fail path.
