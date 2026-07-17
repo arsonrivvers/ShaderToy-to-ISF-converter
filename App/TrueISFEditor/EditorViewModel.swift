@@ -127,7 +127,7 @@ final class EditorViewModel: ObservableObject {
             // No "Opened <name>" toast — the filename is already in the header, and the toast
             // overlay was covering sliders. Clear any stale message instead.
             statusMessage = ""
-            editor.setText(file.source)
+            editor.resetText(file.source)
             headerModel.syncFromText(file.source)
             recompile(immediate: true)
         } catch {
@@ -142,7 +142,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = "New shader"
-        editor.setText(file.source)
+        editor.resetText(file.source)
         headerModel.syncFromText(file.source)
         recompile(immediate: true)
     }
@@ -155,7 +155,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
         statusMessage = "Imported \(suggestedName)"
-        editor.setText(isf)
+        editor.resetText(isf)
         headerModel.syncFromText(isf)
         // No pre-compile applyDiagnostics here: the source just changed, so preview's compile state is
         // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
@@ -171,7 +171,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = ""   // name is in the header; no toast (it covered sliders)
-        editor.setText(source)
+        editor.resetText(source)
         headerModel.syncFromText(source)
         recompile(immediate: true)
     }

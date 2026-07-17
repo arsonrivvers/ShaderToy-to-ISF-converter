@@ -127,4 +127,29 @@ final class EditorViewModelTests: XCTestCase {
         vm.newUntitled()
         XCTAssertNil(vm.conversionReportTitle)
     }
+
+    // MARK: A1 — document switches must DROP editor undo history (resetText), while in-document
+    // programmatic replacements (AI apply) must stay undoable (setText). Before the fix, ⌘Z after
+    // opening doc B restored doc A's text into B and ⌘S corrupted B's file.
+
+    func testDocumentSwitchDropsHistory_assistApplyKeepsIt() throws {
+        let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("a1-reset-\(UUID().uuidString).fs")
+        try "/*{}*/\nvoid main(){ gl_FragColor = vec4(1.0); }".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        XCTAssertNil(vm.editor.lastResetTextForTest, "no reset before any document switch")
+        vm.open(TrueISFEditor.LibraryEntry(url: url))
+        XCTAssertNotNil(vm.editor.lastResetTextForTest, "open() must reset editor history")
+
+        let marker = "/*{}*/\nvoid main(){ gl_FragColor = vec4(0.5); }"
+        vm.replaceSourceFromAssist(marker)
+        XCTAssertNotEqual(vm.editor.lastResetTextForTest, marker,
+                          "AI apply must use setText (undoable), never resetText")
+
+        vm.newUntitled()
+        XCTAssertEqual(vm.editor.lastResetTextForTest, EditorViewModel.blankTemplate,
+                       "newUntitled must reset editor history")
+    }
 }

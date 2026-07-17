@@ -39,6 +39,16 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         webView.evaluateJavaScript("setText(\(lit));")
     }
 
+    /// Replace the document AND drop undo history — for document switches, where ⌘Z must not
+    /// restore the previous file's content into the new one (data-corruption class A1).
+    private(set) var lastResetTextForTest: String?
+    func resetText(_ text: String) {
+        lastText = text
+        lastResetTextForTest = text
+        guard ready, initialized, let lit = jsStringLiteral(text) else { return }
+        webView.evaluateJavaScript("resetDocument(\(lit));")
+    }
+
     func setDiagnostics(_ diags: [EditorDiagnostic]) {
         guard ready, initialized else { pendingDiagnostics = diags; return }
         guard let data = try? JSONEncoder().encode(diags),

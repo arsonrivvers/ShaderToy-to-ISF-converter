@@ -40,6 +40,15 @@
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
   };
 
+  // Replace the document AND drop undo history (document switch — ⌘Z must not
+  // resurrect the previous file's text into this one).
+  window.resetDocument = function (text) {
+    if (!view) { window.initEditor(text); return; }
+    view.destroy();
+    document.getElementById("root").innerHTML = "";
+    window.initEditor(text);
+  };
+
   // diags: [{ line, message, severity }] — 1-based line numbers.
   window.setDiagnostics = function (diags) {
     if (!view) return;
