@@ -112,6 +112,9 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
 
     deinit {
         displayDriver?.invalidate()   // stop the link thread + release its self-retain
+        // Block-based observers are NOT auto-removed; remix thumbnails create a controller each,
+        // so leaking one observer per instance would accumulate in NotificationCenter forever.
+        if let o = occlusionObserver { NotificationCenter.default.removeObserver(o) }
         try? FileManager.default.removeItem(at: tempURL)
     }
 
