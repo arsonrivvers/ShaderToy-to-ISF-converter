@@ -10,7 +10,7 @@ final class LaunchPackTests: XCTestCase {
         // The attribution set required for binary distribution (BSD/Apache reproduce clauses).
         for component in ["ISFMSLKit", "VVMetalKit", "ISFGLSLGenerator", "exprtk", "nlohmann",
                           "glslang", "SPIRV-Cross", "PINCache", "CodeMirror",
-                          "interactive-shader-format"] {
+                          "interactive-shader-format", "null_signal"] {
             XCTAssertTrue(text.contains(component), "acknowledgements missing \(component)")
         }
         XCTAssertGreaterThan(text.count, 10_000, "full license texts must be embedded, not just a summary")

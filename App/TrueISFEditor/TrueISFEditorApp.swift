@@ -215,6 +215,11 @@ void main() {
                         }
                     }
                 }
+                Menu("New from Template") {
+                    ForEach(TemplateCatalog.all) { t in
+                        Button(t.name) { vm.loadExample(name: t.name, source: t.sourceText) }
+                    }
+                }
                 Divider()
                 RemixMenuButton()
                 Divider()

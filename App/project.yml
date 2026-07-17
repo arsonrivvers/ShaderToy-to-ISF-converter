@@ -18,6 +18,10 @@ targets:
       - path: ../samples
         buildPhase: resources
         type: folder
+      # Bundled starter templates (repo /templates, folder reference → Resources/templates/*.fs).
+      - path: ../templates
+        buildPhase: resources
+        type: folder
     dependencies:
       - package: ShadertoyISFKit
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
