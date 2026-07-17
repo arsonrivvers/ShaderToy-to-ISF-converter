@@ -143,7 +143,7 @@ struct EditorScreen: View {
                     shaderAssist.run(.diagnoseAndFix, source: vm.file.source,
                                      diagnostics: vm.diagnostics.diagnostics)
                 }.disabled(running)
-                Button("Suggestions") {
+                Button("Shader Upgrades") {
                     showSuggestionGoalSheet = true
                 }.disabled(running)
                 if running {

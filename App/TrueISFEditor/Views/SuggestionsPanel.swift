@@ -33,9 +33,9 @@ struct SuggestionsPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("ShaderAssist Suggestions")
+                    Text("Shader Upgrades")
                         .font(.headline)
-                    Text(result.goal.isEmpty ? "Goal-driven suggestions" : result.goal)
+                    Text(result.goal.isEmpty ? "Proposed upgrades" : result.goal)
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
