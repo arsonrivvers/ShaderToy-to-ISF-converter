@@ -107,8 +107,19 @@ struct EditorScreen: View {
             if library.sources.isEmpty { library.loadStandardLibraries() }
             applyResolution()
             openSampleOnFirstRun()
+            // B1c/B3: the pop-out is the second render sink — params, pulses, and (validated-only)
+            // source updates all flow through the viewmodel. Sinks no-op while the window is closed.
+            vm.outputParamSink = { [weak output] name, json in
+                guard let output, output.isOpen else { return }
+                output.coordinator.setInput(name, json)
+            }
+            vm.outputPulseSink = { [weak output] name in
+                guard let output, output.isOpen else { return }
+                output.coordinator.pulseEvent(name)
+            }
+            vm.onValidatedSource = { [weak output] src in output?.update(source: src) }
+            output.coordinator.onSceneInstalled = { vm.paramStore.replayAll() }
         }
-        .onChange(of: vm.file.source) { src in output.update(source: src) }
         // A3: assist results are document-scoped — a fix/suggestion generated against doc A must
         // not render (or apply) once doc B is loaded.
         .onChange(of: vm.documentGeneration) { _ in shaderAssist.resetForDocumentSwitch() }

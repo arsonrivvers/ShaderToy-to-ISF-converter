@@ -7,6 +7,8 @@ import VVMetalKit
 @MainActor
 final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessageHandler, PreviewEngine {
     @Published var compileValid = false
+    /// B1c: fired after a successful compile so stored param values get replayed.
+    var onSceneInstalled: (() -> Void)?
     @Published var compileError: String?
     @Published var compileErrorLine: Int?
     @Published var inputs: [ISFPreviewInput] = []
@@ -88,6 +90,7 @@ final class WebKitPreviewController: NSObject, ObservableObject, WKScriptMessage
                                 labels: $0["LABELS"] as? [String],
                                 values: ($0["VALUES"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue })
             } ?? []
+            if compileValid { onSceneInstalled?() }   // B1c: replay stored param values
         case "runtime":
             // Route through the same path the diagnostics pipeline reads: EditorViewModel maps
             // compileError to the gutter only when compileValid is false — leaving it true showed

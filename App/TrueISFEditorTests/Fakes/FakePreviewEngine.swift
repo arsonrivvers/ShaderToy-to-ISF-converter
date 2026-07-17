@@ -16,6 +16,8 @@ final class FakePreviewEngine: PreviewEngine, ObservableObject {
         return SourceRouter(device: device, queue: device.makeCommandQueue()!)
     }()
 
+    var onSceneInstalled: (() -> Void)?
+
     private(set) var loadedISF: String?
     private(set) var lastInput: (String, String)?
     private(set) var lastRenderSize: (width: Int, height: Int, fit: Bool)?

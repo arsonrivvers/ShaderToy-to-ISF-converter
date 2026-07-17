@@ -55,7 +55,6 @@ targets:
       - TrueISFEditor/WebKitShaderFetcher.swift
       - TrueISFEditor/Models/ISFFile.swift
       - TrueISFEditor/Models/LibraryModel.swift
-      - TrueISFEditor/Models/ParamStore.swift
       - TrueISFEditor/PreviewEngine.swift
       - TrueISFEditor/PreviewCoordinator.swift
       - TrueISFEditor/RenderStats.swift

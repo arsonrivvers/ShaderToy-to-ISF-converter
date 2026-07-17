@@ -28,6 +28,14 @@ final class PreviewCoordinator: ObservableObject {
     /// Live FPS/GPU-ms model of the active engine (nil when the engine doesn't measure — WebKit).
     var renderStats: RenderStatsModel? { activeEngine.liveRenderStats }
 
+    /// B1c: scene-install hook, kept on BOTH engines so an engine switch preserves the replay path.
+    var onSceneInstalled: (() -> Void)? {
+        didSet {
+            metal.onSceneInstalled = onSceneInstalled
+            webkit.onSceneInstalled = onSceneInstalled
+        }
+    }
+
     func load(isf: String) { currentSource = isf; activeEngine.load(isf: isf) }
     func setInput(_ name: String, _ jsonValue: String) { activeEngine.setInput(name, jsonValue) }
     func pulseEvent(_ name: String) { activeEngine.pulseEvent(name) }

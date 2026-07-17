@@ -1,11 +1,14 @@
 import XCTest
+@testable import TrueISFEditor
 
 @MainActor
 final class ParamStoreTests: XCTestCase {
+    // Explicitly the APP module's type: the test target compiles its own copy of
+    // ISFPreviewInput.swift, and ParamStore (app-module-only) expects the app's.
     private func input(_ name: String, _ type: String, def: Any? = nil,
-                       min: Any? = nil, max: Any? = nil) -> ISFPreviewInput {
-        ISFPreviewInput(name: name, type: type, defaultValue: def,
-                        min: min, max: max, labels: nil, values: nil)
+                       min: Any? = nil, max: Any? = nil) -> TrueISFEditor.ISFPreviewInput {
+        TrueISFEditor.ISFPreviewInput(name: name, type: type, defaultValue: def,
+                                      min: min, max: max, labels: nil, values: nil)
     }
 
     func testJsonFragments() {

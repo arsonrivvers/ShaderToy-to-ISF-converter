@@ -108,6 +108,10 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             context: Self.shaderName(from: lastLoadedSource)))
     }
 
+    /// B1c: fired after a successful compile installs a fresh scene (which boots at header
+    /// defaults) — the ParamStore's replay hook.
+    var onSceneInstalled: (() -> Void)?
+
     /// Monotonic load counter: a compile finishing for anything but the CURRENT generation is a
     /// superseded source and must be dropped, not published (its scene/inputs/diagnostics would
     /// briefly show as the new shader's).
@@ -151,6 +155,8 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             inputs = Self.mapInputs(s.inputs)
             imageSources.updateInputs(inputs)
             core.setScene(s, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
+            // B1c: a fresh scene boots at header defaults — let the ParamStore replay user values.
+            onSceneInstalled?()
         } else {
             core.setScene(nil, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
             compileValid = false

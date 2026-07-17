@@ -29,6 +29,10 @@ protocol PreviewEngine: AnyObject {
 
     /// Fire an ISF `event` input for one frame.
     func pulseEvent(_ name: String)
+
+    /// B1c: called after a successful compile installs a fresh scene — the hook the ParamStore
+    /// uses to replay user values (a new scene boots at header defaults).
+    var onSceneInstalled: (() -> Void)? { get set }
 }
 
 extension PreviewEngine {

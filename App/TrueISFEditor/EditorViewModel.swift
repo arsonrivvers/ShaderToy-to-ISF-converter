@@ -85,6 +85,16 @@ final class EditorViewModel: ObservableObject {
             self?.preview.setInput(name, json)
             self?.outputParamSink?(name, json)
         }
+        // B1c: a freshly installed scene boots at header defaults — resync + replay user values.
+        // Engine inputs are read directly (the coordinator's mirror lands a turn later). Also the
+        // pop-out feed point (B3): only compile-VALIDATED sources reach the output window, so it
+        // never wastes a transpile on broken intermediate states.
+        preview.onSceneInstalled = { [weak self] in
+            guard let self else { return }
+            self.paramStore.syncInputs(self.preview.activeEngine.inputs)
+            self.paramStore.replayAll()
+            self.onValidatedSource?(self.file.source)
+        }
         editor.setText(self.file.source)
         headerModel.syncFromText(self.file.source)
         recompile(immediate: true)
@@ -98,6 +108,8 @@ final class EditorViewModel: ObservableObject {
     /// Set by EditorScreen when the pop-out window is open — the second render sink.
     var outputParamSink: ((String, String) -> Void)?
     var outputPulseSink: ((String) -> Void)?
+    /// B3: fired with the source text whenever the inline compile succeeds — the pop-out's feed.
+    var onValidatedSource: ((String) -> Void)?
 
     /// Momentary event pulse, forwarded to every open render window (events aren't stored).
     func pulseEvent(_ name: String) {
@@ -147,7 +159,7 @@ final class EditorViewModel: ObservableObject {
             // No "Opened <name>" toast — the filename is already in the header, and the toast
             // overlay was covering sliders. Clear any stale message instead.
             statusMessage = ""
-            editor.resetText(file.source)
+            paramStore.resetAll(); editor.resetText(file.source)
             headerModel.syncFromText(file.source)
             recompile(immediate: true)
         } catch {
@@ -162,7 +174,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = "New shader"
-        editor.resetText(file.source)
+        paramStore.resetAll(); editor.resetText(file.source)
         headerModel.syncFromText(file.source)
         recompile(immediate: true)
     }
@@ -175,7 +187,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
         statusMessage = "Imported \(suggestedName)"
-        editor.resetText(isf)
+        paramStore.resetAll(); editor.resetText(isf)
         headerModel.syncFromText(isf)
         // No pre-compile applyDiagnostics here: the source just changed, so preview's compile state is
         // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
@@ -191,7 +203,7 @@ final class EditorViewModel: ObservableObject {
         conversionWarnings = []
         conversionReportTitle = nil
         statusMessage = ""   // name is in the header; no toast (it covered sliders)
-        editor.resetText(source)
+        paramStore.resetAll(); editor.resetText(source)
         headerModel.syncFromText(source)
         recompile(immediate: true)
     }
