@@ -29,26 +29,7 @@ struct ApplyPreviewPanel: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-            HStack(alignment: .top, spacing: 8) {
-                sourceColumn("Current", originalSource)
-                sourceColumn("Proposed", result.replacementSource)
-            }
+            DiffView(old: originalSource, new: result.replacementSource)
         }
-    }
-
-    private func sourceColumn(_ title: String, _ source: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-            ScrollView {
-                Text(source)
-                    .font(.system(size: 10, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-            }
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
