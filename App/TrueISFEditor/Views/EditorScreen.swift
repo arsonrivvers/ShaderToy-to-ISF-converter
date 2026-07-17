@@ -76,7 +76,8 @@ struct EditorScreen: View {
                     VSplitView {
                         ISFPreviewView(coordinator: vm.preview)
                             .frame(minHeight: 200, maxHeight: .infinity)
-                        HeaderPanelView(coordinator: vm.preview, model: vm.headerModel)
+                        HeaderPanelView(coordinator: vm.preview, model: vm.headerModel,
+                                        store: vm.paramStore, onPulse: { vm.pulseEvent($0) })
                             .frame(minHeight: 180, maxHeight: .infinity)
                             // Fresh @State per document (M30): without this, a new shader whose
                             // inputs share names with the old one keeps the old slider values.

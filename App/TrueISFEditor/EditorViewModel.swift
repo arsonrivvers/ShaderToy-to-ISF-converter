@@ -80,9 +80,29 @@ final class EditorViewModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] names in self?.editor.setInputNames(names) }
             .store(in: &cancellables)
+        // B1: param values live in the store; the store forwards to every render sink.
+        paramStore.onSet = { [weak self] name, json in
+            self?.preview.setInput(name, json)
+            self?.outputParamSink?(name, json)
+        }
         editor.setText(self.file.source)
         headerModel.syncFromText(self.file.source)
         recompile(immediate: true)
+    }
+
+    // MARK: params (B1)
+
+    /// The one store between the param UI and the render engines. Values survive recompiles and
+    /// are replayed into freshly installed scenes (see the onSceneInstalled wiring).
+    let paramStore = ParamStore()
+    /// Set by EditorScreen when the pop-out window is open — the second render sink.
+    var outputParamSink: ((String, String) -> Void)?
+    var outputPulseSink: ((String) -> Void)?
+
+    /// Momentary event pulse, forwarded to every open render window (events aren't stored).
+    func pulseEvent(_ name: String) {
+        preview.pulseEvent(name)
+        outputPulseSink?(name)
     }
 
     /// A header-authoring GUI edit produced new full source: adopt it, push it to the editor (no echo),

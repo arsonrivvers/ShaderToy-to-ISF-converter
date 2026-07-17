@@ -6,6 +6,8 @@ import ShadertoyISFKit
 struct HeaderPanelView: View {
     @ObservedObject var coordinator: PreviewCoordinator
     @ObservedObject var model: HeaderAuthoringModel
+    @ObservedObject var store: ParamStore
+    var onPulse: (String) -> Void
     enum Tab: String, CaseIterable { case adjust = "Adjust", inputs = "Inputs", passes = "Passes" }
     @State private var tab: Tab = .adjust
 
@@ -17,7 +19,7 @@ struct HeaderPanelView: View {
             .labelsHidden().pickerStyle(.segmented).padding(.horizontal, 6).padding(.top, 4)
             Divider().padding(.top, 4)
             switch tab {
-            case .adjust: PreviewControlsView(coordinator: coordinator)
+            case .adjust: PreviewControlsView(coordinator: coordinator, store: store, onPulse: onPulse)
             case .inputs: InputsAuthoringView(model: model)
             case .passes: PassesAuthoringView(model: model)
             }
