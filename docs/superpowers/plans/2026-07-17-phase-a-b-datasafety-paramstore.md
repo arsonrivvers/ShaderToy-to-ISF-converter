@@ -16,6 +16,8 @@
 - Stage builds ONLY via `./scripts/run-latest.sh`; verify freshness via compiled string literals or build log + dylib mtime (comments never land in binaries).
 - Commit per task; never `git add -A` (concurrent sessions).
 - Event inputs stay momentary (pulse-only) in this plan — no held-state modeling (YAGNI until the VJ app).
+- **Explicit deferrals (PM review 2026-07-17):** persistent-buffer continuity across recompiles (see Task 8 Step 4 + ROADMAP B2 mechanism decision); null_signal "skip-at-identity gate" — N/A in the editor's single-scene render path (nothing to bypass; the shader IS the content) — applies to the future VJ compositor only.
+- Also update the six numbered steps below Task 7 accordingly (Step 4 inserted; old Step 5 is now Step 6).
 
 ---
 
@@ -291,8 +293,10 @@ The view NO LONGER calls `coordinator.setInput` — the store's `onSet` does (Ta
 
 - [ ] **Step 2:** All four document-replacement paths call `paramStore.resetAll()` (same places as Task 1 Step 3).
 - [ ] **Step 3:** Pop-out replay: `OutputWindowManager` gets `var onSceneInstalled: (() -> Void)?` passthrough on its coordinator too; `EditorScreen.onAppear` sets `output.coordinator.onSceneInstalled = { vm.paramStore.replayAll() }` — one store, two sinks, both replayed on their own compile cadence. Event pulses: in `EditorScreen`, the event control path goes through `vm.pulseEvent(name)` which calls `preview.pulseEvent` AND `output.coordinator.pulseEvent` when open (add the tiny forwarder to EditorViewModel; update `PreviewControlsView` to call a closure `onPulse` instead of the coordinator directly).
-- [ ] **Step 4: Tests** (`ParamStoreWiringTests`): fake sinks record (name, json); assert a `store.set` reaches both sinks; assert `onSceneInstalled` → all values replayed; assert `resetAll` on document switch (via `vm.newUntitled()` with dirty-guard bypassed as existing tests do).
-- [ ] **Step 5: Run tests + `./scripts/run-latest.sh`; on-device check:** drag slider → edit code → value HOLDS after recompile; pop-out reflects slider drags live. Commit `feat(params): store wiring — dual-sink forward + replay on scene install (B1c)`
+- [ ] **Step 4 (B3 double-transpile mitigation):** gate the pop-out reload on inline compile success — in `EditorScreen`, replace the `onChange(of: vm.file.source) { output.update(...) }` feed with a sink on the preview's compile-success (e.g. call `output.update(source:)` from the same place `compileValid` flips true, passing the validated source). The pop-out no longer transpiles broken intermediate states; the remaining dual transpile of GOOD sources is accepted — sharing one `ISFMSLScene` across two render threads is unsafe (scene-internal pass targets), and window independence is the feature.
+
+- [ ] **Step 5: Tests** (`ParamStoreWiringTests`): fake sinks record (name, json); assert a `store.set` reaches both sinks; assert `onSceneInstalled` → all values replayed; assert `resetAll` on document switch (via `vm.newUntitled()` with dirty-guard bypassed as existing tests do).
+- [ ] **Step 6: Run tests + `./scripts/run-latest.sh`; on-device check:** drag slider → edit code → value HOLDS after recompile; pop-out reflects slider drags live. Commit `feat(params): store wiring — dual-sink forward + replay on scene install (B1c)`
 
 ### Task 8 (B2): Time continuity across recompiles
 

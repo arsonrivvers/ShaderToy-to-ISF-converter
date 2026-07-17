@@ -39,10 +39,14 @@ This single refactor:
 - unlocks presets, write-back-to-header, automation, and (future app) MIDI/OSC mapping
 - makes param behavior unit-testable at all
 
-**B2 — Scene continuity across recompiles.** Use the vendored `loadURL:resetTimer:NO` (already
-in ISFMSLKit's API) + ParamStore value replay after `applyCompile`. Kills the animation-restart
-flash on every keystroke; makes feedback/persistent-buffer shaders editable. Give reset an
-explicit control instead (see D-transport).
+**B2 — Time + param continuity across recompiles.** App-owned pausable `RenderClock` in
+`MetalRenderCore` driving `ISFMSLSafeRenderAtTime` (survives scene swaps) + ParamStore value
+replay after `applyCompile`. Kills the animation-restart flash on every keystroke. _Mechanism
+decision 2026-07-17 (PM review): NOT `loadURL:resetTimer:NO` on the live scene — that runs a
+full synchronous transpile under the render lock (per-edit hitch) and abandons the
+validate-first crash containment. **Persistent-buffer contents still reset on recompile** —
+explicit deferral; revisit as an opt-in "reload in place" if feedback-shader authoring demands
+it. Reset becomes an explicit control (see D-transport)._
 
 **B3 — Pop-out parity.** Route ParamStore changes + event pulses to the output window's
 controller; stop double-transpiling (share the compile or forward the compiled scene).
