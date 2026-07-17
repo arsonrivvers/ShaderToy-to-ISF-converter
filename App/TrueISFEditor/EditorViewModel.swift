@@ -121,6 +121,20 @@ final class EditorViewModel: ObservableObject {
         outputPulseSink?(name)
     }
 
+    // MARK: pop-out editing mode (D0)
+
+    /// True while the output window is popped out: the inline preview pauses (GPU + clock) and
+    /// EditorScreen collapses the preview pane so Adjust/Inputs/Passes gets the freed space.
+    /// Intended use: output on a second monitor, laptop screen becomes a pure editing surface.
+    @Published private(set) var popOutEditing = false
+
+    /// Driven by EditorScreen from the output window's published isOpen.
+    func setPopOutOpen(_ open: Bool) {
+        guard popOutEditing != open else { return }
+        popOutEditing = open
+        preview.setPaused(open)
+    }
+
     /// A header-authoring GUI edit produced new full source: adopt it, push it to the editor (no echo),
     /// and recompile. The header model already holds the matching parsed header.
     private func applyHeaderRewrite(_ newSource: String) {

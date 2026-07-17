@@ -43,6 +43,24 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertEqual(vm.documentGeneration, g0 + 3, "same-doc edits must not bump")
     }
 
+    // MARK: D0 — pop-out editing mode
+
+    func testSetPopOutOpen_pausesAndResumesInlinePreview() {
+        let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate))
+        XCTAssertFalse(vm.popOutEditing)
+
+        vm.setPopOutOpen(true)
+        XCTAssertTrue(vm.popOutEditing)
+        XCTAssertTrue(vm.preview.isPaused, "pop-out must pause the inline render loop")
+
+        vm.setPopOutOpen(true)   // idempotent — repeated opens don't stack
+        XCTAssertTrue(vm.preview.isPaused)
+
+        vm.setPopOutOpen(false)
+        XCTAssertFalse(vm.popOutEditing)
+        XCTAssertFalse(vm.preview.isPaused, "closing the pop-out must resume the inline preview")
+    }
+
     func testDefaultRenderSizeIs1080p16x9() {
         let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate))
         XCTAssertEqual(vm.renderWidth, 1920)
