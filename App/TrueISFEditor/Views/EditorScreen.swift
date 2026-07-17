@@ -57,7 +57,8 @@ struct EditorScreen: View {
                         Text(vm.file.displayName).font(.headline)
                         if vm.file.isDirty { Text("•").foregroundStyle(.secondary) }
                         Spacer()
-                        RenderStatsSlot(coordinator: vm.preview)
+                        // D0: the readout follows the live window — pop-out coordinator while out.
+                        RenderStatsSlot(coordinator: vm.popOutEditing ? output.coordinator : vm.preview)
                         Button {
                             output.show(source: vm.file.source)
                             applyResolution()
@@ -65,7 +66,9 @@ struct EditorScreen: View {
                         } label: {
                             Image(systemName: "rectangle.portrait.and.arrow.forward")
                         }
-                        .help("Pop out the output into its own window")
+                        .help(vm.popOutEditing
+                              ? "Output is popped out — close its window (or Restore Preview) to bring the inline preview back"
+                              : "Pop out the output into its own window")
                     }
                     .padding(6)
                     renderControlsBar
@@ -73,15 +76,23 @@ struct EditorScreen: View {
                         .padding(.bottom, 4)
                     // Preview over controls with a user-draggable divider — the controls panel
                     // gets real vertical space (a fixed 210pt strip hid all but ~4 sliders).
+                    // D0: while the output window is popped out the preview pane collapses
+                    // entirely — the panel gets the full column and the inline render loop is
+                    // paused (vm.popOutEditing).
                     VSplitView {
-                        ISFPreviewView(coordinator: vm.preview)
-                            .frame(minHeight: 200, maxHeight: .infinity)
-                        HeaderPanelView(coordinator: vm.preview, model: vm.headerModel,
-                                        store: vm.paramStore, onPulse: { vm.pulseEvent($0) })
-                            .frame(minHeight: 180, maxHeight: .infinity)
-                            // Fresh @State per document (M30): without this, a new shader whose
-                            // inputs share names with the old one keeps the old slider values.
-                            .id(vm.documentGeneration)
+                        if !vm.popOutEditing {
+                            ISFPreviewView(coordinator: vm.preview)
+                                .frame(minHeight: 200, maxHeight: .infinity)
+                        }
+                        VStack(spacing: 0) {
+                            if vm.popOutEditing { popOutBanner }
+                            HeaderPanelView(coordinator: vm.preview, model: vm.headerModel,
+                                            store: vm.paramStore, onPulse: { vm.pulseEvent($0) })
+                        }
+                        .frame(minHeight: 180, maxHeight: .infinity)
+                        // Fresh @State per document (M30): without this, a new shader whose
+                        // inputs share names with the old one keeps the old slider values.
+                        .id(vm.documentGeneration)
                     }
                 }
                 .frame(minWidth: 320)
@@ -123,6 +134,7 @@ struct EditorScreen: View {
         // A3: assist results are document-scoped — a fix/suggestion generated against doc A must
         // not render (or apply) once doc B is loaded.
         .onChange(of: vm.documentGeneration) { _ in shaderAssist.resetForDocumentSwitch() }
+        .onReceive(output.$isOpen) { vm.setPopOutOpen($0) }
         .onChange(of: vm.fitToWindow) { _ in applyResolution() }
         .onChange(of: vm.renderWidth) { _ in applyResolution() }
         .onChange(of: vm.renderHeight) { _ in applyResolution() }
@@ -255,6 +267,20 @@ struct EditorScreen: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// D0: shown in place of the inline preview while the output window is popped out.
+    private var popOutBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rectangle.on.rectangle")
+            Text("Output popped out — inline preview paused")
+            Spacer()
+            Button("Restore Preview") { output.close() }
+                .controlSize(.small)
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5))
     }
 
     /// Responsive render toolbar (A2): one row when it fits, wraps to two rows when the preview column
