@@ -100,7 +100,7 @@ final class EditorViewModel: ObservableObject {
     var confirmDiscardIfDirty: () -> Bool = { EditorViewModel.askDiscardUnsavedChanges() }
 
     /// The one choke point every document-replacing path goes through.
-    private func canReplaceDocument() -> Bool {
+    func canReplaceDocument() -> Bool {
         if !file.isDirty { return true }
         if confirmDiscardIfDirty() { return true }
         statusMessage = "Kept unsaved changes"
