@@ -63,6 +63,11 @@ the memory ratchet remains a known issue mitigated by the size cap._
 
 Ranked by payoff:
 
+0. **Pop-out editing mode** (Conner, 2026-07-17 on-device review): when the output window is
+   popped out, STOP the inline preview's rendering (GPU saved — pause its driver, collapse the
+   preview pane) and let the Adjust/Inputs/Passes panel expand into the freed space. Intended
+   use: output on a second monitor, laptop screen becomes a pure editing surface. Restore the
+   inline preview when the pop-out closes.
 1. **Version snapshots.** Auto-snapshot before every AI apply and on open; a versions list with
    restore. Biggest trust-builder for AI-assisted editing.
 2. **Real diff in the apply preview.** Today: two raw unhighlighted text columns
