@@ -94,4 +94,72 @@ final class ParamStoreTests: XCTestCase {
         XCTAssertNil(ParamStore.defaultValue(for: input("i", "image")))
         XCTAssertNil(ParamStore.defaultValue(for: input("e", "event")))
     }
+
+    // MARK: D1 — snapshot codec (null_signal preset doctrine)
+
+    func testParamSnapshotRoundTripsAllKinds() throws {
+        let snapshot = ParamSnapshot(params: [
+            "gain": .float(0.75),
+            "invert": .bool(true),
+            "mode": .long(3),
+            "center": .point2D([0.25, 0.5]),
+            "tint": .color([1, 0, 0.5, 1]),
+        ])
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ParamSnapshot.self, from: data)
+        XCTAssertEqual(decoded, snapshot)
+        XCTAssertEqual(decoded.version, 1)
+    }
+
+    func testDecodingSkipsCorruptEntriesWithoutFailing() throws {
+        // point2D with wrong arity + an unknown type tag: both skipped, healthy entry survives.
+        let json = """
+        {"version":1,"params":{
+            "ok":{"type":"float","value":0.5},
+            "badPoint":{"type":"point2D","value":[1.0]},
+            "future":{"type":"quaternion","value":[0,0,0,1]}
+        }}
+        """
+        let decoded = try JSONDecoder().decode(ParamSnapshot.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.params, ["ok": .float(0.5)])
+    }
+
+    func testExportApplySnapshotReplaysThroughSinks() {
+        let store = ParamStore()
+        store.syncInputs([input("gain", "float", def: 0.2, min: 0.0, max: 1.0)])
+        store.set("gain", .float(0.9))
+        let snapshot = store.exportSnapshot()
+        XCTAssertEqual(snapshot.params, ["gain": .float(0.9)])
+
+        let fresh = ParamStore()
+        fresh.syncInputs([input("gain", "float", def: 0.2, min: 0.0, max: 1.0)])
+        var sent: [(String, String)] = []
+        fresh.onSet = { sent.append(($0, $1)) }
+        fresh.applySnapshot(snapshot)
+        XCTAssertEqual(fresh.values, ["gain": .float(0.9)])
+        XCTAssertTrue(sent.contains { $0.0 == "gain" && $0.1 == "0.9" },
+                      "apply must replay values into the render sinks")
+    }
+
+    func testApplySnapshotSkipsTypeDriftAgainstKnownDefaults() {
+        let store = ParamStore()
+        store.syncInputs([input("gain", "float", def: 0.2, min: 0.0, max: 1.0)])
+        store.applySnapshot(ParamSnapshot(params: ["gain": .bool(true),      // drifted: known input, wrong kind
+                                                   "later": .float(0.4)]))   // unknown input: kept, pruned on next syncInputs
+        XCTAssertEqual(store.values, ["later": .float(0.4)])
+    }
+
+    func testApplySnapshotClampsToCurrentHeaderRange() {
+        let store = ParamStore()
+        store.syncInputs([input("gain", "float", def: 0.2, min: 0.0, max: 1.0),
+                          input("center", "point2D", def: [0.5, 0.5], min: [0.0, 0.0], max: [1.0, 1.0]),
+                          input("tint", "color", def: [1, 1, 1, 1])])
+        // Captured under an older, wider header range — must clamp to the LIVE range on apply.
+        store.applySnapshot(ParamSnapshot(params: ["gain": .float(2.0),
+                                                   "center": .point2D([-0.5, 3.0]),
+                                                   "tint": .color([2.0, -1.0, 0.5, 1.0])]))
+        XCTAssertEqual(store.values["gain"], .float(1.0))
+        XCTAssertEqual(store.values["center"], .point2D([0.0, 1.0]))
+        XCTAssertEqual(store.values["tint"], .color([1.0, 0.0, 0.5, 1.0]))
+    }
 }
