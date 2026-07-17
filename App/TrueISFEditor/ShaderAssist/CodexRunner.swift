@@ -51,6 +51,15 @@ final class CodexRunner: AssistProvider {
                 }.value
             } onCancel: { proc.cancel() }
         }
+        catch AssistRunError.timedOut(let partial) {
+            // Salvage: a completed agent_message means the answer landed before the timer fired.
+            let salvaged = Self.finalMessage(fromCodexJSON: partial)
+            if !Task.isCancelled, !salvaged.isEmpty, Self.errorMessage(fromCodexJSON: partial) == nil {
+                onEvent("⏱️ Timed out during teardown, but the completed answer was salvaged.")
+                return salvaged
+            }
+            throw AssistRunError.timedOut(partialStdout: partial)
+        }
         catch let e as AssistRunError { throw e }
         catch { throw AssistRunError.processFailed("\(error)") }
         if Task.isCancelled { throw CancellationError() }   // cancel-terminated exit isn't a real failure

@@ -129,12 +129,36 @@ final class ClaudeCodeRunner: AssistProvider {
                 }.value
             } onCancel: { proc.cancel() }
         }
+        catch AssistRunError.timedOut(let partial) {
+            // Salvage: if the final `result` event already streamed, the run FINISHED — only process
+            // teardown outlived the timer. Return the completed answer instead of discarding it.
+            if !Task.isCancelled, let salvaged = Self.resultEvent(fromStreamJSON: partial) {
+                onEvent("⏱️ Timed out during teardown, but the completed answer was salvaged.")
+                return salvaged
+            }
+            throw AssistRunError.timedOut(partialStdout: partial)
+        }
         catch let e as AssistRunError { throw e }
         catch { throw AssistRunError.processFailed("\(error)") }
         // A cancel-terminated process exits non-zero; don't surface that as a real failure.
         if Task.isCancelled { throw CancellationError() }
         if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
         return Self.finalMessage(fromStreamJSON: out.stdout)
+    }
+
+    /// The `result` event's text, ONLY if one is present — unlike `finalMessage`, no fallback to
+    /// assistant text (a mid-stream kill leaves assistant text without a result; that's not a
+    /// completed run and must stay a timeout).
+    static func resultEvent(fromStreamJSON stdout: String) -> String? {
+        var resultText: String?
+        for line in stdout.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  (obj["type"] as? String) == "result",
+                  let r = obj["result"] as? String else { continue }
+            resultText = r
+        }
+        return resultText
     }
 
     /// Extract the final assistant text from a claude `stream-json` stream: prefer the `result` event;
@@ -282,7 +306,10 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
                 kill(p.processIdentifier, SIGKILL)
                 _ = exited.wait(timeout: .now() + 1)
             }
-            throw AssistRunError.timedOut
+            // The kill closes the pipes, so the readers EOF promptly; bounded wait, then hand the
+            // collected stdout to the caller — the answer may have completed before the timer fired.
+            _ = group.wait(timeout: .now() + 2)
+            throw AssistRunError.timedOut(partialStdout: String(decoding: outBox.value, as: UTF8.self))
         }
         group.wait()
         return ProcessOutput(stdout: String(decoding: outBox.value, as: UTF8.self),

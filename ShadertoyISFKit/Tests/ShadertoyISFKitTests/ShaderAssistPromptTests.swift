@@ -29,6 +29,22 @@ final class ShaderAssistPromptTests: XCTestCase {
         XCTAssertTrue(p.contains("1: void main(){}"))
     }
 
+    func testResearchSystemHasIdeasSchemaAndSkillMining() {
+        let s = ShaderAssistPrompt.system(for: .research(request: "analog video decay"))
+        XCTAssertTrue(s.contains("\"ideas\""))
+        XCTAssertTrue(s.contains("3-6"))
+        XCTAssertTrue(s.contains("technique catalog"))
+        XCTAssertTrue(s.contains("THIS"))   // must demand shader-specific application, not generic advice
+    }
+
+    func testResearchUserPromptIncludesRequestAndSource() {
+        let p = ShaderAssistPrompt.user(task: .research(request: "analog video decay"),
+                                        source: "void main(){}",
+                                        diagnostics: [])
+        XCTAssertTrue(p.contains("Request: analog video decay"))
+        XCTAssertTrue(p.contains("1: void main(){}"))
+    }
+
     func testApplyPromptIncludesSelectedIdeas() {
         let idea = AIIdea(id: "speed-slider", title: "Expose speed", detail: "Make speed live",
                           kind: "make-interactive", lines: [23], impact: "Playable speed")

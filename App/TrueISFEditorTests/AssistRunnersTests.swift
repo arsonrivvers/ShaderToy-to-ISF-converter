@@ -36,6 +36,25 @@ final class CodexRunnerTests: XCTestCase {
         }
     }
 
+    /// Timeout salvage (Codex analog): a completed agent_message in the partial stream is the
+    /// answer — return it instead of discarding the run.
+    func testCodexTimeoutSalvagesCompletedAgentMessage() async throws {
+        let partial = "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"DONE\"}}"
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        let final = try await runner.run(prompt: "P", system: "S", model: nil)
+        XCTAssertEqual(final, "DONE")
+    }
+
+    func testCodexTimeoutWithoutAgentMessageStillThrows() async {
+        let partial = "{\"type\":\"item.started\",\"item\":{\"type\":\"agent_message\"}}"
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        do { _ = try await runner.run(prompt: "P", system: "S", model: nil); XCTFail("expected timeout") }
+        catch AssistRunError.timedOut { /* expected */ }
+        catch { XCTFail("wrong error \(error)") }
+    }
+
     func testCodexDefaultModelOmitsDashM() async throws {
         let fake = ClaudeCodeRunnerTests.FakeProcess(stdout: "{}", exitCode: 0, stderr: "")
         let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })

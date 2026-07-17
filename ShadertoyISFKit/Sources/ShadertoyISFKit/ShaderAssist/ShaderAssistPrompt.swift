@@ -40,6 +40,18 @@ public enum ShaderAssistPrompt {
             Preserve the shader's visual identity unless the selected goal explicitly asks for transformation. \
             Schema: {"explanation": string, "replacementSource": string, "changedLines": [int]}.
             """
+        case .research(request: _):
+            return common + "\n" + """
+            The user wants to explore an upgrade direction for this shader. Dig through the loaded skill \
+            knowledge (isf-shader-development, shader-dev, and the technique catalog when present) and \
+            propose 3-6 concrete, implementable upgrades that serve the request. Each idea must name the \
+            technique in "title", and in "detail" describe specifically how it would be applied to THIS \
+            shader — cite its actual passes, inputs, or functions, not generic advice. Rank the best idea \
+            first and rate each idea's visual payoff in "impact". \
+            Schema: {"goal": string (the user's request), "ideas": [ {"id": string, "title": string, \
+            "detail": string, "kind": string (one of: make-interactive, design, technique, perf), \
+            "lines": [int] or null, "impact": string or null} ]}.
+            """
         }
     }
 
@@ -69,6 +81,8 @@ public enum ShaderAssistPrompt {
             \(ideasJSON)
             Return the full replacement source in "replacementSource".
             """
+        case .research(let request):
+            header = "Research upgrade directions for this ISF shader using the loaded skill knowledge.\nRequest: \(request)"
         }
 
         return """

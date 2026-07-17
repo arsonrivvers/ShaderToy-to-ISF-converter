@@ -173,6 +173,71 @@ final class ShaderAssistViewModelTests: XCTestCase {
         }
     }
 
+    // MARK: Research tab
+
+    func testResearchUpgradesLandsInSuggestionsState() async {
+        let provider = FakeAssistProvider([.success(#"{"goal":"analog decay","ideas":[{"id":"phosphor","title":"Phosphor-lag feedback","detail":"Per-channel decay in PASS 2","kind":"technique","lines":[12],"impact":"High"}]}"#)])
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+        vm.researchUpgrades(request: "  analog decay  ", source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        XCTAssertEqual(vm.activeSuggestionGoal, "analog decay")   // trimmed
+        if case .suggestions(let r) = vm.state {
+            XCTAssertEqual(r.ideas[0].id, "phosphor")
+            XCTAssertEqual(vm.lastSuggestions, r)
+        } else {
+            XCTFail("expected suggestions, got \(vm.state)")
+        }
+        XCTAssertTrue(provider.prompts[0].contains("analog decay"))
+        XCTAssertTrue(provider.prompts[0].contains("Research upgrade directions"))
+    }
+
+    func testResearchUpgradesBlankRequestIsNoOp() async {
+        let vm = ShaderAssistViewModel(providerOverride: nil)
+        vm.researchUpgrades(request: "   ", source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        if case .idle = vm.state {} else { XCTFail("expected idle, got \(vm.state)") }
+        XCTAssertNil(vm.activeSuggestionGoal)
+    }
+
+    // MARK: Timeout resilience
+
+    /// The 240s cap discarded a COMPLETED 239.3s suggestions rewrite; the run timeout must stay at
+    /// the Remix-proven 420s margin and reach the provider.
+    func testRunPassesRaisedTimeoutToProvider() async {
+        XCTAssertEqual(ShaderAssistViewModel.runTimeout, 420)
+        let provider = FakeAssistProvider([.success(#"{"goals":[]}"#)])
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+        vm.requestSuggestionGoals(source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        XCTAssertEqual(provider.lastTimeout, 420)
+    }
+
+    func testRetryLastRunRerunsSameRequestAfterError() async {
+        let provider = FakeAssistProvider([
+            .failure(AssistRunError.timedOut(partialStdout: "")),
+            .success(#"{"goal":"Expose controls","ideas":[{"id":"speed","title":"Speed","detail":"d","kind":"perf","lines":null,"impact":null}]}"#),
+        ])
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+        vm.chooseSuggestionGoal("Expose controls", source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        if case .error(let m) = vm.state { XCTAssertTrue(m.contains("timed out")) }
+        else { return XCTFail("expected error, got \(vm.state)") }
+        XCTAssertTrue(vm.canRetry)
+        vm.retryLastRun()
+        await settle()
+        if case .suggestions(let r) = vm.state { XCTAssertEqual(r.ideas[0].id, "speed") }
+        else { XCTFail("expected suggestions after retry, got \(vm.state)") }
+        XCTAssertEqual(provider.prompts.count, 2)
+        XCTAssertEqual(provider.prompts[0], provider.prompts[1])   // identical re-run
+    }
+
+    func testRetryIsNoOpBeforeAnyRun() {
+        let vm = ShaderAssistViewModel(providerOverride: nil)
+        XCTAssertFalse(vm.canRetry)
+        vm.retryLastRun()
+        if case .idle = vm.state {} else { XCTFail("expected idle") }
+    }
+
     func testApplyRejectsReplacementWithMalformedISFHeader() async {
         let idea = AIIdea(id: "speed", title: "Speed", detail: "Expose speed",
                           kind: "make-interactive", lines: [3], impact: "Playable")
@@ -206,6 +271,8 @@ private final class HangingAssistProvider: AssistProvider {
 private final class FakeAssistProvider: AssistProvider {
     var scripts: [Result<String, Error>]
     private(set) var prompts: [String] = []
+    private(set) var systems: [String] = []
+    private(set) var lastTimeout: TimeInterval = 0
 
     init(_ scripts: [Result<String, Error>]) {
         self.scripts = scripts
@@ -214,6 +281,8 @@ private final class FakeAssistProvider: AssistProvider {
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
              onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
         prompts.append(prompt)
+        systems.append(system)
+        lastTimeout = timeout
         let result = scripts.removeFirst()
         switch result {
         case .success(let text):

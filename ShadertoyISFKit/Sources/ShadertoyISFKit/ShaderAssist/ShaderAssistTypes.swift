@@ -5,6 +5,9 @@ public enum ShaderAssistTask: Sendable, Equatable {
     case suggestionGoals
     case suggestions(goal: String)
     case applySuggestions(goal: String, selectedIdeas: [AIIdea])
+    /// Research tab: mine the loaded skill knowledge for concrete upgrade ideas serving a free-text
+    /// user request. Returns the same ideas schema as `.suggestions` so selection/apply are shared.
+    case research(request: String)
 }
 
 public struct AIEdit: Codable, Equatable, Sendable {

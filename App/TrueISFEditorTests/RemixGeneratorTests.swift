@@ -38,7 +38,7 @@ final class RemixGeneratorTests: XCTestCase {
     }
 
     func test_generate_partialFailure_marksThatChildFailed_othersOK() async {
-        let provider = FakeProvider([.success("```glsl\n\(isf)\n```"), .failure(AssistRunError.timedOut)])
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```"), .failure(AssistRunError.timedOut(partialStdout: ""))])
         let gen = RemixGenerator(makeProvider: { provider }, model: nil, systemProvider: { "" })
         var children: [RemixNode] = []
         await gen.generate(parents: ["/*{A}*/"], mode: .mutate, steer: "", batchSize: 2, round: 1) {

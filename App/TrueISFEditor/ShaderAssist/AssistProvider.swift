@@ -17,7 +17,11 @@ protocol AssistProvider {
 
 /// Shared error type for both CLI providers.
 enum AssistRunError: Error, Equatable {
-    case binaryNotFound, notAuthenticated, timedOut, processFailed(String)
+    case binaryNotFound, notAuthenticated, processFailed(String)
+    /// `partialStdout` carries whatever the CLI streamed before the timer fired, so runners can
+    /// salvage a run whose ANSWER completed but whose teardown outlived the timeout (a real 239.3s
+    /// suggestions run was discarded this way at the old 240s cap).
+    case timedOut(partialStdout: String)
 }
 
 /// The existing call sites + tests still refer to `ClaudeRunError`; keep it as an alias.

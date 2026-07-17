@@ -20,6 +20,15 @@ enum SkillPreamble {
                     userPath: "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md"),
     ]
 
+    /// The 964-shader corpus catalog (same file the Remix path inlines). Loaded ONLY for the
+    /// Research task — it's where "dig through the skills for techniques" pays off; other
+    /// ShaderAssist prompts stay lean.
+    static let techniqueCatalogSource = SkillSource(
+        name: "arsonrivvers_technique_catalog",
+        userPath: "\(NSHomeDirectory())/.claude/skills/isf-shader-development/references/arsonrivvers_technique_catalog.md")
+
+    static let researchSources = defaultSources + [techniqueCatalogSource]
+
     static let defaultPaths = [
         "\(NSHomeDirectory())/.claude/skills/isf-shader-development/SKILL.md",
         "\(NSHomeDirectory())/.claude/skills/shader-dev/SKILL.md",

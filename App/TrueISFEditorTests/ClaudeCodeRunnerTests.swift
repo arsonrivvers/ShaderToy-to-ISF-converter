@@ -116,6 +116,48 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         XCTAssertFalse(box.lines.contains { $0.contains("SECURITY") }, "should not warn at/above floor")
     }
 
+    /// Streams its canned stdout, then times out — stands in for a run whose answer landed before
+    /// the timer fired (the real 239.3s incident) or one that genuinely wedged.
+    final class TimingOutProcess: ProcessRunning, @unchecked Sendable {
+        let partial: String
+        init(partial: String) { self.partial = partial }
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            for line in partial.split(separator: "\n", omittingEmptySubsequences: false) { onLine(String(line)) }
+            throw AssistRunError.timedOut(partialStdout: partial)
+        }
+    }
+
+    /// Timeout salvage: a `result` event in the partial stream means the run FINISHED — the timer
+    /// only beat the CLI's teardown. The completed answer must be returned, not discarded (a real
+    /// 239.3s suggestions rewrite was lost this way at the old 240s cap).
+    func testTimeoutSalvagesCompletedResultEvent() async throws {
+        let partial = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n"
+            + "{\"type\":\"result\",\"result\":\"DONE\"}"
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        let final = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(final, "DONE")
+    }
+
+    /// No `result` event → the run genuinely didn't finish; assistant text alone must NOT be
+    /// salvaged (it's a mid-stream truncation, not an answer). Stays a timeout.
+    func testTimeoutWithoutResultEventStillThrows() async {
+        let partial = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"half an ans\"}]}}"
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        do { _ = try await runner.run(prompt: "P", system: "S", model: "m"); XCTFail("expected timeout") }
+        catch AssistRunError.timedOut { /* expected */ }
+        catch { XCTFail("wrong error \(error)") }
+    }
+
+    func testResultEventExtractorIgnoresAssistantText() {
+        XCTAssertNil(ClaudeCodeRunner.resultEvent(fromStreamJSON:
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"AB\"}]}}"))
+        XCTAssertEqual(ClaudeCodeRunner.resultEvent(fromStreamJSON:
+            "{\"type\":\"result\",\"result\":\"R\"}"), "R")
+    }
+
     /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
     /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
     /// the main actor that the @MainActor runner body needs to execute.

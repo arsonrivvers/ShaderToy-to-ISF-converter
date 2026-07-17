@@ -5,23 +5,35 @@ struct SuggestionGoalSheet: View {
     @ObservedObject var model: ShaderAssistViewModel
     let source: String
     let diagnostics: [Diagnostic]
-    /// All selected goals as ideas (AI goals + custom goals), in menu order, to implement directly.
+    /// All selected ideas (AI goals + custom goals on the quick tab, research ideas on the research
+    /// tab), in menu order, to implement directly.
     let onApply: ([AIIdea]) -> Void
 
+    enum AssistTab: String, CaseIterable, Identifiable {
+        case quickGoals = "Quick Goals"
+        case research = "Research"
+        var id: String { rawValue }
+    }
+
     @Environment(\.dismiss) private var dismiss
+    @State private var tab: AssistTab = .quickGoals
     @State private var customGoal = ""
-    /// Selected goal strings — AI goal titles and custom goal text share this set.
+    /// Selected goal strings — AI goal titles and custom goal text share this set (quick tab).
     @State private var selected: Set<String> = []
     /// Custom goals the user added, in the order they were added.
     @State private var customGoals: [String] = []
+    /// Free-text request for the research tab.
+    @State private var researchRequest = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("What do you want to improve?")
+                    Text(tab == .quickGoals ? "What do you want to improve?" : "Research an upgrade")
                         .font(.title3.bold())
-                    Text("Pick as many as you like — add your own too. ShaderAssist rewrites the shader to implement all of them, then shows you a preview before applying.")
+                    Text(tab == .quickGoals
+                         ? "Pick as many as you like — add your own too. ShaderAssist rewrites the shader to implement all of them, then shows you a preview before applying."
+                         : "Describe a direction. ShaderAssist digs through its shader skills and technique catalog and proposes concrete upgrades for this shader — pick the ones you like.")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
@@ -29,6 +41,55 @@ struct SuggestionGoalSheet: View {
                 Button("Cancel") { dismiss() }
             }
 
+            Picker("", selection: $tab) {
+                ForEach(AssistTab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if tab == .quickGoals {
+                quickGoalsContent
+            } else {
+                researchContent
+            }
+
+            Divider()
+            HStack {
+                Text("\(selectedCount) selected")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Apply Selected") {
+                    let ideas = tab == .quickGoals ? orderedSelectedIdeas : selectedResearchIdeas
+                    guard !ideas.isEmpty else { return }
+                    onApply(ideas)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedCount == 0)
+            }
+        }
+        .padding(18)
+        .frame(width: 560)
+        .frame(minHeight: 360)
+        .onAppear {
+            model.requestSuggestionGoals(source: source, diagnostics: diagnostics)
+        }
+        // Dismissing mid-run abandons the sheet's goals call — kill the CLI instead of letting it
+        // burn a ~30s subscription run and keep the main-screen buttons disabled until it finishes.
+        // A research run is NOT cancelled: its result lands in the main-screen SuggestionsPanel, so
+        // closing the sheet never throws a long run away.
+        .onDisappear { model.cancelSuggestionGoalsIfRunning() }
+    }
+
+    private var selectedCount: Int {
+        tab == .quickGoals ? selected.count : selectedResearchIdeas.count
+    }
+
+    // MARK: - Quick Goals tab (existing flow)
+
+    private var quickGoalsContent: some View {
+        Group {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     aiGoals
@@ -41,32 +102,7 @@ struct SuggestionGoalSheet: View {
             }
 
             customGoalField
-
-            Divider()
-            HStack {
-                Text("\(selected.count) selected")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Apply Selected") {
-                    let ideas = orderedSelectedIdeas
-                    guard !ideas.isEmpty else { return }
-                    onApply(ideas)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(selected.isEmpty)
-            }
         }
-        .padding(18)
-        .frame(width: 560)
-        .frame(minHeight: 360)
-        .onAppear {
-            model.requestSuggestionGoals(source: source, diagnostics: diagnostics)
-        }
-        // Dismissing mid-run abandons the sheet's goals call — kill the CLI instead of letting it
-        // burn a ~30s subscription run and keep the main-screen buttons disabled until it finishes.
-        .onDisappear { model.cancelSuggestionGoalsIfRunning() }
     }
 
     /// The AI-suggested goals (or the loading / error / empty states for that call).
@@ -192,5 +228,120 @@ struct SuggestionGoalSheet: View {
 
     private var trimmedCustomGoal: String {
         customGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Research tab
+
+    private var researchRunning: Bool {
+        if case .running(.research) = model.state { return true }
+        return false
+    }
+
+    private var selectedResearchIdeas: [AIIdea] {
+        guard let s = model.lastSuggestions else { return [] }
+        return s.ideas.filter { model.selectedIdeaIDs.contains($0.id) }
+    }
+
+    private var researchContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("e.g. make the trails feel like analog video decay",
+                      text: $researchRequest, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...5)
+                .onSubmit(startResearch)
+            HStack(spacing: 10) {
+                Button("Research Upgrades", action: startResearch)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(trimmedResearchRequest.isEmpty || researchRunning)
+                if researchRunning {
+                    ProgressView().controlSize(.small)
+                    Text("Digging through the shader skills...")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    Button("Cancel") { model.cancel() }
+                }
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    researchResults
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder private var researchResults: some View {
+        switch model.state {
+        case .suggestions(let result):
+            if result.ideas.isEmpty {
+                Text("Nothing concrete came back for that request. Try rephrasing it.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(result.ideas) { idea in
+                    researchIdeaRow(idea)
+                }
+            }
+        case .error(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(message)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                if model.canRetry {
+                    Button("Try Again") { model.retryLastRun() }
+                }
+            }
+        case .rawAnswer(let answer):
+            Text(answer)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func researchIdeaRow(_ idea: AIIdea) -> some View {
+        let isSelected = model.selectedIdeaIDs.contains(idea.id)
+        return HStack(alignment: .top, spacing: 8) {
+            Toggle("", isOn: Binding(get: { isSelected },
+                                     set: { _ in model.toggleIdeaSelection(idea.id) }))
+                .labelsHidden()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(idea.title)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(idea.kind)
+                        .font(.system(size: 14))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+                Text(idea.detail)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if let impact = idea.impact, !impact.isEmpty {
+                    Text(impact)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func startResearch() {
+        guard !trimmedResearchRequest.isEmpty, !researchRunning else { return }
+        model.researchUpgrades(request: trimmedResearchRequest,
+                               source: source, diagnostics: diagnostics)
+    }
+
+    private var trimmedResearchRequest: String {
+        researchRequest.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

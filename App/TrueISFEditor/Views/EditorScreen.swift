@@ -213,7 +213,15 @@ struct EditorScreen: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 280)
             case .error(let m):
-                Text(m).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                HStack(spacing: 8) {
+                    Text(m).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                    if shaderAssist.canRetry {
+                        // Re-runs the same request (task + source + selections) — a timed-out 4-minute
+                        // rewrite shouldn't force rebuilding the goal flow from scratch.
+                        Button("Try Again") { shaderAssist.retryLastRun() }
+                            .controlSize(.small)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
