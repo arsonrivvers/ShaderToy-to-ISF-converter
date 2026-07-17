@@ -8,6 +8,10 @@ final class OutputWindowManager: ObservableObject {
     private var window: NSWindow?
     let coordinator = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
 
+    /// D0: observable pop-out lifecycle — EditorScreen drives pop-out editing mode off this.
+    @Published private(set) var isOpen = false
+    private var closeObserver: NSObjectProtocol?
+
     /// Open (or focus) the output window and render the given source.
     func show(source: String) {
         coordinator.load(isf: source)
@@ -22,8 +26,25 @@ final class OutputWindowManager: ObservableObject {
             w.isReleasedWhenClosed = false
             w.center()
             window = w
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: w, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.isOpen = false }
+            }
         }
         window?.makeKeyAndOrderFront(nil)
+        isOpen = true
+    }
+
+    /// Close the pop-out programmatically (the inline "Restore Preview" affordance).
+    /// willCloseNotification flips isOpen.
+    func close() {
+        window?.close()
+    }
+
+    deinit {
+        // Block-based observers are not auto-removed (same rule as MetalPreviewController).
+        if let o = closeObserver { NotificationCenter.default.removeObserver(o) }
     }
 
     /// Push a new source if the window is open; no-op otherwise. Debounced — this is fed from the
@@ -48,8 +69,6 @@ final class OutputWindowManager: ObservableObject {
     func syncSelections(from inlineRouter: SourceRouter) {
         coordinator.imageSources.applySelections(from: inlineRouter)
     }
-
-    var isOpen: Bool { window?.isVisible == true }
 }
 
 private struct OutputWindowView: View {
