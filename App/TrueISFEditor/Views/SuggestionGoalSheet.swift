@@ -10,13 +10,13 @@ struct SuggestionGoalSheet: View {
     let onApply: ([AIIdea]) -> Void
 
     enum AssistTab: String, CaseIterable, Identifiable {
-        case quickGoals = "Quick Goals"
         case research = "Research"
+        case quickGoals = "Quick Goals"
         var id: String { rawValue }
     }
 
     @Environment(\.dismiss) private var dismiss
-    @State private var tab: AssistTab = .quickGoals
+    @State private var tab: AssistTab = .research
     @State private var customGoal = ""
     /// Selected goal strings — AI goal titles and custom goal text share this set (quick tab).
     @State private var selected: Set<String> = []
@@ -72,11 +72,11 @@ struct SuggestionGoalSheet: View {
         .padding(18)
         .frame(width: 560)
         .frame(minHeight: 360)
-        .onAppear {
-            model.requestSuggestionGoals(source: source, diagnostics: diagnostics)
-        }
+        // No call fires on open: the sheet starts on Research and the goals call is user-initiated
+        // (Generate Goals on the Quick Goals tab) — opening the sheet must never spend a ~30s
+        // subscription run the user didn't ask for.
         // Dismissing mid-run abandons the sheet's goals call — kill the CLI instead of letting it
-        // burn a ~30s subscription run and keep the main-screen buttons disabled until it finishes.
+        // burn the run and keep the main-screen buttons disabled until it finishes.
         // A research run is NOT cancelled: its result lands in the main-screen SuggestionsPanel, so
         // closing the sheet never throws a long run away.
         .onDisappear { model.cancelSuggestionGoalsIfRunning() }
