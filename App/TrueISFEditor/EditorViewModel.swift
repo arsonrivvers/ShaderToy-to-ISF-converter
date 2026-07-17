@@ -13,6 +13,8 @@ final class EditorViewModel: ObservableObject {
     @Published var statusMessage: String = ""
     /// Set by the "New from Shadertoy…" command; the editor screen presents the sheet.
     @Published var requestImport = false
+    /// Set by the Versions… command / toolbar button; EditorScreen presents the sheet.
+    @Published var requestVersions = false
     /// Bumped every time a DIFFERENT document replaces the current one (open/new/import/example) —
     /// NOT on recompiles of the same document. EditorScreen keys the controls panel's identity on
     /// this (M30): per-input control state must reset when the shader changes (same-named inputs
@@ -61,7 +63,11 @@ final class EditorViewModel: ObservableObject {
     }
     """
 
-    init(file: ISFFile? = nil) {
+    /// D1: version history. Injectable so tests point it at a temp directory.
+    let snapshots: SnapshotStore
+
+    init(file: ISFFile? = nil, snapshots: SnapshotStore? = nil) {
+        self.snapshots = snapshots ?? SnapshotStore()
         self.file = file ?? .untitled(source: Self.blankTemplate)
         editor.onChange = { [weak self] text in self?.sourceEdited(text) }
         // Nested ObservableObject: forward its changes so the diagnostics panel re-renders.
@@ -179,6 +185,7 @@ final class EditorViewModel: ObservableObject {
             statusMessage = ""
             paramStore.resetAll(); preview.resetTimeline(); editor.resetText(file.source)
             headerModel.syncFromText(file.source)
+            snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened")
             recompile(immediate: true)
         } catch {
             statusMessage = "Couldn't open \(entry.name): \(error.localizedDescription)"
@@ -207,6 +214,7 @@ final class EditorViewModel: ObservableObject {
         statusMessage = "Imported \(suggestedName)"
         paramStore.resetAll(); preview.resetTimeline(); editor.resetText(isf)
         headerModel.syncFromText(isf)
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Imported")
         // No pre-compile applyDiagnostics here: the source just changed, so preview's compile state is
         // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
         // the compileError/compileValid sink → applyDiagnostics with the new conversionWarnings merged.
@@ -223,6 +231,7 @@ final class EditorViewModel: ObservableObject {
         statusMessage = ""   // name is in the header; no toast (it covered sliders)
         paramStore.resetAll(); preview.resetTimeline(); editor.resetText(source)
         headerModel.syncFromText(source)
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened")
         recompile(immediate: true)
     }
 
@@ -253,6 +262,20 @@ final class EditorViewModel: ObservableObject {
         presentSaveErrorAlert(error)
     }
 
+    // MARK: versions (D1)
+
+    /// Restore a snapshot: source + params. No discard confirmation — the current state is
+    /// itself captured first, so restore is always undoable via the same list.
+    func restore(_ snapshot: Snapshot) {
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before restore")
+        file.source = snapshot.source
+        editor.setText(snapshot.source)
+        headerModel.syncFromText(snapshot.source)
+        paramStore.applySnapshot(snapshot.params)
+        recompile(immediate: true)
+        statusMessage = "Restored version — \(snapshot.label), \(snapshot.date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
     // MARK: fix apply
 
     /// Apply a fix-suggestion's edit through the editor, guarded so a stale edit can't corrupt the file.
@@ -265,12 +288,16 @@ final class EditorViewModel: ObservableObject {
                 return
             }
         }
+        // D1: every AI mutation is preceded by a restorable version.
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI fix")
         editor.applyTextEdit(fromLine: edit.fromLine, toLine: edit.toLine, edit.replacement)
         statusMessage = "Applied fix"
     }
 
     /// Replace the full editor source after a user-approved ShaderAssist diff.
     func replaceSourceFromAssist(_ source: String, status: String = "Applied ShaderAssist suggestions") {
+        // D1: capture the PRE-apply state — every AI mutation is preceded by a restorable version.
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI rewrite")
         file.source = source
         editor.setText(source)
         headerModel.syncFromText(source)
