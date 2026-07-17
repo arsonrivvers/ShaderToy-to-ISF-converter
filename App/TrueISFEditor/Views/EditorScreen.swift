@@ -108,6 +108,9 @@ struct EditorScreen: View {
             openSampleOnFirstRun()
         }
         .onChange(of: vm.file.source) { src in output.update(source: src) }
+        // A3: assist results are document-scoped — a fix/suggestion generated against doc A must
+        // not render (or apply) once doc B is loaded.
+        .onChange(of: vm.documentGeneration) { _ in shaderAssist.resetForDocumentSwitch() }
         .onChange(of: vm.fitToWindow) { _ in applyResolution() }
         .onChange(of: vm.renderWidth) { _ in applyResolution() }
         .onChange(of: vm.renderHeight) { _ in applyResolution() }
@@ -181,6 +184,15 @@ struct EditorScreen: View {
                 DiffReviewPanel(result: r,
                                 sourceLines: vm.file.source.components(separatedBy: "\n"),
                                 handled: $shaderAssist.handledEdits) { edit in
+                    // A3: the FIRST apply must be against the exact source the fix was generated
+                    // from (document-identity guard). Later applies legitimately see drift from
+                    // our own earlier edits — the per-edit expectedContains guard covers those.
+                    guard !shaderAssist.handledEdits.isEmpty ||
+                          shaderAssist.fixSourceFingerprint ==
+                          ShaderAssistViewModel.sourceFingerprint(vm.file.source) else {
+                        shaderAssist.reportStaleFix()
+                        return
+                    }
                     vm.apply(ShaderAssistViewModel.textEdit(from: edit, source: vm.file.source))
                 }
                 .frame(maxHeight: 280)

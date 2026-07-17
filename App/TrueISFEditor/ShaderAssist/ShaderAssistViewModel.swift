@@ -23,6 +23,9 @@ final class ShaderAssistViewModel: ObservableObject {
     @Published var activeSuggestionGoal: String?
     @Published var suggestionSourceFingerprint: String?
     @Published var applyPreviewSourceFingerprint: String?
+    /// A3: the source the current `.fix` result was generated against — the apply site must refuse
+    /// to map line edits onto a different document.
+    @Published private(set) var fixSourceFingerprint: String?
     @Published var selectedIdeaIDs: Set<String> = []
     @Published var lastSuggestions: AISuggestionsResult?
 
@@ -235,8 +238,10 @@ final class ShaderAssistViewModel: ObservableObject {
                 if Task.isCancelled { return }
                 switch t {
                 case .diagnoseAndFix:
-                    if let r = try? ShaderAssistResponseParser.fixResult(fromClaudeStdout: final) { self?.state = .fix(r) }
-                    else { self?.state = .rawAnswer(final) }
+                    if let r = try? ShaderAssistResponseParser.fixResult(fromClaudeStdout: final) {
+                        self?.fixSourceFingerprint = Self.sourceFingerprint(source)
+                        self?.state = .fix(r)
+                    } else { self?.state = .rawAnswer(final) }
                 case .suggestionGoals:
                     if let r = try? ShaderAssistResponseParser.suggestionGoals(fromClaudeStdout: final) { self?.state = .suggestionGoals(r) }
                     else { self?.state = .rawAnswer(final) }
@@ -264,6 +269,25 @@ final class ShaderAssistViewModel: ObservableObject {
                 self?.state = .error("\(error)")
             }
         }
+    }
+
+    /// A3: the shader changed (manual edits) between fix generation and the first apply — the
+    /// line numbers can't be trusted. Retry is cleared too: re-running against the stale source
+    /// would just reproduce the stale fix.
+    func reportStaleFix() {
+        lastRun = nil
+        fixSourceFingerprint = nil
+        state = .error("Shader changed since this fix was generated. Rerun Diagnose & Fix.")
+    }
+
+    /// A3: a fix (or any assist result) generated against one document must not survive into
+    /// another. Called on every documentGeneration change.
+    func resetForDocumentSwitch() {
+        task?.cancel()
+        lastRun = nil
+        fixSourceFingerprint = nil
+        handledEdits = []
+        startSuggestionFlowOver()
     }
 
     /// Cancel only when the goal sheet's own goals call is running — dismissing the sheet must not

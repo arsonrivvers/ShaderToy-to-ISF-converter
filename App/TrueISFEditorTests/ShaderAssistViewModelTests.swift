@@ -173,6 +173,28 @@ final class ShaderAssistViewModelTests: XCTestCase {
         }
     }
 
+    // MARK: A3 — fix-flow fingerprint + document-switch reset
+
+    func testFixResultCarriesSourceFingerprint() async {
+        let provider = FakeAssistProvider([.success(#"{"explanation":"E","edits":[{"fromLine":1,"toLine":1,"replacement":"x","rationale":"r"}]}"#)])
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+        let src = "/*{}*/\nvoid main(){}"
+        vm.run(.diagnoseAndFix, source: src, diagnostics: [])
+        await settle()
+        XCTAssertEqual(vm.fixSourceFingerprint, ShaderAssistViewModel.sourceFingerprint(src))
+    }
+
+    func testResetForDocumentSwitchClearsFixAndRetry() async {
+        let provider = FakeAssistProvider([.success(#"{"explanation":"E","edits":[]}"#)])
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+        vm.run(.diagnoseAndFix, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        vm.resetForDocumentSwitch()
+        if case .idle = vm.state {} else { XCTFail("expected idle, got \(vm.state)") }
+        XCTAssertNil(vm.fixSourceFingerprint)
+        XCTAssertFalse(vm.canRetry)
+    }
+
     // MARK: Research tab
 
     func testResearchUpgradesLandsInSuggestionsState() async {
