@@ -59,6 +59,10 @@ struct EditorScreen: View {
                         Spacer()
                         // D0: the readout follows the live window — pop-out coordinator while out.
                         RenderStatsSlot(coordinator: vm.popOutEditing ? output.coordinator : vm.preview)
+                        Button { vm.requestVersions = true } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                        }
+                        .help("Versions — restore an earlier state of this shader (⌘⌥V)")
                         Button {
                             output.show(source: vm.file.source)
                             applyResolution()
@@ -145,6 +149,9 @@ struct EditorScreen: View {
             ShadertoyImportSheet { isf, warnings, name in
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
             }
+        }
+        .sheet(isPresented: $vm.requestVersions) {
+            SnapshotListView(vm: vm)
         }
         .sheet(isPresented: $showSuggestionGoalSheet) {
             SuggestionGoalSheet(model: shaderAssist,

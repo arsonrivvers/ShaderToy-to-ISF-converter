@@ -226,6 +226,8 @@ void main() {
                     .keyboardShortcut("s")
                 Button("Save As…") { saveAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Versions…") { vm.requestVersions = true }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
             }
             CommandGroup(after: .windowArrangement) {
                 CrashLogMenuButton()
