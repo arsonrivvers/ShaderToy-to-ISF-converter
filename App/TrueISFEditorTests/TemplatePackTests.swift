@@ -6,6 +6,7 @@ import Metal
 final class TemplatePackTests: XCTestCase {
     func testTemplatesFolderIsBundled() {
         XCTAssertNotNil(TemplateCatalog.bundledTemplatesDir, "templates folder missing from bundle")
+        XCTAssertGreaterThanOrEqual(TemplateCatalog.all.count, 6, "wave-1 pack is six templates")
     }
 
     func testCatalogListsOnlyFSFiles() {

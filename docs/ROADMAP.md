@@ -63,15 +63,16 @@ the memory ratchet remains a known issue mitigated by the size cap._
 
 Ranked by payoff:
 
-0. **Pop-out editing mode** (Conner, 2026-07-17 on-device review): when the output window is
-   popped out, STOP the inline preview's rendering (GPU saved — pause its driver, collapse the
-   preview pane) and let the Adjust/Inputs/Passes panel expand into the freed space. Intended
-   use: output on a second monitor, laptop screen becomes a pure editing surface. Restore the
-   inline preview when the pop-out closes.
-1. **Version snapshots.** Auto-snapshot before every AI apply and on open; a versions list with
-   restore. Biggest trust-builder for AI-assisted editing.
-2. **Real diff in the apply preview.** Today: two raw unhighlighted text columns
-   (`ApplyPreviewPanel.swift`). A proper line diff changes whether users actually review.
+0. ~~**Pop-out editing mode**~~ **LANDED (Plan 2, 2026-07-17, STAGED).** `setPaused` through the
+   `PreviewEngine`/`PreviewCoordinator` seam + published `OutputWindowManager.isOpen` +
+   `EditorViewModel.popOutEditing`; preview pane collapses, panel expands, banner with Restore
+   Preview, FPS readout follows the pop-out.
+1. ~~**Version snapshots.**~~ **LANDED (Plan 2, 2026-07-17, STAGED).** `SnapshotStore` (bounded,
+   deduped, per-doc folders) + `ParamSnapshot` codec (validate-and-clamp per the null_signal
+   preset doctrine); auto-capture on open/import and before every AI apply; versions list
+   (⌘⌥V) with diff + restore, restore itself captured.
+2. ~~**Real diff in the apply preview.**~~ **LANDED (Plan 2, 2026-07-17, STAGED).** `LineDiff`
+   (LCS + folding) + `DiffView`, reused by the apply preview and versions list.
 3. **Still-image + movie-file input sources.** New `ImageSource` conformers
    (MTKTextureLoader / AVPlayerItemVideoOutput → CVMetalTextureCache — mirror
    `CameraFrameProvider`). Filter authoring against real footage.
@@ -89,7 +90,9 @@ Ranked by payoff:
    on declined discard.
 9. **point2D click-pad** on the preview (drag to set), instead of two sliders.
 10. **Templates + header autocomplete.** Filter / multipass / persistent-feedback starters;
-    completion for ISF JSON header keys (the most typo-prone part of ISF).
+    completion for ISF JSON header keys (the most typo-prone part of ISF). _Template
+    MECHANISM landed in Plan 2 (bundled `/templates` folder + `TemplateCatalog` + File ▸ New
+    from Template); generic starters + header autocomplete remain open._
 11. **Shortcut pass:** jump-to-next-error, apply-fix key, focus-editor key.
 
 ## Conversion pipeline (parallel track, independent of A/B/D)
@@ -152,6 +155,13 @@ control/output split, VSN1 MIDI surface, local-AI INTERPRETER. JS→Swift means 
 **patterns and shader math**, not code._
 
 ### Into the editor (A/B/D scope), ranked
+
+_Status 2026-07-17 (Plan 2): item 1 codec doctrine SHIPPED as `ParamSnapshot`
+(validate-and-clamp, skip-corrupt, name-keyed); item 2 affordances shipped in Plan 1;
+items 3–4 wave 1 SHIPPED as bundled `NS` templates (Mirror Kaleido, Pixel Sort, Chroma
+Leak, Bayer Dither, Feedback Echo, Layer Blend — MIT attribution in
+`THIRD_PARTY_LICENSES/null_signal.LICENSE.txt` + CREDIT headers). Wave 2 remaining:
+wind, ink (water finish), burn/scan/jitter CRT block, shader-side strobe._
 
 1. **Preset/snapshot model → ParamStore codec** (`capturePreset`/`applyPreset`,
    `src/main.js:3539/:4056`). Copy the design decisions: versioned flat JSON; key entries by
