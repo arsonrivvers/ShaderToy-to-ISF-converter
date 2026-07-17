@@ -92,6 +92,12 @@ struct EditorScreen: View {
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(.thinMaterial, in: Capsule())
                         .padding(.bottom, 6)
+                        // Auto-dismiss so no status ever sits over the sliders permanently;
+                        // task(id:) restarts the clock when a new message replaces this one.
+                        .task(id: vm.statusMessage) {
+                            try? await Task.sleep(nanoseconds: 5_000_000_000)
+                            vm.statusMessage = ""
+                        }
                 }
             }
         }

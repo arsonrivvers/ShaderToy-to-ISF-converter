@@ -3,8 +3,24 @@ import Foundation
 /// A single `.fs` file shown in the library sidebar.
 struct LibraryEntry: Identifiable, Hashable {
     let url: URL
+    let dateAdded: Date
+    let dateModified: Date
     var name: String { url.lastPathComponent }
     var id: URL { url }
+
+    init(url: URL, dateAdded: Date = .distantPast, dateModified: Date = .distantPast) {
+        self.url = url
+        self.dateAdded = dateAdded
+        self.dateModified = dateModified
+    }
+}
+
+/// Sidebar sort order for library entries.
+enum LibrarySort: String, CaseIterable, Identifiable {
+    case name = "Name"
+    case recentlyAdded = "Recently Added"
+    case recentlyModified = "Recently Modified"
+    var id: String { rawValue }
 }
 
 /// A folder the library lists `.fs` files from (User / System / user-added).
@@ -26,14 +42,32 @@ final class LibraryModel: ObservableObject {
     }
     private static let systemISFDir = URL(fileURLWithPath: "/Library/Graphics/ISF")
 
-    /// Enumerate `.fs` files in a folder, case-insensitive extension, sorted by name.
+    /// Enumerate `.fs` files in a folder, case-insensitive extension, sorted by name. Fetches file
+    /// dates during enumeration (metadata only, still content-lazy) so sort orders have data.
     static func scan(folder: URL) -> [LibraryEntry] {
         let fm = FileManager.default
-        let items = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
+        let items = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
         return items
             .filter { $0.pathExtension.lowercased() == "fs" }
-            .map { LibraryEntry(url: $0) }
+            .map { url -> LibraryEntry in
+                let vals = try? url.resourceValues(forKeys: Set(keys))
+                return LibraryEntry(url: url,
+                                    dateAdded: vals?.creationDate ?? .distantPast,
+                                    dateModified: vals?.contentModificationDate ?? .distantPast)
+            }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    static func sorted(_ entries: [LibraryEntry], by sort: LibrarySort) -> [LibraryEntry] {
+        switch sort {
+        case .name:
+            return entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .recentlyAdded:
+            return entries.sorted { $0.dateAdded > $1.dateAdded }
+        case .recentlyModified:
+            return entries.sorted { $0.dateModified > $1.dateModified }
+        }
     }
 
     func addFolder(_ url: URL, title: String? = nil) {
@@ -43,13 +77,20 @@ final class LibraryModel: ObservableObject {
         persist()
     }
 
-    func entries(for source: LibrarySource) -> [LibraryEntry] { entriesBySource[source.url] ?? [] }
+    func entries(for source: LibrarySource, sort: LibrarySort = .name) -> [LibraryEntry] {
+        Self.sorted(entriesBySource[source.url] ?? [], by: sort)
+    }
 
-    /// All entries across sources, filtered by a case-insensitive name substring.
-    func filtered(query: String) -> [LibraryEntry] {
+    /// All entries across sources, filtered by whitespace-separated tokens — EVERY token must
+    /// appear somewhere in the name (case-insensitive), in any order. "genuary 14" matches
+    /// "Genuary2026_Day14.fs"; a single token behaves like the old substring filter.
+    func filtered(query: String, sort: LibrarySort = .name) -> [LibraryEntry] {
+        let tokens = query.split(whereSeparator: \.isWhitespace).map(String.init)
         let all = sources.flatMap { entriesBySource[$0.url] ?? [] }
-        guard !query.isEmpty else { return all }
-        return all.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        let matched = tokens.isEmpty ? all : all.filter { entry in
+            tokens.allSatisfy { entry.name.localizedCaseInsensitiveContains($0) }
+        }
+        return Self.sorted(matched, by: sort)
     }
 
     /// First-launch: auto-load the standard ISF directories (no prompt) plus any user-added folders.

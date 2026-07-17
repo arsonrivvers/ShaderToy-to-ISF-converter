@@ -10,6 +10,9 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var selection: URL?
     @FocusState private var filterFocused: Bool
+    @AppStorage("librarySortOrder") private var sortRaw = LibrarySort.name.rawValue
+
+    private var sort: LibrarySort { LibrarySort(rawValue: sortRaw) ?? .name }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -17,6 +20,18 @@ struct LibraryView: View {
                 TextField("Filter…", text: $query)
                     .textFieldStyle(.roundedBorder)
                     .focused($filterFocused)
+                Menu {
+                    Picker("Sort", selection: $sortRaw) {
+                        ForEach(LibrarySort.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Sort: \(sort.rawValue)")
                 Button(action: addFolder) { Image(systemName: "folder.badge.plus") }
                     .help("Add a folder of .fs files")
             }
@@ -27,12 +42,12 @@ struct LibraryView: View {
                 if query.isEmpty {
                     ForEach(library.sources) { src in
                         Section("\(src.title) (\(library.entries(for: src).count))") {
-                            ForEach(library.entries(for: src)) { row($0) }
+                            ForEach(library.entries(for: src, sort: sort)) { row($0) }
                         }
                     }
                 } else {
                     Section("Results") {
-                        ForEach(library.filtered(query: query)) { row($0) }
+                        ForEach(library.filtered(query: query, sort: sort)) { row($0) }
                     }
                 }
             }

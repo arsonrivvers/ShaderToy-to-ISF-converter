@@ -124,7 +124,9 @@ final class EditorViewModel: ObservableObject {
             documentGeneration += 1
             conversionWarnings = []
             conversionReportTitle = nil
-            statusMessage = "Opened \(file.displayName)"
+            // No "Opened <name>" toast — the filename is already in the header, and the toast
+            // overlay was covering sliders. Clear any stale message instead.
+            statusMessage = ""
             editor.setText(file.source)
             headerModel.syncFromText(file.source)
             recompile(immediate: true)
@@ -168,7 +170,7 @@ final class EditorViewModel: ObservableObject {
         documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil
-        statusMessage = "Opened example: \(name)"
+        statusMessage = ""   // name is in the header; no toast (it covered sliders)
         editor.setText(source)
         headerModel.syncFromText(source)
         recompile(immediate: true)
