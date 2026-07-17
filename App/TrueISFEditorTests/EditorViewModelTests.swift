@@ -128,6 +128,17 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertNil(vm.conversionReportTitle)
     }
 
+    // MARK: A4 — save failures must raise the (injectable) alert, not just the 5s toast
+
+    func testSaveFailureRaisesAlert() {
+        let vm = EditorViewModel(file: .untitled(source: "x"))
+        var alerted: Error?
+        vm.presentSaveErrorAlert = { alerted = $0 }
+        vm.saveAs(URL(fileURLWithPath: "/nonexistent-dir-a4/\(UUID().uuidString)/f.fs"))
+        XCTAssertNotNil(alerted, "failed save must surface via the alert path")
+        XCTAssertTrue(vm.statusMessage.contains("Save failed"))
+    }
+
     // MARK: A1 — document switches must DROP editor undo history (resetText), while in-document
     // programmatic replacements (AI apply) must stay undoable (setText). Before the fix, ⌘Z after
     // opening doc B restored doc A's text into B and ⌘S corrupted B's file.

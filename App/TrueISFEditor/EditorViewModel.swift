@@ -181,11 +181,26 @@ final class EditorViewModel: ObservableObject {
     var needsSaveAs: Bool { file.needsSaveAs }
     func saveInPlace() {
         do { try file.save(); statusMessage = "Saved \(file.displayName)" }
-        catch { statusMessage = "Save failed: \(error.localizedDescription)" }
+        catch { presentSaveError(error) }
     }
     func saveAs(_ url: URL) {
         do { try file.save(to: url); statusMessage = "Saved \(file.displayName)" }
-        catch { statusMessage = "Save failed: \(error.localizedDescription)" }
+        catch { presentSaveError(error) }
+    }
+
+    /// A4: a failed save is data loss pending — a 5s auto-clearing toast is not enough. Injectable
+    /// for tests (default shows a modal alert).
+    var presentSaveErrorAlert: (Error) -> Void = { error in
+        let alert = NSAlert()
+        alert.messageText = "Save failed"
+        alert.informativeText = "\(error.localizedDescription)\n\nYour changes are still in the editor. Try Save As… to a writable location."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+    private func presentSaveError(_ error: Error) {
+        statusMessage = "Save failed: \(error.localizedDescription)"
+        presentSaveErrorAlert(error)
     }
 
     // MARK: fix apply
