@@ -138,6 +138,33 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertTrue(vm.file.isDirty)
     }
 
+    func testHeaderRewriteClearsAssistNudge() {
+        let vm = makeVM()
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")
+        XCTAssertTrue(vm.assistApplied)
+
+        vm.headerModel.update {
+            $0.inputs.append(.makeDefault(type: "float", name: "gain"))
+        }
+
+        XCTAssertFalse(vm.assistApplied,
+                       "a GUI header rewrite makes 'Rewrite applied' stale")
+    }
+
+    func testRestoreClearsAssistNudge() {
+        let vm = makeVM()
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")
+        XCTAssertTrue(vm.assistApplied)
+        let snapshot = Snapshot(id: "restore-target", date: Date(), label: "Earlier",
+                                source: "/*{}*/ void main(){ gl_FragColor = vec4(0.8); }",
+                                params: ParamSnapshot(params: [:]))
+
+        vm.restore(snapshot)
+
+        XCTAssertFalse(vm.assistApplied,
+                       "restoring a version makes 'Rewrite applied' stale")
+    }
+
     func testSaveClearsAssistNudge() throws {
         let vm = makeVM()
         vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")

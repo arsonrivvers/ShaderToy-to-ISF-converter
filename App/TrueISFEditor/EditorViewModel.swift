@@ -150,6 +150,7 @@ final class EditorViewModel: ObservableObject {
     /// A header-authoring GUI edit produced new full source: adopt it, push it to the editor (no echo),
     /// and recompile. The header model already holds the matching parsed header.
     private func applyHeaderRewrite(_ newSource: String) {
+        assistApplied = false
         file.source = newSource
         editor.setText(newSource)
         recompile(immediate: false)
@@ -307,6 +308,7 @@ final class EditorViewModel: ObservableObject {
     /// itself captured first, so restore is always undoable via the same list.
     func restore(_ snapshot: Snapshot) {
         snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before restore", kind: .safety)
+        assistApplied = false
         file.source = snapshot.source
         editor.setText(snapshot.source)
         headerModel.syncFromText(snapshot.source)
