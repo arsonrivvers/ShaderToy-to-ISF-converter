@@ -103,7 +103,6 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         let vm = makeVM()
         let url = root.appendingPathComponent("seq.fs")
         vm.saveAs(url)                                                    // v01
-        vm.file.source = "/*{}*/ void main(){ gl_FragColor = vec4(0.25); }" // manual edit
         vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.5); }") // aiApply capture
         vm.saveInPlace()                                                  // v02
         let snaps = vm.snapshots.snapshots(for: vm.file)
@@ -113,9 +112,12 @@ final class EditorViewModelSnapshotTests: XCTestCase {
 
     func testPinCapturesWithName() {
         let vm = makeVM()
+        vm.saveAs(root.appendingPathComponent("pin.fs"))
         vm.pin(name: "good strobe feel")
         let snaps = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snaps.count, 2)
         XCTAssertEqual(snaps.first?.kind, .pin(name: "good strobe feel"))
         XCTAssertEqual(snaps.first?.displayTitle, "good strobe feel")
+        XCTAssertEqual(snaps.last?.kind, .save(number: 1))
     }
 }

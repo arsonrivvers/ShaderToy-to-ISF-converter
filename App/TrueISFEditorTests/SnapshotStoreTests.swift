@@ -37,6 +37,27 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshots(for: file).count, 1)
     }
 
+    func testSameSourceEventKindsCaptureWhileSaveAndLegacyDedupe() {
+        let store = SnapshotStore(rootURL: root)
+        let file = TrueISFEditor.ISFFile.untitled(source: "same", suggestedName: "Events.fs")
+        let params = ParamSnapshot(params: [:])
+
+        XCTAssertNotNil(store.capture(file: file, params: params, label: "v01", kind: .save(number: 1)))
+        XCTAssertNil(store.capture(file: file, params: params, label: "v02", kind: .save(number: 2)))
+        XCTAssertNotNil(store.capture(file: file, params: params, label: "Before AI rewrite", kind: .aiApply))
+        XCTAssertNotNil(store.capture(file: file, params: params, label: "good strobe feel",
+                                      kind: .pin(name: "good strobe feel")))
+        XCTAssertNotNil(store.capture(file: file, params: params, label: "Before restore", kind: .safety))
+        XCTAssertNil(store.capture(file: file, params: params, label: "Legacy default"))
+
+        XCTAssertEqual(store.snapshots(for: file).map(\.kind),
+                       [.safety, .pin(name: "good strobe feel"), .aiApply, .save(number: 1)])
+
+        let legacyFile = TrueISFEditor.ISFFile.untitled(source: "legacy", suggestedName: "Legacy.fs")
+        XCTAssertNotNil(store.capture(file: legacyFile, params: params, label: "Opened"))
+        XCTAssertNil(store.capture(file: legacyFile, params: params, label: "Opened again"))
+    }
+
     func testCapIsEnforcedOldestPruned() {
         let store = SnapshotStore(rootURL: root, cap: 3)
         var file = TrueISFEditor.ISFFile.untitled(source: "v0", suggestedName: "Doc")

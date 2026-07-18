@@ -36,8 +36,8 @@ struct Snapshot: Identifiable, Equatable {
 }
 
 /// Disk-backed version history (D1): one folder per document key, one JSON file per version.
-/// Bounded per document, dedupes identical-source captures, and NEVER throws into the editing
-/// flow — a failed snapshot must not block an open or an AI apply (capture returns nil).
+/// Bounded per document, dedupes identical-source save/legacy captures, and NEVER throws into
+/// the editing flow — a failed snapshot must not block an open or an AI apply (capture returns nil).
 @MainActor
 final class SnapshotStore: ObservableObject {
     let rootURL: URL
@@ -115,13 +115,18 @@ final class SnapshotStore: ObservableObject {
             .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id > $1.id }
     }
 
-    /// Capture a version. Returns nil (and writes nothing) when the newest existing version has
-    /// identical source, or when any file operation fails.
+    /// Capture a version. Saves and legacy captures dedupe identical source; event kinds always
+    /// record the event. Returns nil when deduped or when any file operation fails.
     @discardableResult
     func capture(file: ISFFile, params: ParamSnapshot, label: String,
                  kind: SnapshotKind = .legacy) -> Snapshot? {
         let existing = snapshots(for: file)
-        if existing.first?.source == file.source { return nil }
+        if existing.first?.source == file.source {
+            switch kind {
+            case .save, .legacy: return nil
+            case .aiApply, .pin, .safety: break
+            }
+        }
 
         let dir = directory(for: file)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
