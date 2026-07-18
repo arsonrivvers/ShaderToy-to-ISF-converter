@@ -15,6 +15,8 @@ final class EditorViewModel: ObservableObject {
     @Published var requestImport = false
     /// Set by the Versions… command / toolbar button; EditorScreen presents the sheet.
     @Published var requestVersions = false
+    /// Set by replaceSourceFromAssist (Task 3 wires the rest).
+    @Published private(set) var assistApplied = false
     /// Bumped every time a DIFFERENT document replaces the current one (open/new/import/example) —
     /// NOT on recompiles of the same document. EditorScreen keys the controls panel's identity on
     /// this (M30): per-input control state must reset when the shader changes (same-named inputs
@@ -108,6 +110,7 @@ final class EditorViewModel: ObservableObject {
         editor.setText(self.file.source)
         headerModel.syncFromText(self.file.source)
         recompile(immediate: true)
+        refreshVersionState()
     }
 
     // MARK: params (B1)
@@ -167,6 +170,7 @@ final class EditorViewModel: ObservableObject {
             headerModel.syncFromText(file.source)
             snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened", kind: .safety)
             recompile(immediate: true)
+            refreshVersionState()
         } catch {
             statusMessage = "Couldn't open \(entry.name): \(error.localizedDescription)"
         }
@@ -181,6 +185,7 @@ final class EditorViewModel: ObservableObject {
         paramStore.resetAll(); preview.resetTimeline(); editor.resetText(file.source)
         headerModel.syncFromText(file.source)
         recompile(immediate: true)
+        refreshVersionState()
     }
 
     /// Called by the Shadertoy import sheet on a successful conversion.
@@ -197,6 +202,7 @@ final class EditorViewModel: ObservableObject {
         // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
         // the compileError/compileValid sink → applyDiagnostics with the new conversionWarnings merged.
         recompile(immediate: true)
+        refreshVersionState()
     }
 
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
@@ -210,17 +216,19 @@ final class EditorViewModel: ObservableObject {
         headerModel.syncFromText(source)
         snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened", kind: .safety)
         recompile(immediate: true)
+        refreshVersionState()
     }
 
     // MARK: save
 
     var needsSaveAs: Bool { file.needsSaveAs }
     func saveInPlace() {
-        do { try file.save(); statusMessage = "Saved \(file.displayName)" }
+        guard !file.needsSaveAs else { return }   // App routes untitled to Save As
+        do { try file.save(); mintSaveVersion() }
         catch { presentSaveError(error) }
     }
     func saveAs(_ url: URL) {
-        do { try file.save(to: url); statusMessage = "Saved \(file.displayName)" }
+        do { try file.save(to: url); mintSaveVersion() }
         catch { presentSaveError(error) }
     }
 
@@ -241,6 +249,48 @@ final class EditorViewModel: ObservableObject {
 
     // MARK: versions (D1)
 
+    // MARK: version state (cached — snapshots(for:) reads disk; never call it per-render)
+
+    /// v-number the next save mints (drives the "⌘S saves vNN" pill).
+    @Published private(set) var nextSaveVersion = 1
+    /// Timeline length (drives the Versions tab badge).
+    @Published private(set) var versionCount = 0
+    /// Source of the newest `save` version — the change-gutter baseline (nil = no saves yet).
+    private(set) var lastSaveSource: String?
+
+    /// Re-read version state from the store. Call after anything that captures or switches document.
+    func refreshVersionState() {
+        let snaps = snapshots.snapshots(for: file)
+        versionCount = snaps.count
+        nextSaveVersion = (snaps.compactMap { snap -> Int? in
+            if case .save(let n) = snap.kind { return n } else { return nil }
+        }.max() ?? 0) + 1
+        lastSaveSource = snaps.first { if case .save = $0.kind { return true } else { return false } }?.source
+    }
+
+    /// Pin the current editor state as a named version (Versions panel + button).
+    func pin(name: String?) {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(),
+                          label: clean ?? "Pinned", kind: .pin(name: clean))
+        refreshVersionState()
+        statusMessage = "Pinned \(clean ?? "current version")"
+    }
+
+    /// Successful save → mint the numbered version (dedup-aware status).
+    private func mintSaveVersion() {
+        let n = snapshots.nextSaveNumber(for: file)
+        if let snap = snapshots.capture(file: file, params: paramStore.exportSnapshot(),
+                                        label: String(format: "v%02d", n), kind: .save(number: n)) {
+            statusMessage = "Saved \(file.displayName) — \(snap.displayTitle)"
+        } else {
+            statusMessage = "Saved \(file.displayName)"
+        }
+        assistApplied = false
+        refreshVersionState()
+    }
+
     /// Restore a snapshot: source + params. No discard confirmation — the current state is
     /// itself captured first, so restore is always undoable via the same list.
     func restore(_ snapshot: Snapshot) {
@@ -251,6 +301,7 @@ final class EditorViewModel: ObservableObject {
         paramStore.applySnapshot(snapshot.params)
         recompile(immediate: true)
         statusMessage = "Restored version — \(snapshot.label), \(snapshot.date.formatted(date: .abbreviated, time: .shortened))"
+        refreshVersionState()
     }
 
     // MARK: fix apply
@@ -269,6 +320,7 @@ final class EditorViewModel: ObservableObject {
         snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI fix", kind: .aiApply)
         editor.applyTextEdit(fromLine: edit.fromLine, toLine: edit.toLine, edit.replacement)
         statusMessage = "Applied fix"
+        refreshVersionState()
     }
 
     /// Replace the full editor source after a user-approved ShaderAssist diff.
@@ -280,6 +332,7 @@ final class EditorViewModel: ObservableObject {
         headerModel.syncFromText(source)
         recompile(immediate: true)
         statusMessage = status
+        refreshVersionState()
     }
 
     // MARK: recompile loop

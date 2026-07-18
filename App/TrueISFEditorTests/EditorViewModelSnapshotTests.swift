@@ -10,6 +10,7 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         super.setUp()
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("vm-snapshot-tests-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     }
     override func tearDown() {
         try? FileManager.default.removeItem(at: root)
@@ -17,8 +18,12 @@ final class EditorViewModelSnapshotTests: XCTestCase {
     }
 
     private func makeVM() -> EditorViewModel {
-        EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate),
-                        snapshots: SnapshotStore(rootURL: root))
+        let vm = EditorViewModel(file: .untitled(source: EditorViewModel.blankTemplate),
+                                 snapshots: SnapshotStore(rootURL: root))
+        vm.presentSaveErrorAlert = { error in
+            XCTFail("Unexpected save error: \(error.localizedDescription)")
+        }
+        return vm
     }
 
     func testImportCapturesOpenedSnapshot() {
@@ -69,5 +74,48 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         let labels = vm.snapshots.snapshots(for: vm.file).map(\.label)
         XCTAssertTrue(labels.contains("Before restore"))
         XCTAssertTrue(vm.snapshots.snapshots(for: vm.file).contains { $0.source == current })
+    }
+
+    func testSaveAsMintsNumberedVersion() throws {
+        let vm = makeVM()
+        let url = root.appendingPathComponent("mint.fs")
+        vm.saveAs(url)
+        let snaps = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snaps.first?.kind, .save(number: 1))
+        XCTAssertEqual(snaps.first?.displayTitle, "v01")
+        XCTAssertEqual(vm.nextSaveVersion, 2)
+        XCTAssertEqual(vm.lastSaveSource, vm.file.source)
+    }
+
+    func testUnchangedSaveMintsNothing() throws {
+        let vm = makeVM()
+        let url = root.appendingPathComponent("same.fs")
+        vm.saveAs(url)
+        vm.saveInPlace()   // identical source — dedup, no v02
+        let saves = vm.snapshots.snapshots(for: vm.file).filter {
+            if case .save = $0.kind { return true } else { return false }
+        }
+        XCTAssertEqual(saves.count, 1)
+        XCTAssertEqual(vm.nextSaveVersion, 2)
+    }
+
+    func testAIApplyThenSaveNumbersSequentially() throws {
+        let vm = makeVM()
+        let url = root.appendingPathComponent("seq.fs")
+        vm.saveAs(url)                                                    // v01
+        vm.file.source = "/*{}*/ void main(){ gl_FragColor = vec4(0.25); }" // manual edit
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.5); }") // aiApply capture
+        vm.saveInPlace()                                                  // v02
+        let snaps = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snaps.first?.kind, .save(number: 2))
+        XCTAssertTrue(snaps.contains { $0.kind == .aiApply })
+    }
+
+    func testPinCapturesWithName() {
+        let vm = makeVM()
+        vm.pin(name: "good strobe feel")
+        let snaps = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snaps.first?.kind, .pin(name: "good strobe feel"))
+        XCTAssertEqual(snaps.first?.displayTitle, "good strobe feel")
     }
 }
