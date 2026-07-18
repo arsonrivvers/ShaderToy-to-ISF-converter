@@ -419,13 +419,16 @@ final class EditorViewModel: ObservableObject {
 
     private func recompile(immediate: Bool) {
         debounceTask?.cancel()
-        guard Self.shouldCompilePreview() else { return }
         let src = file.source
-        if immediate { preview.load(isf: src); return }
+        if immediate {
+            if Self.shouldCompilePreview() { preview.load(isf: src) }
+            return
+        }
+        let shouldCompilePreview = Self.shouldCompilePreview()
         debounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
-            self?.preview.load(isf: src)
+            if shouldCompilePreview { self?.preview.load(isf: src) }
             self?.updateChangeMarks()
         }
     }

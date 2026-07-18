@@ -172,6 +172,27 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertFalse(vm.assistApplied)
     }
 
+    func testManualEditDebounceUpdatesChangeMarksAndSaveClearsUnderHarness() async throws {
+        let vm = makeVM()
+        vm.editor.onChange?("a\nb")
+        vm.saveAs(root.appendingPathComponent("gutter.fs"))
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.added, [])
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.changed, [])
+
+        vm.editor.onChange?("a\nX\nb")
+        let deadline = Date().addingTimeInterval(2)
+        while vm.editor.lastChangeMarksForTest.added != [2], Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.added, [2])
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.changed, [])
+
+        vm.saveInPlace()
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.added, [])
+        XCTAssertEqual(vm.editor.lastChangeMarksForTest.changed, [])
+    }
+
     func testPinAfterEditDoesNotSuppressNextNumberedSave() {
         let vm = makeVM()
         let sourceA = vm.file.source

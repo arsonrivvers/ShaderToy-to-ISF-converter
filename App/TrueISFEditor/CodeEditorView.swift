@@ -22,6 +22,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
     private var pendingDiagnostics: [EditorDiagnostic]?
     private var pendingChangeMarks: (added: [Int], changed: [Int])?
     private var inputNames: [String] = []           // declared input names for autocomplete
+    private(set) var lastChangeMarksForTest: (added: [Int], changed: [Int]) = ([], [])
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -59,6 +60,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
 
     /// Colored gutter bars vs the last saved version. Empty arrays clear the gutter.
     func setChangeMarks(added: [Int], changed: [Int]) {
+        lastChangeMarksForTest = (added, changed)
         guard ready, initialized else { pendingChangeMarks = (added, changed); return }
         guard let a = try? JSONEncoder().encode(added),
               let c = try? JSONEncoder().encode(changed),
