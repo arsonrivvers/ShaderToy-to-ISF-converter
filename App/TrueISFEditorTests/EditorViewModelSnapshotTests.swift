@@ -120,4 +120,23 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(snaps.first?.displayTitle, "good strobe feel")
         XCTAssertEqual(snaps.last?.kind, .save(number: 1))
     }
+
+    func testPinAfterEditDoesNotSuppressNextNumberedSave() {
+        let vm = makeVM()
+        let sourceA = vm.file.source
+        let sourceB = "/*{}*/ void main(){ gl_FragColor = vec4(0.25); }"
+
+        vm.saveAs(root.appendingPathComponent("pin-then-save.fs"))   // v01(A)
+        vm.file.source = sourceB                                    // edit B
+        vm.pin(name: "B pin")                                      // pin(B)
+        vm.saveInPlace()                                            // v02(B)
+
+        let saves = vm.snapshots.snapshots(for: vm.file).filter {
+            if case .save = $0.kind { return true } else { return false }
+        }
+        XCTAssertEqual(saves.map(\.kind), [.save(number: 2), .save(number: 1)])
+        XCTAssertEqual(saves.map(\.source), [sourceB, sourceA])
+        XCTAssertEqual(vm.nextSaveVersion, 3)
+        XCTAssertEqual(vm.lastSaveSource, sourceB)
+    }
 }

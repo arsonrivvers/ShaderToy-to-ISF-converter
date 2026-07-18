@@ -36,8 +36,9 @@ struct Snapshot: Identifiable, Equatable {
 }
 
 /// Disk-backed version history (D1): one folder per document key, one JSON file per version.
-/// Bounded per document, dedupes identical-source save/legacy captures, and NEVER throws into
-/// the editing flow — a failed snapshot must not block an open or an AI apply (capture returns nil).
+/// Bounded per document, dedupes saves against the newest save and legacy captures against the
+/// newest entry, and NEVER throws into the editing flow — a failed snapshot must not block an
+/// open or an AI apply (capture returns nil).
 @MainActor
 final class SnapshotStore: ObservableObject {
     let rootURL: URL
@@ -115,17 +116,22 @@ final class SnapshotStore: ObservableObject {
             .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id > $1.id }
     }
 
-    /// Capture a version. Saves and legacy captures dedupe identical source; event kinds always
-    /// record the event. Returns nil when deduped or when any file operation fails.
+    /// Capture a version. Saves dedupe against the newest save, legacy captures against the newest
+    /// entry, and event kinds always record the event. Returns nil when deduped or on write failure.
     @discardableResult
     func capture(file: ISFFile, params: ParamSnapshot, label: String,
                  kind: SnapshotKind = .legacy) -> Snapshot? {
         let existing = snapshots(for: file)
-        if existing.first?.source == file.source {
-            switch kind {
-            case .save, .legacy: return nil
-            case .aiApply, .pin, .safety: break
+        switch kind {
+        case .save:
+            let newestSave = existing.first {
+                if case .save = $0.kind { return true } else { return false }
             }
+            if newestSave?.source == file.source { return nil }
+        case .legacy:
+            if existing.first?.source == file.source { return nil }
+        case .aiApply, .pin, .safety:
+            break
         }
 
         let dir = directory(for: file)

@@ -58,6 +58,28 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertNil(store.capture(file: legacyFile, params: params, label: "Opened again"))
     }
 
+    func testSaveDedupesAgainstNewestSaveRatherThanNewestEvent() {
+        let store = SnapshotStore(rootURL: root)
+        var file = TrueISFEditor.ISFFile.untitled(source: "A", suggestedName: "Pinned-edit.fs")
+        let params = ParamSnapshot(params: [:])
+
+        XCTAssertNotNil(store.capture(file: file, params: params,
+                                      label: "v01", kind: .save(number: 1)))
+        file.source = "B"
+        XCTAssertNotNil(store.capture(file: file, params: params,
+                                      label: "B pin", kind: .pin(name: "B pin")))
+        XCTAssertNotNil(store.capture(file: file, params: params,
+                                      label: "v02", kind: .save(number: 2)),
+                        "a same-source pin must not suppress a save of edits since the last save")
+
+        let saves = store.snapshots(for: file).filter {
+            if case .save = $0.kind { return true } else { return false }
+        }
+        XCTAssertEqual(saves.map(\.kind), [.save(number: 2), .save(number: 1)])
+        XCTAssertEqual(saves.map(\.source), ["B", "A"])
+        XCTAssertEqual(store.nextSaveNumber(for: file), 3)
+    }
+
     func testCapIsEnforcedOldestPruned() {
         let store = SnapshotStore(rootURL: root, cap: 3)
         var file = TrueISFEditor.ISFFile.untitled(source: "v0", suggestedName: "Doc")
