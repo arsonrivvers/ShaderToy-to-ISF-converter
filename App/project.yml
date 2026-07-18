@@ -41,13 +41,23 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.TrueISFEditor
         INFOPLIST_FILE: TrueISFEditor/Info.plist
         CODE_SIGN_ENTITLEMENTS: TrueISFEditor/TrueISFEditor.entitlements
-        CODE_SIGN_IDENTITY: "-"
+        # Apple Development (free personal team): stable code identity so TCC grants survive
+        # rebuilds — ad-hoc ("-") minted a new identity every build and re-prompted every restage.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: Q9DY8S68BC
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: "0.1.0"
         GENERATE_INFOPLIST_FILE: NO
         FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/../Frameworks
         SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
+      configs:
+        # Debug: hardened runtime OFF. With ad-hoc signing it was silently disabled anyway
+        # (Xcode note: "Disabling hardened runtime with ad-hoc codesigning"); with the real
+        # identity, library validation would reject the ad-hoc-signed dylibs nested in the
+        # vendored ISFMSLKit and abort the test host. Release keeps it for future notarization.
+        Debug:
+          ENABLE_HARDENED_RUNTIME: NO
   TrueISFEditorTests:
     type: bundle.unit-test
     platform: macOS
