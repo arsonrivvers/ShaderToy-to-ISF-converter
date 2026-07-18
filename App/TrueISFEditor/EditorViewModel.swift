@@ -165,7 +165,7 @@ final class EditorViewModel: ObservableObject {
             statusMessage = ""
             paramStore.resetAll(); preview.resetTimeline(); editor.resetText(file.source)
             headerModel.syncFromText(file.source)
-            snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened")
+            snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened", kind: .safety)
             recompile(immediate: true)
         } catch {
             statusMessage = "Couldn't open \(entry.name): \(error.localizedDescription)"
@@ -192,7 +192,7 @@ final class EditorViewModel: ObservableObject {
         statusMessage = "Imported \(suggestedName)"
         paramStore.resetAll(); preview.resetTimeline(); editor.resetText(isf)
         headerModel.syncFromText(isf)
-        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Imported")
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Imported", kind: .safety)
         // No pre-compile applyDiagnostics here: the source just changed, so preview's compile state is
         // stale. recompile(immediate:) below triggers a fresh compile whose result flows back through
         // the compileError/compileValid sink → applyDiagnostics with the new conversionWarnings merged.
@@ -208,7 +208,7 @@ final class EditorViewModel: ObservableObject {
         statusMessage = ""   // name is in the header; no toast (it covered sliders)
         paramStore.resetAll(); preview.resetTimeline(); editor.resetText(source)
         headerModel.syncFromText(source)
-        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened")
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Opened", kind: .safety)
         recompile(immediate: true)
     }
 
@@ -244,7 +244,7 @@ final class EditorViewModel: ObservableObject {
     /// Restore a snapshot: source + params. No discard confirmation — the current state is
     /// itself captured first, so restore is always undoable via the same list.
     func restore(_ snapshot: Snapshot) {
-        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before restore")
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before restore", kind: .safety)
         file.source = snapshot.source
         editor.setText(snapshot.source)
         headerModel.syncFromText(snapshot.source)
@@ -266,7 +266,7 @@ final class EditorViewModel: ObservableObject {
             }
         }
         // D1: every AI mutation is preceded by a restorable version.
-        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI fix")
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI fix", kind: .aiApply)
         editor.applyTextEdit(fromLine: edit.fromLine, toLine: edit.toLine, edit.replacement)
         statusMessage = "Applied fix"
     }
@@ -274,7 +274,7 @@ final class EditorViewModel: ObservableObject {
     /// Replace the full editor source after a user-approved ShaderAssist diff.
     func replaceSourceFromAssist(_ source: String, status: String = "Applied ShaderAssist suggestions") {
         // D1: capture the PRE-apply state — every AI mutation is preceded by a restorable version.
-        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI rewrite")
+        snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI rewrite", kind: .aiApply)
         file.source = source
         editor.setText(source)
         headerModel.syncFromText(source)
