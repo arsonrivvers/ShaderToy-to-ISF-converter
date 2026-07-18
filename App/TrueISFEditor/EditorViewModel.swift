@@ -236,7 +236,12 @@ final class EditorViewModel: ObservableObject {
         catch { presentSaveError(error) }
     }
     func saveAs(_ url: URL) {
-        do { try file.save(to: url); mintSaveVersion() }
+        let previousFile = file
+        do {
+            try file.save(to: url)
+            snapshots.migrateHistory(from: previousFile, to: file)
+            mintSaveVersion()
+        }
         catch { presentSaveError(error) }
     }
 

@@ -190,4 +190,76 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(vm.nextSaveVersion, 3)
         XCTAssertEqual(vm.lastSaveSource, sourceB)
     }
+
+    func testFirstSaveAsPreservesUntitledAIAndPinHistoryBeforeMintingSave() {
+        let vm = makeVM()
+        let original = vm.file.source
+        let rewritten = "/*{}*/ void main(){ gl_FragColor = vec4(0.4); }"
+        vm.replaceSourceFromAssist(rewritten)
+        vm.pin(name: "keep this")
+        let untitledFile = vm.file
+
+        vm.saveAs(root.appendingPathComponent("First-save-as.fs"))
+
+        let snapshots = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snapshots.count, 3)
+        XCTAssertTrue(snapshots.contains { $0.kind == .aiApply && $0.source == original })
+        XCTAssertTrue(snapshots.contains { $0.kind == .pin(name: "keep this") && $0.source == rewritten })
+        XCTAssertTrue(snapshots.contains { $0.kind == .save(number: 1) && $0.source == rewritten })
+        XCTAssertTrue(vm.snapshots.snapshots(for: untitledFile).isEmpty,
+                      "Save As must retire the temporary untitled history key")
+        XCTAssertEqual(vm.versionCount, 3)
+        XCTAssertEqual(vm.nextSaveVersion, 2)
+        XCTAssertEqual(vm.lastSaveSource, rewritten)
+    }
+
+    func testLaterSaveAsMovesExistingTimelineAndContinuesSaveNumbers() {
+        let vm = makeVM()
+        let original = vm.file.source
+        let firstRewrite = "/*{}*/ void main(){ gl_FragColor = vec4(0.4); }"
+        let laterEdit = "/*{}*/ void main(){ gl_FragColor = vec4(0.8); }"
+        vm.replaceSourceFromAssist(firstRewrite)
+        vm.pin(name: "first look")
+        vm.saveAs(root.appendingPathComponent("First-path.fs"))
+        let firstSavedFile = vm.file
+
+        vm.editor.onChange?(laterEdit)
+        vm.saveAs(root.appendingPathComponent("Second-path.fs"))
+
+        let snapshots = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(snapshots.count, 4)
+        XCTAssertTrue(snapshots.contains { $0.kind == .aiApply && $0.source == original })
+        XCTAssertTrue(snapshots.contains { $0.kind == .pin(name: "first look") })
+        let saves = snapshots.filter {
+            if case .save = $0.kind { return true } else { return false }
+        }
+        XCTAssertEqual(saves.map(\.kind), [.save(number: 2), .save(number: 1)])
+        XCTAssertEqual(saves.map(\.source), [laterEdit, firstRewrite])
+        XCTAssertTrue(vm.snapshots.snapshots(for: firstSavedFile).isEmpty,
+                      "a later Save As must retire the previous path's history key")
+        XCTAssertEqual(vm.versionCount, 4)
+        XCTAssertEqual(vm.nextSaveVersion, 3)
+        XCTAssertEqual(vm.lastSaveSource, laterEdit)
+    }
+
+    func testSaveAsStillSucceedsWhenHistoryMigrationCannotWrite() throws {
+        let vm = makeVM()
+        let rewritten = "/*{}*/ void main(){ gl_FragColor = vec4(0.6); }"
+        vm.replaceSourceFromAssist(rewritten)
+        let untitledFile = vm.file
+        let target = root.appendingPathComponent("History-blocked.fs")
+        var destinationFile = untitledFile
+        try destinationFile.save(to: target)
+        let blockedHistoryDirectory = root
+            .appendingPathComponent(SnapshotStore.documentKey(for: destinationFile))
+        try Data("not a directory".utf8).write(to: blockedHistoryDirectory)
+
+        vm.saveAs(target)
+
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), rewritten)
+        XCTAssertEqual(vm.file.url, target)
+        XCTAssertFalse(vm.file.isDirty)
+        XCTAssertEqual(vm.snapshots.snapshots(for: untitledFile).count, 1,
+                       "failed migration keeps the old history available for a later retry")
+    }
 }

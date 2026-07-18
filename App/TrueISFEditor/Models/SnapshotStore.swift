@@ -116,6 +116,123 @@ final class SnapshotStore: ObservableObject {
             .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id > $1.id }
     }
 
+    /// Move a document's raw history when Save As changes its identity key. Best effort and
+    /// deliberately nonthrowing: snapshot maintenance must never turn a successful file save into
+    /// a reported failure. Differing name collisions are retained under a unique migrated name;
+    /// byte-identical entries already at the destination are not copied again.
+    func migrateHistory(from sourceFile: ISFFile, to destinationFile: ISFFile) {
+        let sourceDirectory = directory(for: sourceFile)
+        let destinationDirectory = directory(for: destinationFile)
+        guard sourceDirectory.standardizedFileURL != destinationDirectory.standardizedFileURL else {
+            return
+        }
+
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: sourceDirectory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let sourceItems = try? fileManager.contentsOfDirectory(
+                  at: sourceDirectory, includingPropertiesForKeys: nil
+              ) else { return }
+
+        let sourceEntries = sourceItems.filter { $0.pathExtension == "json" }
+        let destinationEntries = (try? fileManager.contentsOfDirectory(
+            at: destinationDirectory, includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "json" } ?? []
+        var destinationPayloads = destinationEntries.compactMap { try? Data(contentsOf: $0) }
+        var sourcePayloads: [String: Data] = [:]
+        var materialChange = false
+        var everySourceEntryReadable = sourceEntries.count == sourceItems.count
+
+        func availableDestination(for sourceEntry: URL) -> URL {
+            let preferred = destinationDirectory.appendingPathComponent(sourceEntry.lastPathComponent)
+            guard fileManager.fileExists(atPath: preferred.path) else { return preferred }
+            let stem = sourceEntry.deletingPathExtension().lastPathComponent
+            var suffix = 1
+            while true {
+                let candidate = destinationDirectory
+                    .appendingPathComponent("\(stem)-migrated-\(suffix).json")
+                if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+                suffix += 1
+            }
+        }
+
+        for sourceEntry in sourceEntries {
+            guard let data = try? Data(contentsOf: sourceEntry) else {
+                everySourceEntryReadable = false
+                continue
+            }
+            sourcePayloads[sourceEntry.path] = data
+            if destinationPayloads.contains(data) { continue }
+
+            do {
+                try fileManager.createDirectory(at: destinationDirectory,
+                                                withIntermediateDirectories: true)
+                let target = availableDestination(for: sourceEntry)
+                // copyItem refuses an externally-created collision instead of replacing it.
+                try fileManager.copyItem(at: sourceEntry, to: target)
+                guard (try? Data(contentsOf: target)) == data else {
+                    everySourceEntryReadable = false
+                    continue
+                }
+                destinationPayloads.append(data)
+                materialChange = true
+            } catch {
+                everySourceEntryReadable = false
+            }
+        }
+
+        // Re-read from disk before retiring the old key. A partial write or unreadable destination
+        // keeps the source directory intact so a later Save As/retry can finish safely.
+        let finalDestinationEntries = (try? fileManager.contentsOfDirectory(
+            at: destinationDirectory, includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension == "json" } ?? []
+        let finalDestinationPayloads = finalDestinationEntries.compactMap {
+            try? Data(contentsOf: $0)
+        }
+        let everySourceEntryPresent = everySourceEntryReadable
+            && sourcePayloads.count == sourceEntries.count
+            && sourcePayloads.values.allSatisfy(finalDestinationPayloads.contains)
+        let currentSourceItems = try? fileManager.contentsOfDirectory(
+            at: sourceDirectory, includingPropertiesForKeys: nil
+        )
+        let sourceDirectoryUnchanged = currentSourceItems.map { currentItems in
+            guard Set(currentItems.map(\.path)) == Set(sourceItems.map(\.path)) else {
+                return false
+            }
+            return sourceEntries.allSatisfy { entry in
+                guard let expected = sourcePayloads[entry.path] else { return false }
+                return (try? Data(contentsOf: entry)) == expected
+            }
+        } ?? false
+
+        if everySourceEntryPresent && sourceDirectoryUnchanged {
+            do {
+                try fileManager.removeItem(at: sourceDirectory)
+                materialChange = true
+            } catch {
+                // The save itself remains successful; the old history stays available for retry.
+            }
+
+            // The merge is safe now. Bound the destination exactly like capture(), oldest first.
+            let merged = snapshots(for: destinationFile)
+            if merged.count > cap {
+                for stale in merged.suffix(merged.count - cap) {
+                    do {
+                        try fileManager.removeItem(
+                            at: destinationDirectory.appendingPathComponent("\(stale.id).json")
+                        )
+                        materialChange = true
+                    } catch {
+                        // Best effort: one failed prune must not block the remaining entries.
+                    }
+                }
+            }
+        }
+
+        if materialChange { revision += 1 }
+    }
+
     /// Capture a version. Saves dedupe against the newest save, legacy captures against the newest
     /// entry, and event kinds always record the event. Returns nil when deduped or on write failure.
     @discardableResult

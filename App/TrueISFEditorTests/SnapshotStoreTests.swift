@@ -15,6 +15,35 @@ final class SnapshotStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    private func directory(for file: TrueISFEditor.ISFFile) -> URL {
+        root.appendingPathComponent(SnapshotStore.documentKey(for: file))
+    }
+
+    private func rawSnapshotData(date: Double, label: String, source: String,
+                                 kind: String? = nil, number: Int? = nil,
+                                 name: String? = nil, futureMarker: String? = nil) throws -> Data {
+        var object: [String: Any] = [
+            "date": date,
+            "label": label,
+            "source": source,
+            "params": ["params": [String: Any]()]
+        ]
+        object["kind"] = kind
+        object["number"] = number
+        object["name"] = name
+        if let futureMarker {
+            object["futureMetadata"] = ["marker": futureMarker]
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private func writeRawSnapshot(_ data: Data, named name: String,
+                                  for file: TrueISFEditor.ISFFile) throws {
+        let dir = directory(for: file)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try data.write(to: dir.appendingPathComponent(name), options: .atomic)
+    }
+
     func testCaptureAndListRoundTrip() {
         let store = SnapshotStore(rootURL: root)
         let file = TrueISFEditor.ISFFile.untitled(source: "v1", suggestedName: "Doc")
@@ -179,5 +208,88 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertEqual(store.revision, r0 + 1)
         store.capture(file: file, params: ParamSnapshot(params: [:]), label: "v02", kind: .save(number: 2))
         XCTAssertEqual(store.revision, r0 + 1, "identical-source dedup must not bump revision")
+    }
+
+    func testMigrateHistoryPreservesRawMetadataAndKindsThenRetiresOldKey() throws {
+        let store = SnapshotStore(rootURL: root)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "pin", suggestedName: "Raw.fs")
+        let saveData = try rawSnapshotData(date: 100, label: "v07", source: "save",
+                                           kind: "save", number: 7,
+                                           futureMarker: "preserve-me")
+        let pinData = try rawSnapshotData(date: 200, label: "favorite", source: "pin",
+                                          kind: "pin", name: "favorite")
+        try writeRawSnapshot(saveData, named: "save.json", for: sourceFile)
+        try writeRawSnapshot(pinData, named: "pin.json", for: sourceFile)
+
+        var destinationFile = sourceFile
+        try destinationFile.save(to: root.appendingPathComponent("Raw-saved.fs"))
+        let revisionBeforeMigration = store.revision
+
+        store.migrateHistory(from: sourceFile, to: destinationFile)
+
+        let destinationDirectory = directory(for: destinationFile)
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory.appendingPathComponent("save.json")),
+                       saveData, "migration must preserve unknown metadata byte-for-byte")
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory.appendingPathComponent("pin.json")),
+                       pinData)
+        XCTAssertEqual(store.snapshots(for: destinationFile).map(\.kind),
+                       [.pin(name: "favorite"), .save(number: 7)])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory(for: sourceFile).path),
+                       "the old document key must retire after every entry is safely present")
+        XCTAssertEqual(store.revision, revisionBeforeMigration + 1)
+
+        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertEqual(store.revision, revisionBeforeMigration + 1,
+                       "retrying an already-complete migration is not a material change")
+    }
+
+    func testMigrateHistoryMergesCollisionDedupesAndPrunesOldestToCap() throws {
+        let store = SnapshotStore(rootURL: root, cap: 3)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source", suggestedName: "Merge.fs")
+        var destinationFile = sourceFile
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try destinationFile.save(to: root.appendingPathComponent("Merge-saved.fs"))
+
+        let destinationOldest = try rawSnapshotData(date: 100, label: "oldest", source: "d100")
+        let sourceOld = try rawSnapshotData(date: 200, label: "source old", source: "s200")
+        let destinationCollision = try rawSnapshotData(date: 300, label: "destination collision",
+                                                       source: "d300", kind: "save", number: 3)
+        let sourceCollision = try rawSnapshotData(date: 400, label: "source collision",
+                                                  source: "s400", kind: "pin", name: "keep")
+        let destinationNewest = try rawSnapshotData(date: 500, label: "newest", source: "d500",
+                                                    kind: "save", number: 5)
+
+        try writeRawSnapshot(destinationOldest, named: "destination-oldest.json", for: destinationFile)
+        try writeRawSnapshot(destinationCollision, named: "collision.json", for: destinationFile)
+        try writeRawSnapshot(destinationNewest, named: "destination-newest.json", for: destinationFile)
+        try writeRawSnapshot(sourceOld, named: "source-old.json", for: sourceFile)
+        try writeRawSnapshot(sourceCollision, named: "collision.json", for: sourceFile)
+        try writeRawSnapshot(destinationNewest, named: "duplicate-newest.json", for: sourceFile)
+
+        store.migrateHistory(from: sourceFile, to: destinationFile)
+
+        let destinationDirectory = directory(for: destinationFile)
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory.appendingPathComponent("collision.json")),
+                       destinationCollision, "a name collision must never overwrite destination data")
+        let listed = store.snapshots(for: destinationFile)
+        XCTAssertEqual(listed.map(\.source), ["d500", "s400", "d300"],
+                       "identical entries dedupe and the oldest unique entries prune to the cap")
+        XCTAssertEqual(listed.filter { $0.source == "d500" }.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory(for: sourceFile).path))
+        XCTAssertEqual(store.revision, 1)
+    }
+
+    func testMigrateHistoryNoOpsDoNotBumpRevision() throws {
+        let store = SnapshotStore(rootURL: root)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source", suggestedName: "No-op.fs")
+
+        store.migrateHistory(from: sourceFile, to: sourceFile)
+        XCTAssertEqual(store.revision, 0, "the same document key needs no migration")
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var destinationFile = sourceFile
+        try destinationFile.save(to: root.appendingPathComponent("No-op-saved.fs"))
+        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertEqual(store.revision, 0, "an absent source history is not a material change")
     }
 }
