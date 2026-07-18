@@ -15,8 +15,11 @@ final class EditorViewModel: ObservableObject {
     @Published var requestImport = false
     /// Set by the Versions… command / toolbar button; EditorScreen presents the sheet.
     @Published var requestVersions = false
-    /// Set by replaceSourceFromAssist (Task 3 wires the rest).
+    /// Set after an AI rewrite until the user saves, edits, starts another run, or dismisses it.
     @Published private(set) var assistApplied = false
+
+    func clearAssistNudge() { assistApplied = false }
+
     /// Bumped every time a DIFFERENT document replaces the current one (open/new/import/example) —
     /// NOT on recompiles of the same document. EditorScreen keys the controls panel's identity on
     /// this (M30): per-input control state must reset when the shader changes (same-named inputs
@@ -160,6 +163,7 @@ final class EditorViewModel: ObservableObject {
     func open(_ entry: LibraryEntry) {
         do {
             file = try ISFFile(contentsOf: entry.url)
+            assistApplied = false
             documentGeneration += 1
             conversionWarnings = []
             conversionReportTitle = nil
@@ -178,6 +182,7 @@ final class EditorViewModel: ObservableObject {
 
     func newUntitled() {
         file = .untitled(source: Self.blankTemplate)
+        assistApplied = false
         documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil
@@ -191,6 +196,7 @@ final class EditorViewModel: ObservableObject {
     /// Called by the Shadertoy import sheet on a successful conversion.
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
         file = .untitled(source: isf, suggestedName: suggestedName)
+        assistApplied = false
         documentGeneration += 1
         conversionWarnings = warnings
         conversionReportTitle = "Imported \(suggestedName)"
@@ -208,6 +214,7 @@ final class EditorViewModel: ObservableObject {
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
     func loadExample(name: String, source: String) {
         file = .untitled(source: source, suggestedName: name)
+        assistApplied = false
         documentGeneration += 1
         conversionWarnings = []
         conversionReportTitle = nil
@@ -333,6 +340,7 @@ final class EditorViewModel: ObservableObject {
         // D1: capture the PRE-apply state — every AI mutation is preceded by a restorable version.
         snapshots.capture(file: file, params: paramStore.exportSnapshot(), label: "Before AI rewrite", kind: .aiApply)
         file.source = source
+        assistApplied = true
         editor.setText(source)
         headerModel.syncFromText(source)
         recompile(immediate: true)
@@ -343,6 +351,7 @@ final class EditorViewModel: ObservableObject {
     // MARK: recompile loop
 
     private func sourceEdited(_ text: String) {
+        assistApplied = false
         file.source = text          // marks dirty
         headerModel.syncFromText(text)   // reflect hand edits into the Inputs/Passes tabs
         recompile(immediate: false)

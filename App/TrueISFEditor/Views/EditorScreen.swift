@@ -1,6 +1,8 @@
 import SwiftUI
 import ShadertoyISFKit
 
+enum BottomPanelTab { case diagnostics, versions }
+
 /// The TrueISFEditor main window: library sidebar | editor + warnings | preview + controls.
 struct EditorScreen: View {
     @ObservedObject var library: LibraryModel
@@ -10,6 +12,7 @@ struct EditorScreen: View {
     @AppStorage("editorCollapsed") private var editorCollapsed = false
     @State private var showTerminal = true
     @State private var showSuggestionGoalSheet = false
+    @State private var bottomTab: BottomPanelTab = .diagnostics
 
     var body: some View {
         NavigationSplitView {
@@ -55,7 +58,18 @@ struct EditorScreen: View {
                         }
                         .help(editorCollapsed ? "Show the code editor (⌘⌥E)" : "Hide the code editor (⌘⌥E)")
                         Text(vm.file.displayName).font(.headline)
-                        if vm.file.isDirty { Text("•").foregroundStyle(.secondary) }
+                        if vm.file.isDirty {
+                            Text(vm.assistApplied
+                                 ? "Rewrite applied — ⌘S saves v\(String(format: "%02d", vm.nextSaveVersion))"
+                                 : (vm.file.needsSaveAs
+                                    ? "Edited — unsaved"
+                                    : "Edited — ⌘S saves v\(String(format: "%02d", vm.nextSaveVersion))"))
+                                .font(.caption)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background((vm.assistApplied ? Color.orange : Color.secondary).opacity(0.18),
+                                            in: Capsule())
+                                .foregroundStyle(vm.assistApplied ? Color.orange : Color.secondary)
+                        }
                         Spacer()
                         // D0: the readout follows the live window — pop-out coordinator while out.
                         RenderStatsSlot(coordinator: vm.popOutEditing ? output.coordinator : vm.preview)
@@ -138,6 +152,9 @@ struct EditorScreen: View {
         // A3: assist results are document-scoped — a fix/suggestion generated against doc A must
         // not render (or apply) once doc B is loaded.
         .onChange(of: vm.documentGeneration) { _ in shaderAssist.resetForDocumentSwitch() }
+        .onChange(of: shaderAssist.state) { s in
+            if case .running = s { vm.clearAssistNudge() }
+        }
         .onReceive(output.$isOpen) { vm.setPopOutOpen($0) }
         .onChange(of: vm.fitToWindow) { _ in applyResolution() }
         .onChange(of: vm.renderWidth) { _ in applyResolution() }
@@ -210,7 +227,20 @@ struct EditorScreen: View {
 
             switch shaderAssist.state {
             case .idle, .running:
-                EmptyView()
+                if vm.assistApplied, case .idle = shaderAssist.state {
+                    HStack(spacing: 6) {
+                        Image(systemName: "wand.and.stars")
+                        Text("Rewrite applied — unsaved. ⌘S saves v\(String(format: "%02d", vm.nextSaveVersion))")
+                        Button("View Changes") { bottomTab = .versions }
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                    .font(.caption).foregroundStyle(.orange)
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(.orange.opacity(0.1))
+                } else {
+                    EmptyView()
+                }
             case .fix(let r):
                 DiffReviewPanel(result: r,
                                 sourceLines: vm.file.source.components(separatedBy: "\n"),

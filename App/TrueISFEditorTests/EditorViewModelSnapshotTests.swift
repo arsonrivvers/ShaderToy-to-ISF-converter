@@ -121,6 +121,30 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(snaps.last?.kind, .save(number: 1))
     }
 
+    func testAssistAppliedLifecycle() {
+        let vm = makeVM()
+        XCTAssertFalse(vm.assistApplied)
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")
+        XCTAssertTrue(vm.assistApplied, "AI apply raises the save-nudge flag")
+        vm.clearAssistNudge()
+        XCTAssertFalse(vm.assistApplied)
+    }
+
+    func testManualEditClearsAssistNudge() {
+        let vm = makeVM()
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")
+        vm.editor.onChange?("/*{}*/ void main(){ gl_FragColor = vec4(0.2); }")  // user typed
+        XCTAssertFalse(vm.assistApplied, "a manual edit makes 'Rewrite applied' stale")
+        XCTAssertTrue(vm.file.isDirty)
+    }
+
+    func testSaveClearsAssistNudge() throws {
+        let vm = makeVM()
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.1); }")
+        vm.saveAs(root.appendingPathComponent("nudge.fs"))
+        XCTAssertFalse(vm.assistApplied)
+    }
+
     func testPinAfterEditDoesNotSuppressNextNumberedSave() {
         let vm = makeVM()
         let sourceA = vm.file.source
