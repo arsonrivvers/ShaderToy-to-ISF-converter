@@ -394,8 +394,17 @@ final class EditorViewModel: ObservableObject {
         recompile(immediate: false)
     }
 
+    /// Unit tests exercise document state, not the native transpiler. The XCTest app host creates
+    /// many short-lived view models whose background compiles can outlive their tests and contend
+    /// with the process-global ISFMSL cache. Dedicated native-preview tests call the controller
+    /// directly, so they remain live while view-model tests stay isolated.
+    static func shouldCompilePreview(testHarnessActive: Bool = TestHarness.isActive) -> Bool {
+        !testHarnessActive
+    }
+
     private func recompile(immediate: Bool) {
         debounceTask?.cancel()
+        guard Self.shouldCompilePreview() else { return }
         let src = file.source
         if immediate { preview.load(isf: src); return }
         debounceTask = Task { [weak self] in

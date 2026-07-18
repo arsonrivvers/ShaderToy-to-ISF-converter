@@ -64,9 +64,27 @@ final class PreviewCoordinatorTests: XCTestCase {
 
     func testRealEnginesToggleWithoutCrash() async throws {
         let coord = PreviewCoordinator(metal: MetalPreviewController(), webkit: WebKitPreviewController())
-        coord.load(isf: "/*{ \"ISFVSN\":\"2\" }*/ void main(){ gl_FragColor=vec4(1.0); }")
+        let source = """
+        /*{ "DESCRIPTION": "toggle", "ISFVSN": "2", "INPUTS": [] }*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """
+        coord.load(isf: source)
         coord.active = .webkit
         coord.active = .metal
+        try await waitUntil { coord.compileValid || coord.compileError != nil }
         XCTAssertEqual(coord.active, .metal)
+        XCTAssertTrue(coord.compileValid, coord.compileError ?? "Metal preview did not compile")
+    }
+
+    private func waitUntil(timeout: TimeInterval = 10,
+                           _ condition: @escaping () -> Bool) async throws {
+        let start = Date()
+        while !condition() {
+            if Date().timeIntervalSince(start) > timeout {
+                XCTFail("timed out waiting for preview compile")
+                return
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 }

@@ -174,6 +174,11 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(EditorViewModel.shouldPresentSaveErrorAlert(testHarnessActive: false))
     }
 
+    func testPreviewCompilationIsSuppressedUnderTestHarness() {
+        XCTAssertFalse(EditorViewModel.shouldCompilePreview(testHarnessActive: true))
+        XCTAssertTrue(EditorViewModel.shouldCompilePreview(testHarnessActive: false))
+    }
+
     func testSaveFailureRaisesAlert() {
         let vm = EditorViewModel(file: .untitled(source: "x"))
         var alerted: Error?
