@@ -33,18 +33,37 @@ enum AssistErrorMapper {
     }
 }
 
+/// Once-only latch for the teardown grace timer (armed from the pipe-reader thread).
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isSet = false
+    func trySet() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if isSet { return false }
+        isSet = true
+        return true
+    }
+}
+
 @MainActor
 final class ClaudeCodeRunner: AssistProvider {
     private let binary: URL?
     private let makeProcess: () -> ProcessRunning
     private let versionOutput: (@Sendable () -> String?)?
+    /// Teardown grace (Quick Goals hang, 2026-07-17): once the CLI's terminal `result` event has
+    /// streamed, the answer is complete — a process still alive this long after is a teardown
+    /// straggler and gets terminated; the run then completes from the streamed result instead of
+    /// waiting out the 420s timer (or forever, when a CLI child inherited the pipes).
+    private let teardownGrace: TimeInterval
     private(set) var lastArgsForTest: [String] = []
 
     init(binary: URL?, process: @escaping () -> ProcessRunning = { RealProcess() },
-         versionOutput: (@Sendable () -> String?)? = nil) {
+         versionOutput: (@Sendable () -> String?)? = nil,
+         teardownGrace: TimeInterval = 5) {
         self.binary = binary
         self.makeProcess = process
         self.versionOutput = versionOutput
+        self.teardownGrace = teardownGrace
     }
 
     // CSO M12: the tool-restriction flags below (`--tools ""`, `--disallowedTools LSP`, …) are only
@@ -119,13 +138,25 @@ final class ClaudeCodeRunner: AssistProvider {
             }
         }
         let proc = makeProcess()
+        // Grace-kill: the stream-json `result` event IS protocol completion. Arm a short timer
+        // when it streams; if the process outlives its own answer, terminate it — the completed
+        // result is then returned via the rescue below. Firing after a clean exit is a no-op
+        // (the process is already gone).
+        let graceArmed = OnceFlag()
+        let grace = teardownGrace
+        let onLine: @Sendable (String) -> Void = { line in
+            onEvent(line)
+            if Self.resultEvent(fromStreamJSON: line) != nil, graceArmed.trySet() {
+                DispatchQueue.global().asyncAfter(deadline: .now() + grace) { proc.cancel() }
+            }
+        }
         let out: ProcessOutput
         do {
             // withTaskCancellationHandler so a parent-Task cancel (user Stop) terminates the CLI —
             // a detached task is otherwise immune to cancellation and would orphan the process.
             out = try await withTaskCancellationHandler {
                 try await Task.detached(priority: .userInitiated) {
-                    try proc.run(executable: binary, args: args, timeout: timeout, onLine: onEvent)
+                    try proc.run(executable: binary, args: args, timeout: timeout, onLine: onLine)
                 }.value
             } onCancel: { proc.cancel() }
         }
@@ -142,19 +173,25 @@ final class ClaudeCodeRunner: AssistProvider {
         catch { throw AssistRunError.processFailed("\(error)") }
         // A cancel-terminated process exits non-zero; don't surface that as a real failure.
         if Task.isCancelled { throw CancellationError() }
+        // Rescue: a streamed (non-error) `result` event is the authoritative completion — accept
+        // it even on a non-zero exit (our own grace-kill above, or a CLI that crashes during
+        // teardown AFTER answering must not discard the finished answer).
+        if let result = Self.resultEvent(fromStreamJSON: out.stdout) { return result }
         if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
         return Self.finalMessage(fromStreamJSON: out.stdout)
     }
 
     /// The `result` event's text, ONLY if one is present — unlike `finalMessage`, no fallback to
     /// assistant text (a mid-stream kill leaves assistant text without a result; that's not a
-    /// completed run and must stay a timeout).
-    static func resultEvent(fromStreamJSON stdout: String) -> String? {
+    /// completed run and must stay a timeout). An `is_error` result is a FAILED run, never a
+    /// completed answer — excluded here so neither the salvage nor the exit-code rescue keep it.
+    nonisolated static func resultEvent(fromStreamJSON stdout: String) -> String? {
         var resultText: String?
         for line in stdout.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   (obj["type"] as? String) == "result",
+                  (obj["is_error"] as? Bool) != true,
                   let r = obj["result"] as? String else { continue }
             resultText = r
         }
@@ -206,7 +243,15 @@ enum BinaryLocator {
 
 /// Real streaming Process implementation (not exercised in unit tests).
 final class RealProcess: ProcessRunning, @unchecked Sendable {
-    private final class Box: @unchecked Sendable { var value = Data() }
+    /// Lock-guarded so the bounded post-exit drain can snapshot while a reader thread (kept alive
+    /// by an orphan holding the pipe) may still be appending.
+    private final class Box: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        func append(_ chunk: Data) { lock.lock(); data.append(chunk); lock.unlock() }
+        func set(_ d: Data) { lock.lock(); data = d; lock.unlock() }
+        var value: Data { lock.lock(); defer { lock.unlock() }; return data }
+    }
 
     // Live-process tracking so `cancel()` (called off the run thread, from the Task cancellation
     // handler) can terminate a CLI that's still running.
@@ -278,11 +323,11 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
         group.enter()
         q.async {
             let h = outPipe.fileHandleForReading
-            var pending = Data(); var full = Data()
+            var pending = Data()
             while true {
                 let chunk = h.availableData
                 if chunk.isEmpty { break }
-                full.append(chunk); pending.append(chunk)
+                outBox.append(chunk); pending.append(chunk)
                 while let nl = pending.firstIndex(of: 0x0A) {
                     let lineData = pending.subdata(in: pending.startIndex..<nl)
                     pending.removeSubrange(pending.startIndex...nl)
@@ -290,11 +335,10 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
                 }
             }
             if !pending.isEmpty, let s = String(data: pending, encoding: .utf8) { onLine(s) }
-            outBox.value = full
             group.leave()
         }
         group.enter()
-        q.async { errBox.value = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        q.async { errBox.set(errPipe.fileHandleForReading.readDataToEndOfFile()); group.leave() }
 
         let exited = DispatchSemaphore(value: 0)
         DispatchQueue(label: "assist.wait").async { p.waitUntilExit(); exited.signal() }
@@ -311,7 +355,11 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
             _ = group.wait(timeout: .now() + 2)
             throw AssistRunError.timedOut(partialStdout: String(decoding: outBox.value, as: UTF8.self))
         }
-        group.wait()
+        // Bounded drain (Quick Goals hang, 2026-07-17): pipe EOF requires EVERY fd holder to exit.
+        // A CLI child that inherited our pipes kept an unbounded wait here blocked forever with a
+        // finished answer on screen. 3s after exit, return what's collected — bytes after that
+        // belong to the orphan, not this run (the reader thread ends on its own at the real EOF).
+        _ = group.wait(timeout: .now() + 3)
         return ProcessOutput(stdout: String(decoding: outBox.value, as: UTF8.self),
                              stderr: String(decoding: errBox.value, as: UTF8.self),
                              exitCode: p.terminationStatus)

@@ -158,6 +158,70 @@ final class ClaudeCodeRunnerTests: XCTestCase {
             "{\"type\":\"result\",\"result\":\"R\"}"), "R")
     }
 
+    // MARK: Quick Goals hang (2026-07-17) — the result event is completion; teardown is not
+
+    /// Streams its result line, then blocks like a CLI that never exits after answering. Only
+    /// cancel() (the grace-kill) unblocks it — it then returns a killed process's exit code.
+    final class LingeringProcess: ProcessRunning, @unchecked Sendable {
+        private let sema = DispatchSemaphore(value: 0)
+        private(set) var cancelCalled = false
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            onLine("{\"type\":\"result\",\"result\":\"ok\"}")
+            sema.wait()
+            return ProcessOutput(stdout: "{\"type\":\"result\",\"result\":\"ok\"}",
+                                 stderr: "", exitCode: 15)
+        }
+        func cancel() { cancelCalled = true; sema.signal() }
+    }
+
+    /// The hang Conner hit: goals JSON streamed ("done in 160.4s" in the Activity pane) but the
+    /// CLI process lingered, so run() sat in .running for up to 260 more seconds (or forever on
+    /// an inherited-fd pipe). The result event IS protocol completion — the runner must grace-kill
+    /// the straggler and return the streamed answer.
+    func testGraceKillCompletesRunWhenProcessOutlivesItsResult() async throws {
+        let fake = LingeringProcess()
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { fake }, teardownGrace: 0.2)
+        let start = Date()
+        let final = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(final, "ok")
+        XCTAssertTrue(fake.cancelCalled, "the straggler must be terminated")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "must complete at the grace, not the 420s timer")
+    }
+
+    /// A non-zero exit AFTER a streamed result event is teardown noise (our own grace-kill, or a
+    /// CLI crash-on-exit) — the completed answer must be returned, not mapped to an error.
+    func testNonZeroExitAfterResultEventReturnsResult() async throws {
+        let fake = FakeProcess(stdout: "{\"type\":\"result\",\"result\":\"ok\"}",
+                               exitCode: 15, stderr: "terminated")
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"), process: { fake })
+        let final = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(final, "ok")
+    }
+
+    /// An is_error result is a FAILED run — it must never be treated as a completed answer
+    /// (neither by the timeout salvage nor by the non-zero-exit rescue).
+    func testErrorResultEventIsNeverTreatedAsCompletion() {
+        XCTAssertNil(ClaudeCodeRunner.resultEvent(fromStreamJSON:
+            "{\"type\":\"result\",\"result\":\"boom\",\"is_error\":true}"))
+    }
+
+    /// RealProcess regression: pipe EOF needs every fd holder gone — a CLI child that inherited
+    /// our pipes kept the post-exit drain blocked with a finished answer on screen. The drain must
+    /// be bounded: /bin/sh exits instantly here but its backgrounded sleep holds stdout for 30s.
+    func testRealProcessBoundsPipeDrainWhenChildHoldsFDs() throws {
+        let start = Date()
+        let out = try RealProcess().run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            args: ["-c", "echo READY; sleep 30 &"], timeout: 60, onLine: { _ in })
+        XCTAssertEqual(out.exitCode, 0)
+        XCTAssertTrue(out.stdout.contains("READY"))
+        XCTAssertLessThan(Date().timeIntervalSince(start), 10,
+                          "post-exit pipe drain must be bounded, not wait out the orphan")
+    }
+
     /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
     /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
     /// the main actor that the @MainActor runner body needs to execute.
