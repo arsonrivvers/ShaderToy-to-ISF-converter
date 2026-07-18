@@ -277,6 +277,36 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(vm.lastSaveSource, rewritten)
     }
 
+    func testReopeningSameSavedDocumentKeepsPendingHistoryRetry() throws {
+        let vm = makeVM()
+        let rewritten = "/*{}*/ void main(){ gl_FragColor = vec4(0.65); }"
+        vm.replaceSourceFromAssist(rewritten)
+        vm.pin(name: "survive reopen")
+        let untitledFile = vm.file
+        let target = root.appendingPathComponent("Reopen-pending.fs")
+        var destinationFile = untitledFile
+        try destinationFile.save(to: target)
+        let blocker = root.appendingPathComponent(
+            SnapshotStore.documentKey(for: destinationFile)
+        )
+        try Data("not a directory".utf8).write(to: blocker)
+        vm.saveAs(target)
+
+        vm.open(TrueISFEditor.LibraryEntry(url: target))
+        try FileManager.default.removeItem(at: blocker)
+        vm.saveInPlace()
+
+        let migrated = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(migrated.count, 3)
+        XCTAssertTrue(migrated.contains { $0.kind == .aiApply })
+        XCTAssertTrue(migrated.contains { $0.kind == .pin(name: "survive reopen") })
+        XCTAssertTrue(migrated.contains { $0.kind == .save(number: 1) })
+        XCTAssertTrue(vm.snapshots.snapshots(for: untitledFile).isEmpty)
+        XCTAssertEqual(vm.versionCount, 3)
+        XCTAssertEqual(vm.nextSaveVersion, 2)
+        XCTAssertEqual(vm.lastSaveSource, rewritten)
+    }
+
     func testSaveAsMergesNumberCollisionsBeforeMintingNextSave() throws {
         let vm = makeVM()
         let params = ParamSnapshot(params: [:])

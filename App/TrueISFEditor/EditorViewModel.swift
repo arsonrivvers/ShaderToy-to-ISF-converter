@@ -167,8 +167,12 @@ final class EditorViewModel: ObservableObject {
 
     func open(_ entry: LibraryEntry) {
         do {
-            file = try ISFFile(contentsOf: entry.url)
-            pendingHistorySources.removeAll()
+            let currentDocumentKey = SnapshotStore.documentKey(for: file)
+            let openedFile = try ISFFile(contentsOf: entry.url)
+            file = openedFile
+            if SnapshotStore.documentKey(for: openedFile) != currentDocumentKey {
+                pendingHistorySources.removeAll()
+            }
             assistApplied = false
             documentGeneration += 1
             conversionWarnings = []
