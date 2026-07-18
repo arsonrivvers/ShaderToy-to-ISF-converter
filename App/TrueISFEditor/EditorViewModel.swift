@@ -13,7 +13,7 @@ final class EditorViewModel: ObservableObject {
     @Published var statusMessage: String = ""
     /// Set by the "New from Shadertoy…" command; the editor screen presents the sheet.
     @Published var requestImport = false
-    /// Set by the Versions… command / toolbar button; EditorScreen presents the sheet.
+    /// Set by the Versions… command / toolbar button; EditorScreen opens the embedded Versions tab.
     @Published var requestVersions = false
     /// Set after an AI rewrite until the user saves, edits, starts another run, or dismisses it.
     @Published private(set) var assistApplied = false
