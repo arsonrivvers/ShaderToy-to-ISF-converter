@@ -78,14 +78,23 @@ final class SourceRouter: ObservableObject {
         let nameSet = Set(names)
         selections = selections.filter { nameSet.contains($0.key) }
         sources = sources.filter { nameSet.contains($0.key) }
-        // Filters default to the live camera (Conner, 2026-07-14) — a filter should show SOMETHING
-        // moving on load, not a black unbound input. Camera-denied machines fall back to the test
-        // pattern inside makeSource; the session itself starts lazily on first consumed frame.
+        // The primary input defaults to the live camera (Conner, 2026-07-14) — a filter should
+        // show SOMETHING moving on load, not a black unbound input. Camera-denied machines fall
+        // back to the test pattern inside makeSource; the session starts lazily on first frame.
+        // Secondary inputs (blend layers, masks) get a moving pattern DISTINCT from the camera:
+        // two identical feeds make a blend filter render as identity (Conner, 2026-07-18).
         for n in names where selections[n] == nil {
-            selections[n] = .camera
-            sources[n] = makeSource(.camera)
+            let sel: SourceSelection = n == names.first
+                ? .camera
+                : .testPattern(id: Self.secondaryDefaultPattern)
+            selections[n] = sel
+            sources[n] = makeSource(sel)
         }
     }
+
+    /// Default pattern for secondary image inputs. Falls back inside makeSource if the resource
+    /// is missing from the catalog (never black).
+    private static let secondaryDefaultPattern = "scrolling_checker"
 
     func selection(for name: String) -> SourceSelection { selections[name] ?? .none }
 

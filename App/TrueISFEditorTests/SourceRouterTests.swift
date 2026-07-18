@@ -26,6 +26,28 @@ final class SourceRouterTests: XCTestCase {
         XCTAssertEqual(r.selection(for: "mask"), .none)   // pruned input reverts to unrouted
     }
 
+    /// Secondary image inputs (blend layers, masks) default to a moving test pattern DISTINCT
+    /// from the primary input's camera. Two identical camera feeds make a blend filter render as
+    /// identity — "Layer Blend does nothing" (Conner, 2026-07-18).
+    func test_secondaryImageInputsDefaultToDistinctPattern() throws {
+        let r = try makeRouter()
+        r.updateInputs([imageInput("inputImage"), imageInput("blendImage"), imageInput("mask")])
+        XCTAssertEqual(r.selection(for: "inputImage"), .camera)
+        XCTAssertEqual(r.selection(for: "blendImage"), .testPattern(id: "scrolling_checker"))
+        XCTAssertEqual(r.selection(for: "mask"), .testPattern(id: "scrolling_checker"))
+    }
+
+    /// A later recompile that ADDS a secondary input must not disturb the primary's existing
+    /// route, and the new input still gets the distinct-pattern default.
+    func test_addedSecondaryInputDefaultsToPatternWithoutTouchingPrimary() throws {
+        let r = try makeRouter()
+        r.updateInputs([imageInput("inputImage")])
+        r.setSelection(.testPattern(id: "smpte_bars"), for: "inputImage")
+        r.updateInputs([imageInput("inputImage"), imageInput("blendImage")])
+        XCTAssertEqual(r.selection(for: "inputImage"), .testPattern(id: "smpte_bars"))
+        XCTAssertEqual(r.selection(for: "blendImage"), .testPattern(id: "scrolling_checker"))
+    }
+
     /// Camera-denied machines must never show black (C10): the camera default (and any explicit
     /// camera pick) falls back to the default test pattern.
     func test_cameraDefaultFallsBackToPatternWhenBlocked() throws {
