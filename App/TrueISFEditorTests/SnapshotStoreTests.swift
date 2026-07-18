@@ -96,6 +96,21 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertEqual(snaps[0].displayTitle, "Opened")   // legacy shows its stored label
     }
 
+    func testUnknownKindDecodesAsLegacy() throws {
+        let store = SnapshotStore(rootURL: root)
+        let file = TrueISFEditor.ISFFile.untitled(source: "a", suggestedName: "Future.fs")
+        let dir = root.appendingPathComponent(SnapshotStore.documentKey(for: file))
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"{"date":100.5,"label":"Future capture","source":"a","params":{"params":{}},"kind":"futureKind","number":99,"name":"ignored"}"#
+        try json.data(using: .utf8)!.write(to: dir.appendingPathComponent("20260101-000000-000.json"))
+
+        let snaps = store.snapshots(for: file)
+
+        XCTAssertEqual(snaps.count, 1)
+        XCTAssertEqual(snaps[0].kind, .legacy)
+        XCTAssertEqual(snaps[0].displayTitle, "Future capture")
+    }
+
     func testNextSaveNumberSkipsNonSavesAndSurvivesGaps() {
         let store = SnapshotStore(rootURL: root)
         var file = TrueISFEditor.ISFFile.untitled(source: "a", suggestedName: "N.fs")
