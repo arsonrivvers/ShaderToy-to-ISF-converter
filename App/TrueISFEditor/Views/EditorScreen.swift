@@ -350,7 +350,9 @@ struct EditorScreen: View {
     /// user sees is a moving shader with live controls, not an empty editor (Task 2.5).
     @AppStorage("hasOpenedFirstRunSample") private var hasOpenedFirstRunSample = false
     private func openSampleOnFirstRun() {
-        guard !hasOpenedFirstRunSample else { return }
+        // Under XCTest the host shares the real user-defaults domain — don't consume (or act
+        // on) the user's real first-run state from a test launch.
+        guard !hasOpenedFirstRunSample, !TestHarness.isActive else { return }
         hasOpenedFirstRunSample = true
         guard !vm.file.isDirty,
               let dir = LibraryModel.bundledSamplesDir,

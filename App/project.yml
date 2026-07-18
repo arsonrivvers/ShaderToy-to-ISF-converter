@@ -55,6 +55,7 @@ targets:
       - TrueISFEditorTests
       - path: TrueISFEditor/Resources/symbols.json
         buildPhase: resources
+      - TrueISFEditor/TestHarness.swift
       - TrueISFEditor/FetchStrategy.swift
       - TrueISFEditor/WebKitShaderFetcher.swift
       - TrueISFEditor/Models/ISFFile.swift

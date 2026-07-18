@@ -105,6 +105,10 @@ final class LibraryModel: ObservableObject {
     func loadStandardLibraries() {
         let fm = FileManager.default
         if let samples = Self.bundledSamplesDir { addFolder(samples, title: "Samples") }
+        // Headless test mode: never scan the user's real folders from a test host — persisted
+        // added folders can live in TCC-protected locations (Documents), and the resulting
+        // permission prompt blocks the harness until the user clicks it.
+        guard !TestHarness.isActive else { return }
         if fm.fileExists(atPath: Self.userISFDir.path) { addFolder(Self.userISFDir, title: "User") }
         if fm.fileExists(atPath: Self.systemISFDir.path) { addFolder(Self.systemISFDir, title: "System") }
         for path in (UserDefaults.standard.array(forKey: defaultsKey) as? [String] ?? []) {
@@ -114,6 +118,9 @@ final class LibraryModel: ObservableObject {
     }
 
     private func persist() {
+        // Headless test mode: the host shares the real defaults domain — a test-launched model
+        // (which skips the user's folders above) must never overwrite the user's saved list.
+        guard !TestHarness.isActive else { return }
         // Bundled samples must never persist as a user-added folder — the bundle path changes
         // per install location and would accumulate stale entries.
         let optionalPaths: [String?] = [Self.userISFDir.path, Self.systemISFDir.path,

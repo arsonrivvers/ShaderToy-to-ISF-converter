@@ -32,7 +32,13 @@ final class OutputWindowManager: ObservableObject {
                 MainActor.assumeIsolated { self?.isOpen = false }
             }
         }
-        window?.makeKeyAndOrderFront(nil)
+        if TestHarness.isActive {
+            // Still visible (update() gates on isVisible) but never key — a suite run must not
+            // steal keyboard focus from whatever the user is doing.
+            window?.orderFront(nil)
+        } else {
+            window?.makeKeyAndOrderFront(nil)
+        }
         isOpen = true
     }
 

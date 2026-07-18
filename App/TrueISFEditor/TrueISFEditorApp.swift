@@ -294,7 +294,24 @@ final class AppQuitGuard: NSObject, NSApplicationDelegate {
     var hasUnsavedChanges: () -> Bool = { false }
     var confirmDiscard: () -> Bool = { true }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Headless test mode: the host must not present as a foreground app — no dock icon,
+        // no activation, no stealing focus from whatever the user is doing during suite runs.
+        if TestHarness.isActive { NSApp.setActivationPolicy(.accessory) }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard TestHarness.isActive else { return }
+        // SwiftUI orders the main Window in after launch completes; hide it one runloop later.
+        DispatchQueue.main.async {
+            NSApp.windows.forEach { $0.orderOut(nil) }
+        }
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Headless test mode: XCTest terminates the host after every suite run — a discard
+        // modal here blocks the harness until it kills the host (and pops on the user's screen).
+        if TestHarness.isActive { return .terminateNow }
         guard hasUnsavedChanges() else { return .terminateNow }
         return confirmDiscard() ? .terminateNow : .terminateCancel
     }
