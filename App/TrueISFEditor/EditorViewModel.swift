@@ -151,30 +151,10 @@ final class EditorViewModel: ObservableObject {
 
     // MARK: document lifecycle
 
-    /// Asked before anything replaces a dirty document (the library list is selection-driven, so a
-    /// single stray click would otherwise destroy unsaved edits). Injectable for tests.
-    var confirmDiscardIfDirty: () -> Bool = { EditorViewModel.askDiscardUnsavedChanges() }
-
-    /// The one choke point every document-replacing path goes through.
-    func canReplaceDocument() -> Bool {
-        if !file.isDirty { return true }
-        if confirmDiscardIfDirty() { return true }
-        statusMessage = "Kept unsaved changes"
-        return false
-    }
-
-    private static func askDiscardUnsavedChanges() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Discard unsaved changes?"
-        alert.informativeText = "The current shader has unsaved edits. Replacing it will lose them."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Discard Changes")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
-    }
+    // Launch-readiness TODO: restore data-loss protection with a nonblocking sheet. The synchronous
+    // discard-confirm modal was intentionally retired because it could deadlock the app and tests.
 
     func open(_ entry: LibraryEntry) {
-        guard canReplaceDocument() else { return }
         do {
             file = try ISFFile(contentsOf: entry.url)
             documentGeneration += 1
@@ -193,7 +173,6 @@ final class EditorViewModel: ObservableObject {
     }
 
     func newUntitled() {
-        guard canReplaceDocument() else { return }
         file = .untitled(source: Self.blankTemplate)
         documentGeneration += 1
         conversionWarnings = []
@@ -206,7 +185,6 @@ final class EditorViewModel: ObservableObject {
 
     /// Called by the Shadertoy import sheet on a successful conversion.
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
-        guard canReplaceDocument() else { return }
         file = .untitled(source: isf, suggestedName: suggestedName)
         documentGeneration += 1
         conversionWarnings = warnings
@@ -223,7 +201,6 @@ final class EditorViewModel: ObservableObject {
 
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
     func loadExample(name: String, source: String) {
-        guard canReplaceDocument() else { return }
         file = .untitled(source: source, suggestedName: name)
         documentGeneration += 1
         conversionWarnings = []

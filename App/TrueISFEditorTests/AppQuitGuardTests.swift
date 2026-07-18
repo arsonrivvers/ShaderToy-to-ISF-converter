@@ -3,18 +3,12 @@ import XCTest
 
 @MainActor
 final class AppQuitGuardTests: XCTestCase {
-    /// Headless test mode: the test target's TEST_HOST is the real app, so every suite run
-    /// terminates it. A dirty document must NOT pop the discard-confirm modal under XCTest —
-    /// an unclicked modal blocks the harness until it kills the host.
-    func testTerminatesImmediatelyUnderTestHarnessEvenWhenDirty() {
+    /// The discard-confirm modal is retired until launch readiness. Termination must never block
+    /// on a modal sheet in development or under the test host.
+    func testTerminatesImmediatelyWithoutDiscardConfirmation() {
         let quitGuard = AppQuitGuard()
-        var confirmAsked = false
-        quitGuard.hasUnsavedChanges = { true }
-        quitGuard.confirmDiscard = { confirmAsked = true; return false }
-
         XCTAssertEqual(quitGuard.applicationShouldTerminate(NSApp), .terminateNow,
-                       "quit guard must never block termination under the test harness")
-        XCTAssertFalse(confirmAsked, "discard-confirm alert must not run under the test harness")
+                       "termination must never block on the retired discard-confirm modal")
     }
 
     /// The host must be an accessory process under XCTest — no dock icon, no activation, no

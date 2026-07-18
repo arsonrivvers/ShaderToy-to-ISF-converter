@@ -188,11 +188,6 @@ void main() {
         }
         #endif
 
-        // A2: quit guard closures capture the StateObject's wrapped instance; safe — both
-        // outlive the app run. canReplaceDocument() runs the standard discard-confirm alert.
-        let vmRef = _vm.wrappedValue
-        quitGuard.hasUnsavedChanges = { MainActor.assumeIsolated { vmRef.file.isDirty } }
-        quitGuard.confirmDiscard = { MainActor.assumeIsolated { vmRef.canReplaceDocument() } }
     }
 
     var body: some Scene {
@@ -288,12 +283,9 @@ void main() {
     }
 }
 
-/// A2: ⌘Q guard. SwiftUI Window scenes have no native terminate hook; this delegate asks the
-/// EditorViewModel (via closures, set in the App init) whether edits would be lost.
+/// App lifecycle delegate. The synchronous unsaved-change confirmation is intentionally retired
+/// until launch hardening; it could deadlock both the app and its XCTest host.
 final class AppQuitGuard: NSObject, NSApplicationDelegate {
-    var hasUnsavedChanges: () -> Bool = { false }
-    var confirmDiscard: () -> Bool = { true }
-
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Headless test mode: the host must not present as a foreground app — no dock icon,
         // no activation, no stealing focus from whatever the user is doing during suite runs.
@@ -309,10 +301,6 @@ final class AppQuitGuard: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Headless test mode: XCTest terminates the host after every suite run — a discard
-        // modal here blocks the harness until it kills the host (and pops on the user's screen).
-        if TestHarness.isActive { return .terminateNow }
-        guard hasUnsavedChanges() else { return .terminateNow }
-        return confirmDiscard() ? .terminateNow : .terminateCancel
+        .terminateNow
     }
 }

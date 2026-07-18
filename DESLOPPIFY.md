@@ -72,13 +72,13 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Recommend:** Run each `replaceCall` to a fixpoint (re-scan output until no change) or rewrite `args` recursively before `transform`. Bounded — replacements never reintroduce the function names.
 - **Safe to fix now?** yes, with tests.
 
-### C8 — No dirty-document guard anywhere → one stray click destroys unsaved work
-- **Status:** done
-- **Resolved:** One choke point `EditorViewModel.canReplaceDocument()` guards open()/newUntitled()/loadImported()/loadExample() (Remix open-in-editor routes through loadImported): dirty doc → NSAlert confirm (injectable closure for tests); declining keeps the document + sets a status message. 4 new tests (declined/confirmed/clean/import paths).
-- **Where:** `App/TrueISFEditor/Models/ISFFile.swift` (`isDirty` tracked, never consulted); `Views/LibraryView.swift:39-42`; `EditorViewModel.swift:91,103,113,127`; `Remix/RemixStudioView.swift:242`
+### C8 — Dirty-document protection deferred until launch readiness
+- **Status:** deferred by operator (2026-07-18)
+- **Current:** The synchronous AppKit discard-confirm modal was retired after it froze on-device and wedged the XCTest host. Open/new/example/import/remix-open and quit now proceed immediately; regression tests cover every replacement path. This intentionally reopens the data-loss risk during development so the modal cannot block application progress.
+- **Where:** `App/TrueISFEditor/Models/ISFFile.swift` (`isDirty` remains tracked); `Views/LibraryView.swift`; `EditorViewModel.swift` document lifecycle; `Remix/RemixStudioView.swift`; `TrueISFEditorApp.swift` app lifecycle delegate.
 - **Why it matters:** The library list is selection-driven — a single click replaces the document. Open/new/example/import/remix-open all silently discard unsaved edits with zero confirmation. Straight data loss.
-- **Recommend:** One choke-point guard in `EditorViewModel` (`guard !file.isDirty || userConfirms()`) before any document replacement.
-- **Safe to fix now?** yes — additive, small, testable.
+- **Recommend:** Before launch, restore protection as a nonblocking SwiftUI sheet with explicit Save / Discard / Cancel outcomes and full document-switch + quit coverage. Do not restore the synchronous `NSAlert.runModal()` path.
+- **Safe to fix now?** no — Conner explicitly deferred it until the app is ready to fully ship.
 
 ### C9 — CameraSource releases the previous CVMetalTexture while the GPU may still read it
 - **Status:** done
@@ -446,7 +446,7 @@ _Pixel gate 2026-07-09 post-Task-3.2: **BLACK→OK flips confirmed: XXVfRV 33jcR
 - **Where:** `App/TrueISFEditor/EditorViewModel.swift` (`loadImported` path) — title bar shows `Untitled.fs` while the import banner + status bar both say "Imported More -cubes- for the cube lovers.fs" (CS screenshot, 2026-07-11)
 - **Why it matters:** A stranger imports a shader, sees the right name in the banner, then hits Save and gets `Untitled.fs` — provenance lost, and the mismatch reads as a bug. First-session UX on the app's headline flow.
 - **Recommend:** Adopt the imported shader's (sanitized) name as the document display name / default save filename.
-- **Safe to fix now?** yes — small, but touch the dirty-document/save path with a test (C8's choke point lives there).
+- **Safe to fix now?** yes — small, but cover the document/save path with a test; C8 protection is currently deferred.
 
 ### M44 — `rewriteScoped` queues nested edits: word-rule uniform inside an indexed access corrupts output
 - **Status:** done (found + fixed 2026-07-11, Mechanic manual review `7817e94e`)

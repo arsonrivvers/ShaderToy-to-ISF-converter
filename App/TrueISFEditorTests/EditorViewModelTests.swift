@@ -68,43 +68,52 @@ final class EditorViewModelTests: XCTestCase {
         XCTAssertTrue(vm.fitToWindow)
     }
 
-    // MARK: C8 — dirty-document guard (the library list is selection-driven; before the guard,
-    // one stray click silently destroyed unsaved edits)
+    // MARK: document replacement — discard confirmation is intentionally retired until launch
 
-    func testDirtyDocument_declinedConfirm_keepsDocument() {
-        let vm = EditorViewModel(file: .untitled(source: "original"))
-        vm.file.source = "edited"                                  // marks dirty
-        var asked = 0
-        vm.confirmDiscardIfDirty = { asked += 1; return false }
-        vm.newUntitled()
-        XCTAssertEqual(asked, 1)
-        XCTAssertEqual(vm.file.source, "edited", "declining the confirm must keep the document")
-    }
-
-    func testDirtyDocument_confirmedDiscard_replaces() {
+    func testDirtyDocument_newUntitledReplacesWithoutPrompt() {
         let vm = EditorViewModel(file: .untitled(source: "original"))
         vm.file.source = "edited"
-        vm.confirmDiscardIfDirty = { true }
         vm.newUntitled()
         XCTAssertEqual(vm.file.source, EditorViewModel.blankTemplate)
     }
 
-    func testCleanDocument_replacesWithoutAsking() {
+    func testCleanDocument_replaces() {
         let vm = EditorViewModel(file: .untitled(source: "original"))
-        var asked = 0
-        vm.confirmDiscardIfDirty = { asked += 1; return true }
         vm.newUntitled()
-        XCTAssertEqual(asked, 0, "a clean document must be replaced without a prompt")
         XCTAssertEqual(vm.file.source, EditorViewModel.blankTemplate)
     }
 
-    func testLoadImported_respectsDirtyGuard() {
+    func testDirtyDocument_loadImportedReplacesWithoutPrompt() {
         let vm = EditorViewModel(file: .untitled(source: "original"))
         vm.file.source = "edited"
-        vm.confirmDiscardIfDirty = { false }
-        vm.loadImported(isf: "/*{\"INPUTS\":[]}*/\nvoid main(){}", warnings: [], suggestedName: "X")
-        XCTAssertEqual(vm.file.source, "edited")
-        XCTAssertNil(vm.conversionReportTitle)
+        let imported = "/*{\"INPUTS\":[]}*/\nvoid main(){}"
+        vm.loadImported(isf: imported, warnings: [], suggestedName: "X")
+        XCTAssertEqual(vm.file.source, imported)
+        XCTAssertEqual(vm.conversionReportTitle, "Imported X")
+    }
+
+    func testDirtyDocument_openReplacesWithoutPrompt() throws {
+        let vm = EditorViewModel(file: .untitled(source: "original"))
+        vm.file.source = "edited"
+        let opened = "/*{\"INPUTS\":[]}*/\nvoid main(){ gl_FragColor = vec4(0.25); }"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unguarded-open-\(UUID().uuidString).fs")
+        try opened.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        vm.open(TrueISFEditor.LibraryEntry(url: url))
+
+        XCTAssertEqual(vm.file.source, opened)
+    }
+
+    func testDirtyDocument_loadExampleReplacesWithoutPrompt() {
+        let vm = EditorViewModel(file: .untitled(source: "original"))
+        vm.file.source = "edited"
+        let example = "/*{\"INPUTS\":[]}*/\nvoid main(){ gl_FragColor = vec4(0.75); }"
+
+        vm.loadExample(name: "Example.fs", source: example)
+
+        XCTAssertEqual(vm.file.source, example)
     }
 
     // MARK: C11 — open() must sync the header tabs and clear a stale import report; before the
