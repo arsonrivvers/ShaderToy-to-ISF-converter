@@ -19,16 +19,24 @@ struct ApplyPreviewPanel: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
-            Text(result.explanation)
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            if !result.changedLines.isEmpty {
-                Text("Changed lines: \(result.changedLines.map(String.init).joined(separator: ", "))")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            // The explanation can be many paragraphs — it scrolls in a bounded strip so it can
+            // never overrun the changed-lines caption or the diff below (overlap bug, 2026-07-18).
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(result.explanation)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    if !result.changedLines.isEmpty {
+                        Text("Changed lines: \(LineDiff.rangeSummary(result.changedLines))")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 110)
             DiffView(old: originalSource, new: result.replacementSource)
         }
     }

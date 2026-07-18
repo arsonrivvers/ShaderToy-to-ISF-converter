@@ -27,6 +27,23 @@ enum DiffRow: Equatable, Identifiable {
 /// LCS line diff (D2). Shader sources are small (hundreds of lines), so the O(n·m) table is
 /// fine; a size guard degrades giant inputs to remove-all/add-all instead of blowing memory.
 enum LineDiff {
+    /// Collapse a changed-line list into a compact range string: [7,17,18,29,30,64] → "7, 17–18,
+    /// 29–30, 64". Sorts and deduplicates first (assist output ordering isn't guaranteed).
+    static func rangeSummary(_ lines: [Int]) -> String {
+        let sorted = Array(Set(lines)).sorted()
+        var parts: [String] = []
+        var runStart: Int?
+        var prev: Int?
+        for n in sorted {
+            if let p = prev, n == p + 1 { prev = n; continue }
+            if let s = runStart, let p = prev { parts.append(s == p ? "\(s)" : "\(s)–\(p)") }
+            runStart = n
+            prev = n
+        }
+        if let s = runStart, let p = prev { parts.append(s == p ? "\(s)" : "\(s)–\(p)") }
+        return parts.joined(separator: ", ")
+    }
+
     static func diff(old: String, new: String) -> [DiffLine] {
         let a = old.components(separatedBy: "\n")
         let b = new.components(separatedBy: "\n")

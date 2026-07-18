@@ -2,6 +2,21 @@ import XCTest
 @testable import TrueISFEditor
 
 final class LineDiffTests: XCTestCase {
+    // MARK: rangeSummary — collapses the changed-lines wall of numbers into ranges
+
+    func testRangeSummaryCollapsesConsecutiveRuns() {
+        XCTAssertEqual(LineDiff.rangeSummary([7, 17, 18, 29, 30, 64]), "7, 17–18, 29–30, 64")
+    }
+
+    func testRangeSummarySortsAndDeduplicates() {
+        XCTAssertEqual(LineDiff.rangeSummary([3, 1, 2, 2, 10]), "1–3, 10")
+    }
+
+    func testRangeSummarySingleAndEmpty() {
+        XCTAssertEqual(LineDiff.rangeSummary([5]), "5")
+        XCTAssertEqual(LineDiff.rangeSummary([]), "")
+    }
+
     func testIdenticalTextsAreAllSame() {
         let d = LineDiff.diff(old: "a\nb\nc", new: "a\nb\nc")
         XCTAssertEqual(d.map(\.kind), [.same, .same, .same])
