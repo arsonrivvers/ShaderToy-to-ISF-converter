@@ -63,6 +63,7 @@ struct EditorScreen: View {
                         Divider()
                         shaderAssistSection
                             .padding(6)
+                        AssistProgressStrip(model: shaderAssist, onCancel: { shaderAssist.cancel() })
                     }
                 }
                 // Right: preview + input controls.
@@ -90,6 +91,9 @@ struct EditorScreen: View {
                         Spacer()
                         // D0: the readout follows the live window — pop-out coordinator while out.
                         RenderStatsSlot(coordinator: vm.popOutEditing ? output.coordinator : vm.preview)
+                        if editorCollapsed {
+                            AssistRunBadge(model: shaderAssist) { editorCollapsed = false }
+                        }
                         Button { vm.requestVersions = true } label: {
                             Image(systemName: "clock.arrow.circlepath")
                         }
@@ -223,10 +227,6 @@ struct EditorScreen: View {
                 Button("Shader Upgrades") {
                     showSuggestionGoalSheet = true
                 }.disabled(running)
-                if running {
-                    ProgressView().controlSize(.small)
-                    Button("Cancel") { shaderAssist.cancel() }
-                }
                 Spacer()
                 settingsGearButton
                     .help("ShaderAssist settings — provider, model, login")

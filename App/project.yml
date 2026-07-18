@@ -96,6 +96,7 @@ targets:
       - TrueISFEditor/ShaderAssist/AssistTranscriptFormatter.swift
       - TrueISFEditor/Acknowledgements.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
+      - TrueISFEditor/Views/AssistProgressStrip.swift
       - TrueISFEditor/Remix/RemixNode.swift
       - TrueISFEditor/Remix/RemixDirectives.swift
       - TrueISFEditor/Remix/RemixPrompt.swift

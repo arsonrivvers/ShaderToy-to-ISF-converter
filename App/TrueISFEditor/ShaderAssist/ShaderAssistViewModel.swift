@@ -18,6 +18,10 @@ final class ShaderAssistViewModel: ObservableObject {
     @Published var handledEdits: Set<Int> = []
     /// Live raw event lines from the provider CLI (the embedded terminal, B3).
     @Published private(set) var transcript: [String] = []
+    // MARK: Run liveness (progress strip)
+    @Published private(set) var runStartDate: Date?
+    @Published private(set) var eventCount = 0
+    @Published private(set) var lastEventDate: Date?
     /// "Using <provider> · <model>" caption for the UI.
     @Published private(set) var providerCaption: String = ""
     @Published var activeSuggestionGoal: String?
@@ -32,6 +36,8 @@ final class ShaderAssistViewModel: ObservableObject {
     private let defaults: UserDefaults
     private let providerOverride: AssistProvider?
     private var task: Task<Void, Never>?
+    /// Tags stream callbacks so a cancelled run cannot report late events into its successor.
+    private var runGeneration = 0
     /// The last run's inputs, kept so the `.error` state's Try Again can re-run in place instead of
     /// making the user rebuild the whole goal-selection flow. Apply previews stay fingerprint-guarded
     /// against the CURRENT editor source, so retrying with the stashed source is safe.
@@ -210,8 +216,13 @@ final class ShaderAssistViewModel: ObservableObject {
 
     func run(_ t: ShaderAssistTask, source: String, diagnostics: [Diagnostic]) {
         task?.cancel(); handledEdits = []; transcript = []
+        runGeneration &+= 1
+        let generation = runGeneration
         lastRun = (t, source, diagnostics)
         state = .running(t)
+        runStartDate = Date()
+        eventCount = 0
+        lastEventDate = nil
         let selection = providerSelection
         let kind = selection.kind
         let provider = makeProvider(kind: kind)
@@ -230,12 +241,16 @@ final class ShaderAssistViewModel: ObservableObject {
         }()
         let system = skills + "\n\n---\n\n" + ShaderAssistPrompt.system(for: t) + injectionGuard
         let prompt = ShaderAssistPrompt.user(task: t, source: source, diagnostics: diagnostics)
+        let onEvent: @Sendable (String) -> Void = { [weak self] line in
+            Task { @MainActor [weak self] in
+                self?.appendTranscript(line, generation: generation)
+            }
+        }
         task = Task { [weak self] in
             do {
-                let final = try await provider.run(prompt: prompt, system: system, model: model, timeout: Self.runTimeout) { line in
-                    Task { @MainActor [weak self] in self?.appendTranscript(line) }
-                }
-                if Task.isCancelled { return }
+                let final = try await provider.run(prompt: prompt, system: system, model: model,
+                                                   timeout: Self.runTimeout, onEvent: onEvent)
+                guard !Task.isCancelled, self?.runGeneration == generation else { return }
                 switch t {
                 case .diagnoseAndFix:
                     if let r = try? ShaderAssistResponseParser.fixResult(fromClaudeStdout: final) {
@@ -262,10 +277,10 @@ final class ShaderAssistViewModel: ObservableObject {
                     } else { self?.state = .rawAnswer(final) }
                 }
             } catch let e as AssistRunError {
-                if Task.isCancelled { return }
+                guard !Task.isCancelled, self?.runGeneration == generation else { return }
                 self?.state = .error(Self.message(for: e, provider: kind))
             } catch {
-                if Task.isCancelled { return }
+                guard !Task.isCancelled, self?.runGeneration == generation else { return }
                 self?.state = .error("\(error)")
             }
         }
@@ -284,6 +299,7 @@ final class ShaderAssistViewModel: ObservableObject {
     /// another. Called on every documentGeneration change.
     func resetForDocumentSwitch() {
         task?.cancel()
+        runGeneration &+= 1
         lastRun = nil
         fixSourceFingerprint = nil
         handledEdits = []
@@ -298,6 +314,7 @@ final class ShaderAssistViewModel: ObservableObject {
 
     func cancel() {
         task?.cancel()
+        runGeneration &+= 1
         if let lastSuggestions {
             state = .suggestions(lastSuggestions)
         } else {
@@ -305,7 +322,10 @@ final class ShaderAssistViewModel: ObservableObject {
         }
     }
 
-    private func appendTranscript(_ line: String) {
+    private func appendTranscript(_ line: String, generation: Int) {
+        guard generation == runGeneration else { return }
+        eventCount += 1
+        lastEventDate = Date()
         // N28: the Activity pane is a user surface — humanize stream-JSON, drop the internals.
         guard let display = AssistTranscriptFormatter.display(line) else { return }
         transcript.appendBounded(display, max: 2000)   // bound memory

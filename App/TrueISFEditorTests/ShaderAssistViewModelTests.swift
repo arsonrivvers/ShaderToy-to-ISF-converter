@@ -278,6 +278,90 @@ final class ShaderAssistViewModelTests: XCTestCase {
             XCTFail("expected invalid replacement error")
         }
     }
+
+    // MARK: Run liveness
+
+    func testRunResetsAndCountsStreamEvents() async {
+        let provider = FakeAssistProvider(
+            [
+                .success(#"{"goals":[]}"#),
+                .success(#"{"goals":[]}"#),
+            ],
+            eventsPerRun: [["raw event one", "raw event two", "raw event three"], []]
+        )
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+
+        vm.run(.suggestionGoals, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        XCTAssertNotNil(vm.runStartDate)
+        XCTAssertEqual(vm.eventCount, 0)
+        XCTAssertNil(vm.lastEventDate)
+
+        await settle()
+        XCTAssertEqual(vm.eventCount, 3)
+        XCTAssertNotNil(vm.lastEventDate)
+
+        vm.run(.suggestionGoals, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        XCTAssertNotNil(vm.runStartDate)
+        XCTAssertEqual(vm.eventCount, 0)
+        XCTAssertNil(vm.lastEventDate)
+    }
+
+    func testClockString() {
+        XCTAssertEqual(AssistProgressStrip.clock(0), "0s")
+        XCTAssertEqual(AssistProgressStrip.clock(45), "45s")
+        XCTAssertEqual(AssistProgressStrip.clock(134), "2m 14s")
+        XCTAssertEqual(AssistProgressStrip.clock(3701), "61m 41s")
+    }
+
+    func testQuietDurationUsesRunStartUntilFirstEvent() {
+        let start = Date(timeIntervalSince1970: 100)
+        let event = Date(timeIntervalSince1970: 125)
+        let now = Date(timeIntervalSince1970: 141)
+
+        XCTAssertEqual(
+            AssistProgressStrip.quietDuration(runStartDate: start, lastEventDate: nil, now: now),
+            41
+        )
+        XCTAssertEqual(
+            AssistProgressStrip.quietDuration(runStartDate: start, lastEventDate: event, now: now),
+            16
+        )
+    }
+
+    func testCancelledRunCannotReportLateEventsIntoNextRun() async {
+        let provider = ControllableAssistProvider()
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+
+        vm.run(.suggestionGoals, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await waitForEventSinks(1, provider: provider)
+
+        vm.run(.suggestionGoals, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await waitForEventSinks(2, provider: provider)
+
+        provider.eventSinks[0]("late event from cancelled run")
+        provider.eventSinks[1]("current run event")
+        await settle()
+
+        XCTAssertEqual(vm.eventCount, 1)
+        XCTAssertNotNil(vm.lastEventDate)
+        vm.cancel()
+    }
+
+    func testCancelledRunIgnoresLateEvents() async {
+        let provider = ControllableAssistProvider()
+        let vm = ShaderAssistViewModel(providerOverride: provider)
+
+        vm.run(.suggestionGoals, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await waitForEventSinks(1, provider: provider)
+        vm.cancel()
+
+        provider.eventSinks[0]("late event after explicit cancel")
+        await settle()
+
+        XCTAssertEqual(vm.eventCount, 0)
+        XCTAssertNil(vm.lastEventDate)
+        if case .idle = vm.state {} else { XCTFail("expected idle after cancel") }
+    }
 }
 
 @MainActor
@@ -292,12 +376,14 @@ private final class HangingAssistProvider: AssistProvider {
 
 private final class FakeAssistProvider: AssistProvider {
     var scripts: [Result<String, Error>]
+    var eventsPerRun: [[String]]
     private(set) var prompts: [String] = []
     private(set) var systems: [String] = []
     private(set) var lastTimeout: TimeInterval = 0
 
-    init(_ scripts: [Result<String, Error>]) {
+    init(_ scripts: [Result<String, Error>], eventsPerRun: [[String]] = []) {
         self.scripts = scripts
+        self.eventsPerRun = eventsPerRun
     }
 
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
@@ -305,6 +391,9 @@ private final class FakeAssistProvider: AssistProvider {
         prompts.append(prompt)
         systems.append(system)
         lastTimeout = timeout
+        if !eventsPerRun.isEmpty {
+            eventsPerRun.removeFirst().forEach(onEvent)
+        }
         let result = scripts.removeFirst()
         switch result {
         case .success(let text):
@@ -313,6 +402,27 @@ private final class FakeAssistProvider: AssistProvider {
             throw error
         }
     }
+}
+
+@MainActor
+private final class ControllableAssistProvider: AssistProvider {
+    private(set) var eventSinks: [@Sendable (String) -> Void] = []
+
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
+             onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
+        eventSinks.append(onEvent)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
+        return #"{"goals":[]}"#
+    }
+}
+
+@MainActor
+private func waitForEventSinks(_ count: Int, provider: ControllableAssistProvider) async {
+    for _ in 0..<100 where provider.eventSinks.count < count {
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    XCTAssertGreaterThanOrEqual(provider.eventSinks.count, count)
 }
 
 private func settle() async {
