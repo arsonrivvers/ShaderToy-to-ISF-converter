@@ -9,7 +9,6 @@ struct DiagnosticsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Diagnostics (\(diagnostics.count))").font(.headline)
             if diagnostics.isEmpty {
                 Text("No diagnostics").foregroundStyle(.secondary)
             } else {

@@ -1,7 +1,7 @@
 import SwiftUI
 import ShadertoyISFKit
 
-enum BottomPanelTab { case diagnostics, versions }
+enum BottomPanelTab: Hashable { case diagnostics, versions }
 
 /// The TrueISFEditor main window: library sidebar | editor + warnings | preview + controls.
 struct EditorScreen: View {
@@ -36,13 +36,30 @@ struct EditorScreen: View {
                         CodeEditorView(controller: vm.editor)
                             .frame(minWidth: 360)
                         Divider()
-                        DiagnosticsPanel(
-                            diagnostics: vm.diagnostics.diagnostics,
-                            sourceLines: vm.file.source.components(separatedBy: "\n"),
-                            onJump: { vm.editor.revealLine($0) },
-                            onApply: { vm.apply($0) })
-                            .frame(height: 150)
-                            .padding(6)
+                        Picker("", selection: $bottomTab) {
+                            Text("Diagnostics (\(vm.diagnostics.diagnostics.count))")
+                                .tag(BottomPanelTab.diagnostics)
+                            Text("Versions (\(vm.versionCount))")
+                                .tag(BottomPanelTab.versions)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        .padding(.top, 6)
+                        Group {
+                            if bottomTab == .diagnostics {
+                                DiagnosticsPanel(
+                                    diagnostics: vm.diagnostics.diagnostics,
+                                    sourceLines: vm.file.source.components(separatedBy: "\n"),
+                                    onJump: { vm.editor.revealLine($0) },
+                                    onApply: { vm.apply($0) })
+                            } else {
+                                VersionsPanel(vm: vm)
+                            }
+                        }
+                        // A readable inline diff needs more room than the compact diagnostics list.
+                        .frame(height: bottomTab == .versions ? 280 : 150)
+                        .padding(6)
                         Divider()
                         shaderAssistSection
                             .padding(6)
@@ -167,8 +184,11 @@ struct EditorScreen: View {
                 vm.loadImported(isf: isf, warnings: warnings, suggestedName: name)
             }
         }
-        .sheet(isPresented: $vm.requestVersions) {
-            SnapshotListView(vm: vm)
+        .onChange(of: vm.requestVersions) { open in
+            guard open else { return }
+            editorCollapsed = false
+            bottomTab = .versions
+            vm.requestVersions = false
         }
         .sheet(isPresented: $showSuggestionGoalSheet) {
             SuggestionGoalSheet(model: shaderAssist,
