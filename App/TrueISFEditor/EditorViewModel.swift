@@ -233,8 +233,13 @@ final class EditorViewModel: ObservableObject {
     }
 
     /// A4: a failed save is data loss pending — a 5s auto-clearing toast is not enough. Injectable
-    /// for tests (default shows a modal alert).
+    /// for tests; normal app runs show a modal, while the XCTest host must never block on one.
+    static func shouldPresentSaveErrorAlert(testHarnessActive: Bool = TestHarness.isActive) -> Bool {
+        !testHarnessActive
+    }
+
     var presentSaveErrorAlert: (Error) -> Void = { error in
+        guard EditorViewModel.shouldPresentSaveErrorAlert() else { return }
         let alert = NSAlert()
         alert.messageText = "Save failed"
         alert.informativeText = "\(error.localizedDescription)\n\nYour changes are still in the editor. Try Save As… to a writable location."

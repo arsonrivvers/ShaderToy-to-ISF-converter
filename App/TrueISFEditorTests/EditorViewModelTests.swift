@@ -169,6 +169,11 @@ final class EditorViewModelTests: XCTestCase {
 
     // MARK: A4 — save failures must raise the (injectable) alert, not just the 5s toast
 
+    func testSaveErrorPresentationIsSuppressedUnderTestHarness() {
+        XCTAssertFalse(EditorViewModel.shouldPresentSaveErrorAlert(testHarnessActive: true))
+        XCTAssertTrue(EditorViewModel.shouldPresentSaveErrorAlert(testHarnessActive: false))
+    }
+
     func testSaveFailureRaisesAlert() {
         let vm = EditorViewModel(file: .untitled(source: "x"))
         var alerted: Error?
