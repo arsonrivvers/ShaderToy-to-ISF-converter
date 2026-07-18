@@ -15,23 +15,24 @@ Non-goals: branching history (linear timeline chosen), file-per-version on disk 
 
 ## 1. Version model & save flow
 
-- `Snapshot` gains `kind`: `save(number: Int)` / `aiApply` / `pin(name: String?)` / `safety` / `legacy`. Encoded as a string field (`"save:3"`, `"pin:good strobe feel"`, …) in the existing per-snapshot JSON. Pre-existing snapshot files (no `kind` field) decode as `legacy` and display with their stored labels. No migration.
+- `Snapshot` gains `kind`: `save(number: Int)` / `aiApply` / `pin(name: String?)` / `safety` / `legacy`. JSON encoding uses three separate fields — `kind` (bare enum string), optional `number` (saves), optional `name` (pins) — no string-packing, so free-text pin names need no escaping (PM F5). Pre-existing snapshot files (no `kind` field) decode as `legacy` and display with their stored labels. No migration.
 - **Numbers belong to saves.** On each successful ⌘S the saved state is captured as `save(vNN)`, NN = highest existing save number for the document + 1 (first save = v01). Identical-source saves mint nothing (existing dedup). AI applies and pins are labeled timeline entries and do not consume numbers.
-- **Capture events:** every Save (numbered), every AI apply (pre-apply state, as today, now `kind: aiApply`), manual pin from the Versions panel. Nothing timed.
-- **Dirty state:** the toolbar's lone "•" becomes an **"Edited — ⌘S saves vNN"** pill (computed next number). Immediately after an AI apply, a save-nudge bar replaces the review panel: "Rewrite applied — unsaved. ⌘S saves vNN · view changes" (view-changes jumps to the Versions panel diff).
+- **Capture events:** every Save (numbered), every AI apply (pre-apply state, as today, now `kind: aiApply`), manual pin from the Versions panel, and — kept from shipped behavior (PM F3) — on document open, as `kind: safety` labeled "Opened". Nothing timed.
+- **Dirty state:** the toolbar's lone "•" becomes an **"Edited — ⌘S saves vNN"** pill (computed next number). Immediately after an AI apply, a save-nudge bar replaces the review panel: "Rewrite applied — unsaved. ⌘S saves vNN · view changes" (view-changes jumps to the Versions panel diff). The nudge bar clears back to the plain dirty pill on save, on any manual edit (the "Rewrite applied" claim would be stale), or on starting a new assist run (PM F4).
 - **Restore:** restoring any version first captures the current state as `safety` ("before restore"), then replaces editor text + params (existing clamp-on-restore behavior). Restored state is dirty until saved → becomes the next vNN. Timeline stays linear; nothing is deleted by restoring.
 - Snapshot cap stays (30/document); pruning is oldest-first regardless of kind (a pin can age out; acceptable at cap 30).
 
 ## 2. Versions panel & in-editor change marks
 
-- The bottom "Diagnostics (N)" header becomes a segmented toggle **`Diagnostics | Versions`**, same footprint. Diagnostics keeps its badge; Versions badges the timeline count.
+- The bottom "Diagnostics (N)" header becomes a segmented toggle **`Diagnostics | Versions`**. Diagnostics keeps its badge and its current 150pt height; the Versions tab expands the panel to 280pt while selected (PM F1 — the retired `SnapshotListView` needed a 720×440 window; a usable inline diff can't live in 150pt). Versions badges the timeline count.
 - **Versions rows** (newest first): kind glyph (save / AI / pin / safety), `vNN` or label, relative time. Actions per row: **Diff** (existing `DiffView`, that version → current buffer, inline in the panel), **Restore** (with safety capture). Panel header has a **pin** button (optional name prompt).
 - The ⌘⌥V snapshots sheet is retired; ⌘⌥V now opens the bottom panel on the Versions tab. `SnapshotListView` is superseded by the panel view.
 - **Gutter change bars:** the CodeMirror 6 editor gets a change gutter via the existing JS bridge pattern (`setDiagnostics` precedent — a new `setChangeMarks(added:[Int], changed:[Int])`). Swift computes the sets with `LineDiff` (buffer vs newest `save` snapshot's source), debounced with the existing recompile debounce. No saves yet ⇒ no bars. The gutter baseline is ALWAYS the newest save — the panel's Diff picker does not move it.
 
 ## 3. Live progress strip
 
-- Visible while `ShaderAssistViewModel.state == .running`, as a slim strip under the bottom panel (independent of the assist sidebar's visibility): animated indeterminate bar + `taskName · elapsed · N events · active Ns ago`.
+- Visible while `ShaderAssistViewModel.state == .running`, as a slim strip under the bottom panel (independent of the assist sidebar's `showTerminal` disclosure): animated indeterminate bar + `taskName · elapsed · N events · active Ns ago`.
+- **Second home (PM F2):** the strip's host section is inside the editor pane, which the shipped ⌘⌥E collapse can hide mid-run. While a run is active AND the editor pane is collapsed, a compact run indicator (spinner · elapsed, amber when quiet >30 s) appears in the always-visible preview-pane header; clicking it restores the editor pane. "Visibly alive at all times" must hold in every reachable pane state.
 - Data: each streamed transcript line bumps an event counter + `lastEventDate` on the VM; a 1 s UI timer renders elapsed/ago. No fake percent, no ETA (chosen over ETA-style fill).
 - Quiet-but-alive: if no stream activity for >30 s the activity text turns amber ("quiet 48s — still running").
 - **Cancel** button on the strip, wired to the runner's existing termination path; cancel surfaces the normal `.error`/idle handling, never a hang.
