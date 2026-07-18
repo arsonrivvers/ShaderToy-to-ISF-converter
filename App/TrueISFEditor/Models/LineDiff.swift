@@ -44,6 +44,24 @@ enum LineDiff {
         return parts.joined(separator: ", ")
     }
 
+    /// Gutter-bar sets vs a baseline: lines ADDED in `new`, and added lines that pair 1:1 with a
+    /// preceding removed run — those read as CHANGED. Line numbers are 1-based in `new`.
+    static func changeMarks(old: String, new: String) -> (added: [Int], changed: [Int]) {
+        var added: [Int] = [], changed: [Int] = []
+        var pendingRemoved = 0
+        for line in diff(old: old, new: new) {
+            switch line.kind {
+            case .same: pendingRemoved = 0
+            case .removed: pendingRemoved += 1
+            case .added:
+                guard let n = line.newLine else { continue }
+                if pendingRemoved > 0 { changed.append(n); pendingRemoved -= 1 }
+                else { added.append(n) }
+            }
+        }
+        return (added, changed)
+    }
+
     static func diff(old: String, new: String) -> [DiffLine] {
         let a = old.components(separatedBy: "\n")
         let b = new.components(separatedBy: "\n")

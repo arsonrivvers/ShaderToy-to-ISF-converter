@@ -2,6 +2,32 @@ import XCTest
 @testable import TrueISFEditor
 
 final class LineDiffTests: XCTestCase {
+    // MARK: changeMarks — gutter bars vs the last save
+
+    func testChangeMarksPureInsertionIsAdded() {
+        let m = LineDiff.changeMarks(old: "a\nb", new: "a\nX\nb")
+        XCTAssertEqual(m.added, [2])
+        XCTAssertEqual(m.changed, [])
+    }
+
+    func testChangeMarksReplacementIsChanged() {
+        let m = LineDiff.changeMarks(old: "a\nOLD\nc", new: "a\nNEW\nc")
+        XCTAssertEqual(m.added, [])
+        XCTAssertEqual(m.changed, [2])
+    }
+
+    func testChangeMarksReplaceRunPlusGrowth() {
+        // 2 lines became 3: the first two pair as changed, the overflow is added.
+        let m = LineDiff.changeMarks(old: "a\nx\ny\nz", new: "a\nX2\nY2\nEXTRA\nz")
+        XCTAssertEqual(m.changed, [2, 3])
+        XCTAssertEqual(m.added, [4])
+    }
+
+    func testChangeMarksIdenticalIsEmpty() {
+        let m = LineDiff.changeMarks(old: "a\nb", new: "a\nb")
+        XCTAssertEqual(m.added, []); XCTAssertEqual(m.changed, [])
+    }
+
     // MARK: rangeSummary — collapses the changed-lines wall of numbers into ranges
 
     func testRangeSummaryCollapsesConsecutiveRuns() {
