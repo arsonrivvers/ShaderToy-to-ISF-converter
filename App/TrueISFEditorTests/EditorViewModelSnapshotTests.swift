@@ -34,6 +34,59 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(snaps[0].source, "/*{}*/ void main(){}")
     }
 
+    func testSameNamedImportsBeforeFirstSaveHaveIsolatedHistories() {
+        let vm = makeVM()
+        let firstSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.1); }"
+        let secondSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.9); }"
+
+        vm.loadImported(isf: firstSource, warnings: [], suggestedName: "Remixed shader")
+        let firstChild = vm.file
+        vm.pin(name: "first child")
+
+        vm.loadImported(isf: secondSource, warnings: [], suggestedName: "Remixed shader")
+        let secondChild = vm.file
+        vm.pin(name: "second child")
+
+        let firstBeforeSave = vm.snapshots.snapshots(for: firstChild)
+        let secondBeforeSave = vm.snapshots.snapshots(for: secondChild)
+        XCTAssertEqual(firstBeforeSave.count, 2)
+        XCTAssertEqual(Set(firstBeforeSave.map(\.source)), Set([firstSource]))
+        XCTAssertTrue(firstBeforeSave.contains { $0.kind == .pin(name: "first child") })
+        XCTAssertEqual(secondBeforeSave.count, 2)
+        XCTAssertEqual(Set(secondBeforeSave.map(\.source)), Set([secondSource]))
+        XCTAssertTrue(secondBeforeSave.contains { $0.kind == .pin(name: "second child") })
+    }
+
+    func testSaveAsMigratesOnlyCurrentSameNamedImportHistory() {
+        let vm = makeVM()
+        let firstSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.1); }"
+        let secondSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.9); }"
+
+        vm.loadImported(isf: firstSource, warnings: [], suggestedName: "Remixed shader")
+        let firstChild = vm.file
+        vm.pin(name: "first child")
+
+        vm.loadImported(isf: secondSource, warnings: [], suggestedName: "Remixed shader")
+        let secondChild = vm.file
+        vm.pin(name: "second child")
+
+        vm.saveAs(root.appendingPathComponent("Second-child.fs"))
+
+        let savedSecond = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(savedSecond.count, 3)
+        XCTAssertEqual(Set(savedSecond.map(\.source)), Set([secondSource]))
+        XCTAssertTrue(savedSecond.contains { $0.kind == .safety })
+        XCTAssertTrue(savedSecond.contains { $0.kind == .pin(name: "second child") })
+        XCTAssertTrue(savedSecond.contains { $0.kind == .save(number: 1) })
+        XCTAssertTrue(vm.snapshots.snapshots(for: secondChild).isEmpty,
+                      "Save As must retire only the active child's temporary key")
+
+        let untouchedFirst = vm.snapshots.snapshots(for: firstChild)
+        XCTAssertEqual(untouchedFirst.count, 2)
+        XCTAssertEqual(Set(untouchedFirst.map(\.source)), Set([firstSource]))
+        XCTAssertTrue(untouchedFirst.contains { $0.kind == .pin(name: "first child") })
+    }
+
     func testAIRewriteCapturesPreApplySource() {
         let vm = makeVM()
         let original = vm.file.source

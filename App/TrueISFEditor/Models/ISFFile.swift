@@ -3,6 +3,9 @@ import Foundation
 /// One open ISF document in the editor. The editable artifact whose `source` the preview renders.
 /// (Named `ISFFile` to avoid clashing with the engine's `ISFDocument`.)
 struct ISFFile {
+    /// Stable for this in-memory document's lifetime. Struct copies preserve it across edits/Save As;
+    /// every fresh untitled/import/example construction receives a new identity.
+    let documentID: UUID
     private(set) var url: URL?
     var source: String { didSet { if source != oldValue { isDirty = true } } }
     private(set) var isDirty: Bool
@@ -15,7 +18,9 @@ struct ISFFile {
     /// True when a plain Save must fall back to Save As (no backing file yet).
     var needsSaveAs: Bool { url == nil }
 
-    private init(url: URL?, source: String, isDirty: Bool, suggestedName: String? = nil) {
+    private init(url: URL?, source: String, isDirty: Bool, suggestedName: String? = nil,
+                 documentID: UUID = UUID()) {
+        self.documentID = documentID
         self.url = url; self.source = source; self.isDirty = isDirty
         self.suggestedName = suggestedName
     }

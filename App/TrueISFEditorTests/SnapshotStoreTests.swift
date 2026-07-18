@@ -133,6 +133,21 @@ final class SnapshotStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshots(for: b).map(\.source), ["bbb"])
     }
 
+    func testSameNamedUntitledDocumentsUseDistinctStableKeys() {
+        let first = TrueISFEditor.ISFFile.untitled(source: "first", suggestedName: "Remixed shader")
+        let second = TrueISFEditor.ISFFile.untitled(source: "second", suggestedName: "Remixed shader")
+        var editedFirst = first
+        editedFirst.source = "first edited"
+
+        XCTAssertNotEqual(first.documentID, second.documentID)
+        XCTAssertEqual(first.documentID, editedFirst.documentID,
+                       "value-semantic edits must retain the document identity")
+        XCTAssertNotEqual(SnapshotStore.documentKey(for: first),
+                          SnapshotStore.documentKey(for: second))
+        XCTAssertEqual(SnapshotStore.documentKey(for: first),
+                       SnapshotStore.documentKey(for: editedFirst))
+    }
+
     func testCorruptSnapshotFileIsSkippedNotFatal() throws {
         let store = SnapshotStore(rootURL: root)
         let file = TrueISFEditor.ISFFile.untitled(source: "good", suggestedName: "Doc")
@@ -150,7 +165,7 @@ final class SnapshotStoreTests: XCTestCase {
         store.capture(file: f2, params: ParamSnapshot(params: [:]), label: "good strobe feel", kind: .pin(name: "good strobe feel"))
         var f3 = file; f3.source = "c"
         store.capture(file: f3, params: ParamSnapshot(params: [:]), label: "Before AI rewrite", kind: .aiApply)
-        let snaps = store.snapshots(for: f3)   // same document key (same suggestedName)
+        let snaps = store.snapshots(for: f3)   // same document key (same document identity)
         XCTAssertEqual(snaps.map(\.kind), [.aiApply, .pin(name: "good strobe feel"), .save(number: 1)])
     }
 

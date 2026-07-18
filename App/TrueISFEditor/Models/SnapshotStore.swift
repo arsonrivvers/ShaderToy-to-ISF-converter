@@ -52,13 +52,15 @@ final class SnapshotStore: ObservableObject {
         self.cap = cap
     }
 
-    /// Stable, filesystem-safe per-document folder name. Saved docs key on their path; untitled
-    /// docs on their display name (an unsaved import keeps one history while it stays unsaved).
+    /// Stable, filesystem-safe per-document folder name. Saved docs retain the historical path-based
+    /// key so their timelines survive reopen; unsaved docs use their full in-memory document UUID.
     static func documentKey(for file: ISFFile) -> String {
-        let identity = file.url?.path ?? "untitled:\(file.displayName)"
-        let digest = SHA256.hash(data: Data(identity.utf8))
-        let hex = digest.prefix(6).map { String(format: "%02x", $0) }.joined()
         let safeName = String(file.displayName.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+        guard let path = file.url?.path else {
+            return "\(safeName)-\(file.documentID.uuidString.lowercased())"
+        }
+        let digest = SHA256.hash(data: Data(path.utf8))
+        let hex = digest.prefix(6).map { String(format: "%02x", $0) }.joined()
         return "\(safeName)-\(hex)"
     }
 
