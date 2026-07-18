@@ -76,11 +76,11 @@ struct EditorScreen: View {
                         }
                         .help(editorCollapsed ? "Show the code editor (⌘⌥E)" : "Hide the code editor (⌘⌥E)")
                         Text(vm.file.displayName).font(.headline)
-                        if vm.file.isDirty {
+                        if vm.file.hasUnsavedWork {
                             Text(vm.assistApplied
                                  ? "Rewrite applied — ⌘S saves v\(String(format: "%02d", vm.nextSaveVersion))"
                                  : (vm.file.needsSaveAs
-                                    ? "Edited — unsaved"
+                                    ? "Unsaved — Save As required"
                                     : "Edited — ⌘S saves v\(String(format: "%02d", vm.nextSaveVersion))"))
                                 .font(.caption)
                                 .padding(.horizontal, 7).padding(.vertical, 2)

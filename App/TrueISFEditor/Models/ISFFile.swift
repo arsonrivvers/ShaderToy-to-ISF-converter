@@ -17,6 +17,8 @@ struct ISFFile {
     var displayName: String { url?.lastPathComponent ?? suggestedName ?? "Untitled.fs" }
     /// True when a plain Save must fall back to Save As (no backing file yet).
     var needsSaveAs: Bool { url == nil }
+    /// Any state whose current editor contents do not yet exist durably at the backing URL.
+    var hasUnsavedWork: Bool { isDirty || needsSaveAs }
 
     private init(url: URL?, source: String, isDirty: Bool, suggestedName: String? = nil,
                  documentID: UUID = UUID()) {
