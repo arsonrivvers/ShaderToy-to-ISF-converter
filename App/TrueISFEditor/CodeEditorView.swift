@@ -20,6 +20,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
     private var initialized = false
     private var lastText = ""                       // text currently believed to be in the editor
     private var pendingDiagnostics: [EditorDiagnostic]?
+    private var pendingChangeMarks: (added: [Int], changed: [Int])?
     private var inputNames: [String] = []           // declared input names for autocomplete
 
     override init() {
@@ -54,6 +55,16 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
         guard let data = try? JSONEncoder().encode(diags),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("setDiagnostics(\(json));")
+    }
+
+    /// Colored gutter bars vs the last saved version. Empty arrays clear the gutter.
+    func setChangeMarks(added: [Int], changed: [Int]) {
+        guard ready, initialized else { pendingChangeMarks = (added, changed); return }
+        guard let a = try? JSONEncoder().encode(added),
+              let c = try? JSONEncoder().encode(changed),
+              let aj = String(data: a, encoding: .utf8),
+              let cj = String(data: c, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("setChangeMarks(\(aj), \(cj));")
     }
 
     /// Move the editor cursor to a 1-based line and scroll it into view (click-to-jump).
@@ -109,6 +120,7 @@ final class CodeEditorController: NSObject, ObservableObject, WKScriptMessageHan
                     self?.pushSymbols()
                     self?.pushInputNames()
                     if let p = self?.pendingDiagnostics { self?.pendingDiagnostics = nil; self?.setDiagnostics(p) }
+                    if let m = self?.pendingChangeMarks { self?.pendingChangeMarks = nil; self?.setChangeMarks(added: m.added, changed: m.changed) }
                 }
             }
         case "change":

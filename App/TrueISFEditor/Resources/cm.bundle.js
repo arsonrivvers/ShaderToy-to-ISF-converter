@@ -24726,6 +24726,57 @@
       }
     };
   });
+  var setChangeMarksEffect = StateEffect.define();
+  var ChangeBarMarker = class extends GutterMarker {
+    constructor(cls) {
+      super();
+      this.cls = cls;
+    }
+    eq(other) {
+      return other.cls === this.cls;
+    }
+    toDOM() {
+      var el = document.createElement("div");
+      el.className = this.cls;
+      return el;
+    }
+  };
+  var addedBar = new ChangeBarMarker("cm-changebar cm-changebar-added");
+  var changedBar = new ChangeBarMarker("cm-changebar cm-changebar-changed");
+  var changeMarksField = StateField.define({
+    create: function() {
+      return RangeSet.empty;
+    },
+    update: function(set, tr) {
+      set = set.map(tr.changes);
+      for (var e of tr.effects) if (e.is(setChangeMarksEffect)) set = e.value;
+      return set;
+    }
+  });
+  window.__cmChangeGutter = [
+    changeMarksField,
+    gutter({
+      class: "cm-changegutter",
+      markers: function(view) {
+        return view.state.field(changeMarksField);
+      }
+    })
+  ];
+  // added/changed: 1-based line numbers in the current doc. Out-of-range lines are dropped.
+  window.__cmSetChangeMarks = function(view, added, changed) {
+    var doc = view.state.doc, ranges = [];
+    function push(lines, marker) {
+      (lines || []).forEach(function(n) {
+        if (n >= 1 && n <= doc.lines) ranges.push(marker.range(doc.line(n).from));
+      });
+    }
+    push(added || [], addedBar);
+    push(changed || [], changedBar);
+    ranges.sort(function(a, b) {
+      return a.from - b.from;
+    });
+    view.dispatch({ effects: setChangeMarksEffect.of(RangeSet.of(ranges, true)) });
+  };
   window.__createEditor = function(parent, initialDoc, onChange) {
     return new EditorView({
       parent,
@@ -24733,6 +24784,7 @@
         doc: initialDoc || "",
         extensions: [
           basicSetup,
+          window.__cmChangeGutter,
           cpp(),
           oneDark,
           symbolHover,

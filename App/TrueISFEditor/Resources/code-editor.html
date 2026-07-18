@@ -6,6 +6,10 @@
   html, body, #root { margin: 0; height: 100%; background: #282c34; }
   .cm-editor { height: 100%; font-size: 13px; }
   .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cm-changegutter { width: 4px; }
+  .cm-changebar { width: 3px; height: 100%; border-radius: 1px; }
+  .cm-changebar-added { background: #4ec9b0; }
+  .cm-changebar-changed { background: #d7ba7d; }
 </style>
 </head>
 <body>
@@ -58,6 +62,12 @@
       return { from: ln.from, to: ln.to, severity: d.severity || "error", message: d.message || "" };
     });
     view.dispatch(window.__cmSetDiagnostics(view.state, mapped));
+  };
+
+  // added/changed: 1-based line arrays — colored gutter bars vs the last saved version.
+  window.setChangeMarks = function (added, changed) {
+    if (!view || !window.__cmSetChangeMarks) return;
+    window.__cmSetChangeMarks(view, added || [], changed || []);
   };
 
   // Move the cursor to a 1-based line and scroll it into view (click-to-jump from a diagnostic).

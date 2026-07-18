@@ -318,6 +318,17 @@ final class EditorViewModel: ObservableObject {
             if case .save(let n) = snap.kind { return n } else { return nil }
         }.max() ?? 0) + 1
         lastSaveSource = snaps.first { if case .save = $0.kind { return true } else { return false } }?.source
+        updateChangeMarks()
+    }
+
+    /// Recompute gutter bars vs the last save. No saves yet ⇒ clear.
+    private func updateChangeMarks() {
+        guard let baseline = lastSaveSource else {
+            editor.setChangeMarks(added: [], changed: [])
+            return
+        }
+        let m = LineDiff.changeMarks(old: baseline, new: file.source)
+        editor.setChangeMarks(added: m.added, changed: m.changed)
     }
 
     /// Pin the current editor state as a named version (Versions panel + button).
@@ -415,6 +426,7 @@ final class EditorViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 300_000_000)
             if Task.isCancelled { return }
             self?.preview.load(isf: src)
+            self?.updateChangeMarks()
         }
     }
 
