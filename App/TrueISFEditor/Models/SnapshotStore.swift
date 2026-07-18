@@ -116,33 +116,154 @@ final class SnapshotStore: ObservableObject {
             .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id > $1.id }
     }
 
+    private struct MigrationEntry {
+        let sourceURL: URL
+        let originalData: Data
+        let date: Double
+        let originalSaveNumber: Int?
+        var plannedData: Data
+        var alreadyRepresented: Bool
+    }
+
+    /// A save's identity without its presentation number. This lets an interrupted migration
+    /// recognize a save it already renumbered on the previous attempt instead of minting another
+    /// copy. Date, source, params, and unknown metadata remain part of the identity.
+    private static func saveMetadata(in data: Data) -> (number: Int, date: Double, identity: Data)? {
+        guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["kind"] as? String == "save",
+              let number = (object["number"] as? NSNumber)?.intValue else { return nil }
+        let date = (object["date"] as? NSNumber)?.doubleValue ?? 0
+        object.removeValue(forKey: "number")
+        object.removeValue(forKey: "label")
+        guard let identity = try? JSONSerialization.data(withJSONObject: object,
+                                                         options: [.sortedKeys]) else { return nil }
+        return (number, date, identity)
+    }
+
+    /// Renumber only a colliding incoming save. Unknown fields survive; non-colliding entries never
+    /// pass through JSONSerialization and therefore remain byte-for-byte unchanged.
+    private static func renumberedSave(_ data: Data, to number: Int) -> Data? {
+        guard var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["kind"] as? String == "save" else { return nil }
+        object["number"] = number
+        object["label"] = String(format: "v%02d", number)
+        return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
     /// Move a document's raw history when Save As changes its identity key. Best effort and
     /// deliberately nonthrowing: snapshot maintenance must never turn a successful file save into
-    /// a reported failure. Differing name collisions are retained under a unique migrated name;
-    /// byte-identical entries already at the destination are not copied again.
-    func migrateHistory(from sourceFile: ISFFile, to destinationFile: ISFFile) {
+    /// a reported failure. Existing destination save numbers win; non-conflicting incoming saves
+    /// retain their number and raw bytes, while conflicts append oldest-first above the merged max.
+    /// Returns true only when the source key is no longer needed, so callers can retain failed work
+    /// and retry it after a later successful shader save.
+    @discardableResult
+    func migrateHistory(from sourceFile: ISFFile, to destinationFile: ISFFile) -> Bool {
         let sourceDirectory = directory(for: sourceFile)
         let destinationDirectory = directory(for: destinationFile)
         guard sourceDirectory.standardizedFileURL != destinationDirectory.standardizedFileURL else {
-            return
+            return true
         }
 
         let fileManager = FileManager.default
         var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: sourceDirectory.path, isDirectory: &isDirectory),
-              isDirectory.boolValue,
+        guard fileManager.fileExists(atPath: sourceDirectory.path, isDirectory: &isDirectory) else {
+            return true
+        }
+        guard isDirectory.boolValue,
               let sourceItems = try? fileManager.contentsOfDirectory(
                   at: sourceDirectory, includingPropertiesForKeys: nil
-              ) else { return }
+              ) else { return false }
 
-        let sourceEntries = sourceItems.filter { $0.pathExtension == "json" }
+        let sourceEntries = sourceItems.filter { $0.pathExtension == "json" }.sorted {
+            $0.path < $1.path
+        }
         let destinationEntries = (try? fileManager.contentsOfDirectory(
             at: destinationDirectory, includingPropertiesForKeys: nil
-        ))?.filter { $0.pathExtension == "json" } ?? []
-        var destinationPayloads = destinationEntries.compactMap { try? Data(contentsOf: $0) }
+        ))?.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path } ?? []
+        let destinationEntryPayloads = destinationEntries.compactMap { entry -> (URL, Data)? in
+            guard let data = try? Data(contentsOf: entry) else { return nil }
+            return (entry, data)
+        }
+        var destinationPayloads = destinationEntryPayloads.map(\.1)
+        var destinationSavePayloadsByIdentity: [Data: Data] = [:]
+        var claimedSaveNumbers = Set<Int>()
+        for (_, data) in destinationEntryPayloads {
+            guard let metadata = Self.saveMetadata(in: data) else { continue }
+            claimedSaveNumbers.insert(metadata.number)
+            if destinationSavePayloadsByIdentity[metadata.identity] == nil {
+                destinationSavePayloadsByIdentity[metadata.identity] = data
+            }
+        }
+
+        var migrationEntries: [MigrationEntry] = []
         var sourcePayloads: [String: Data] = [:]
+        var priorRenumberedNumbers = Set<Int>()
         var materialChange = false
-        var everySourceEntryReadable = sourceEntries.count == sourceItems.count
+        var migrationViable = sourceEntries.count == sourceItems.count
+
+        for sourceEntry in sourceEntries {
+            guard let data = try? Data(contentsOf: sourceEntry) else {
+                migrationViable = false
+                continue
+            }
+            sourcePayloads[sourceEntry.path] = data
+            let metadata = Self.saveMetadata(in: data)
+            let exactDestinationMatch = destinationPayloads.contains(data)
+            let priorRenumberedMatch = metadata.flatMap {
+                destinationSavePayloadsByIdentity[$0.identity]
+            }
+            if let priorRenumberedMatch,
+               priorRenumberedMatch != data,
+               let priorMetadata = Self.saveMetadata(in: priorRenumberedMatch) {
+                priorRenumberedNumbers.insert(priorMetadata.number)
+            }
+            migrationEntries.append(MigrationEntry(
+                sourceURL: sourceEntry,
+                originalData: data,
+                date: metadata?.date ?? 0,
+                originalSaveNumber: metadata?.number,
+                plannedData: priorRenumberedMatch ?? data,
+                alreadyRepresented: exactDestinationMatch || priorRenumberedMatch != nil
+            ))
+        }
+
+        // Reserve every original number before assigning conflicts so a non-conflicting incoming
+        // save never gets displaced by an earlier collision. Example: destination {1,2}, incoming
+        // {1,3} keeps incoming v03 raw and renumbers only incoming v01 to v04.
+        let incomingSaveIndices = migrationEntries.indices.filter {
+            !migrationEntries[$0].alreadyRepresented
+                && migrationEntries[$0].originalSaveNumber != nil
+        }.sorted {
+            let lhs = migrationEntries[$0]
+            let rhs = migrationEntries[$1]
+            return lhs.date != rhs.date ? lhs.date < rhs.date
+                : lhs.sourceURL.path < rhs.sourceURL.path
+        }
+        let mergedOriginalNumbers = Array(claimedSaveNumbers.subtracting(priorRenumberedNumbers))
+            + migrationEntries.compactMap(\.originalSaveNumber)
+        var collisionIndices: [Int] = []
+        for index in incomingSaveIndices {
+            guard let number = migrationEntries[index].originalSaveNumber else { continue }
+            if claimedSaveNumbers.contains(number) {
+                collisionIndices.append(index)
+            } else {
+                claimedSaveNumbers.insert(number)
+            }
+        }
+        var nextCollisionNumber = (mergedOriginalNumbers.max() ?? 0) + 1
+        for index in collisionIndices {
+            while claimedSaveNumbers.contains(nextCollisionNumber) {
+                nextCollisionNumber += 1
+            }
+            guard let data = Self.renumberedSave(migrationEntries[index].originalData,
+                                                 to: nextCollisionNumber) else {
+                migrationViable = false
+                continue
+            }
+            migrationEntries[index].plannedData = data
+            claimedSaveNumbers.insert(nextCollisionNumber)
+            nextCollisionNumber += 1
+        }
 
         func availableDestination(for sourceEntry: URL) -> URL {
             let preferred = destinationDirectory.appendingPathComponent(sourceEntry.lastPathComponent)
@@ -157,28 +278,33 @@ final class SnapshotStore: ObservableObject {
             }
         }
 
-        for sourceEntry in sourceEntries {
-            guard let data = try? Data(contentsOf: sourceEntry) else {
-                everySourceEntryReadable = false
-                continue
-            }
-            sourcePayloads[sourceEntry.path] = data
-            if destinationPayloads.contains(data) { continue }
+        for entry in migrationEntries {
+            if destinationPayloads.contains(entry.plannedData) { continue }
 
             do {
                 try fileManager.createDirectory(at: destinationDirectory,
                                                 withIntermediateDirectories: true)
-                let target = availableDestination(for: sourceEntry)
-                // copyItem refuses an externally-created collision instead of replacing it.
-                try fileManager.copyItem(at: sourceEntry, to: target)
-                guard (try? Data(contentsOf: target)) == data else {
-                    everySourceEntryReadable = false
+                let target = availableDestination(for: entry.sourceURL)
+                if entry.plannedData == entry.originalData {
+                    // copyItem refuses an externally-created collision instead of replacing it.
+                    try fileManager.copyItem(at: entry.sourceURL, to: target)
+                } else {
+                    // A temporary move gives renumbered data the same no-overwrite collision
+                    // guarantee as copyItem.
+                    let temporary = destinationDirectory
+                        .appendingPathComponent(".snapshot-migration-\(UUID().uuidString).tmp")
+                    defer { try? fileManager.removeItem(at: temporary) }
+                    try entry.plannedData.write(to: temporary, options: .atomic)
+                    try fileManager.moveItem(at: temporary, to: target)
+                }
+                guard (try? Data(contentsOf: target)) == entry.plannedData else {
+                    migrationViable = false
                     continue
                 }
-                destinationPayloads.append(data)
+                destinationPayloads.append(entry.plannedData)
                 materialChange = true
             } catch {
-                everySourceEntryReadable = false
+                migrationViable = false
             }
         }
 
@@ -190,9 +316,11 @@ final class SnapshotStore: ObservableObject {
         let finalDestinationPayloads = finalDestinationEntries.compactMap {
             try? Data(contentsOf: $0)
         }
-        let everySourceEntryPresent = everySourceEntryReadable
+        let everySourceEntryPresent = migrationViable
             && sourcePayloads.count == sourceEntries.count
-            && sourcePayloads.values.allSatisfy(finalDestinationPayloads.contains)
+            && migrationEntries.allSatisfy {
+                finalDestinationPayloads.contains($0.plannedData)
+            }
         let currentSourceItems = try? fileManager.contentsOfDirectory(
             at: sourceDirectory, includingPropertiesForKeys: nil
         )
@@ -231,6 +359,7 @@ final class SnapshotStore: ObservableObject {
         }
 
         if materialChange { revision += 1 }
+        return !fileManager.fileExists(atPath: sourceDirectory.path)
     }
 
     /// Capture a version. Saves dedupe against the newest save, legacy captures against the newest

@@ -225,7 +225,7 @@ final class SnapshotStoreTests: XCTestCase {
         try destinationFile.save(to: root.appendingPathComponent("Raw-saved.fs"))
         let revisionBeforeMigration = store.revision
 
-        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
 
         let destinationDirectory = directory(for: destinationFile)
         XCTAssertEqual(try Data(contentsOf: destinationDirectory.appendingPathComponent("save.json")),
@@ -238,7 +238,7 @@ final class SnapshotStoreTests: XCTestCase {
                        "the old document key must retire after every entry is safely present")
         XCTAssertEqual(store.revision, revisionBeforeMigration + 1)
 
-        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
         XCTAssertEqual(store.revision, revisionBeforeMigration + 1,
                        "retrying an already-complete migration is not a material change")
     }
@@ -266,7 +266,7 @@ final class SnapshotStoreTests: XCTestCase {
         try writeRawSnapshot(sourceCollision, named: "collision.json", for: sourceFile)
         try writeRawSnapshot(destinationNewest, named: "duplicate-newest.json", for: sourceFile)
 
-        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
 
         let destinationDirectory = directory(for: destinationFile)
         XCTAssertEqual(try Data(contentsOf: destinationDirectory.appendingPathComponent("collision.json")),
@@ -283,13 +283,120 @@ final class SnapshotStoreTests: XCTestCase {
         let store = SnapshotStore(rootURL: root)
         let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source", suggestedName: "No-op.fs")
 
-        store.migrateHistory(from: sourceFile, to: sourceFile)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: sourceFile))
         XCTAssertEqual(store.revision, 0, "the same document key needs no migration")
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var destinationFile = sourceFile
         try destinationFile.save(to: root.appendingPathComponent("No-op-saved.fs"))
-        store.migrateHistory(from: sourceFile, to: destinationFile)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
         XCTAssertEqual(store.revision, 0, "an absent source history is not a material change")
+    }
+
+    func testMigrateHistoryRenumbersIncomingSaveCollisionsIntoLinearTimeline() throws {
+        let store = SnapshotStore(rootURL: root)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source-v2",
+                                                       suggestedName: "Source.fs")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var destinationFile = TrueISFEditor.ISFFile.untitled(source: "destination-v2",
+                                                             suggestedName: "Destination.fs")
+        try destinationFile.save(to: root.appendingPathComponent("Destination.fs"))
+
+        let destinationV1 = try rawSnapshotData(date: 50, label: "v01",
+                                                source: "destination-v1", kind: "save", number: 1)
+        let destinationV2 = try rawSnapshotData(date: 60, label: "v02",
+                                                source: "destination-v2", kind: "save", number: 2)
+        let sourceV1 = try rawSnapshotData(date: 100, label: "v01",
+                                           source: "source-v1", kind: "save", number: 1)
+        let sourcePin = try rawSnapshotData(date: 150, label: "source pin",
+                                            source: "source-v1", kind: "pin", name: "source pin",
+                                            futureMarker: "keep-raw")
+        let sourceV2 = try rawSnapshotData(date: 200, label: "v02",
+                                           source: "source-v2", kind: "save", number: 2)
+        try writeRawSnapshot(destinationV1, named: "destination-v1.json", for: destinationFile)
+        try writeRawSnapshot(destinationV2, named: "destination-v2.json", for: destinationFile)
+        try writeRawSnapshot(sourceV1, named: "source-v1.json", for: sourceFile)
+        try writeRawSnapshot(sourcePin, named: "source-pin.json", for: sourceFile)
+        try writeRawSnapshot(sourceV2, named: "source-v2.json", for: sourceFile)
+
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
+
+        let savesBySource = Dictionary(uniqueKeysWithValues: store.snapshots(for: destinationFile)
+            .compactMap { snapshot -> (String, Int)? in
+                if case .save(let number) = snapshot.kind {
+                    return (snapshot.source, number)
+                }
+                return nil
+            })
+        XCTAssertEqual(savesBySource, [
+            "destination-v1": 1,
+            "destination-v2": 2,
+            "source-v1": 3,
+            "source-v2": 4
+        ], "destination numbers win; incoming collisions append oldest-first above the merged max")
+        XCTAssertEqual(Set(savesBySource.values).count, savesBySource.count)
+        XCTAssertEqual(store.nextSaveNumber(for: destinationFile), 5)
+        let destinationDirectory = directory(for: destinationFile)
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory
+            .appendingPathComponent("destination-v1.json")), destinationV1)
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory
+            .appendingPathComponent("destination-v2.json")), destinationV2)
+        XCTAssertEqual(try Data(contentsOf: destinationDirectory
+            .appendingPathComponent("source-pin.json")), sourcePin,
+                       "entries that do not need renumbering remain byte-for-byte unchanged")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory(for: sourceFile).path))
+    }
+
+    func testMigrateHistoryReportsFailureAndKeepsSourceWhenDestinationIsBlocked() throws {
+        let store = SnapshotStore(rootURL: root)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source",
+                                                       suggestedName: "Blocked-source.fs")
+        XCTAssertNotNil(store.capture(file: sourceFile, params: ParamSnapshot(params: [:]),
+                                      label: "keep", kind: .pin(name: "keep")))
+        var destinationFile = sourceFile
+        try destinationFile.save(to: root.appendingPathComponent("Blocked-destination.fs"))
+        try Data("not a directory".utf8).write(to: directory(for: destinationFile))
+
+        XCTAssertFalse(store.migrateHistory(from: sourceFile, to: destinationFile))
+
+        XCTAssertEqual(store.snapshots(for: sourceFile).count, 1)
+        XCTAssertEqual(store.revision, 1, "the failed migration itself made no material change")
+    }
+
+    func testInterruptedRenumberMigrationRetriesWithoutDuplicateOrNumberDrift() throws {
+        let store = SnapshotStore(rootURL: root)
+        let sourceFile = TrueISFEditor.ISFFile.untitled(source: "source-v1",
+                                                       suggestedName: "Retry-source.fs")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var destinationFile = TrueISFEditor.ISFFile.untitled(source: "destination-v1",
+                                                             suggestedName: "Retry-destination.fs")
+        try destinationFile.save(to: root.appendingPathComponent("Retry-destination.fs"))
+        let destinationV1 = try rawSnapshotData(date: 50, label: "v01",
+                                                source: "destination-v1", kind: "save", number: 1)
+        let sourceV1 = try rawSnapshotData(date: 100, label: "v01",
+                                           source: "source-v1", kind: "save", number: 1)
+        try writeRawSnapshot(destinationV1, named: "destination-v1.json", for: destinationFile)
+        try writeRawSnapshot(sourceV1, named: "source-v1.json", for: sourceFile)
+        let retryMarker = directory(for: sourceFile).appendingPathComponent("keep-for-retry.tmp")
+        try Data("unknown sidecar".utf8).write(to: retryMarker)
+
+        XCTAssertFalse(store.migrateHistory(from: sourceFile, to: destinationFile))
+        XCTAssertEqual(store.snapshots(for: destinationFile).compactMap { snapshot -> Int? in
+            if case .save(let number) = snapshot.kind { return number }
+            return nil
+        }.sorted(), [1, 2])
+
+        try FileManager.default.removeItem(at: retryMarker)
+        XCTAssertTrue(store.migrateHistory(from: sourceFile, to: destinationFile))
+
+        let saves = store.snapshots(for: destinationFile).filter {
+            if case .save = $0.kind { return true } else { return false }
+        }
+        XCTAssertEqual(saves.count, 2)
+        XCTAssertEqual(saves.compactMap { snapshot -> Int? in
+            if case .save(let number) = snapshot.kind { return number }
+            return nil
+        }.sorted(), [1, 2])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory(for: sourceFile).path))
     }
 }

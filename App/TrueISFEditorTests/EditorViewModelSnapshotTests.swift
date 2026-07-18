@@ -242,10 +242,11 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(vm.lastSaveSource, laterEdit)
     }
 
-    func testSaveAsStillSucceedsWhenHistoryMigrationCannotWrite() throws {
+    func testFailedSaveAsHistoryMigrationRetriesOnNextSave() throws {
         let vm = makeVM()
         let rewritten = "/*{}*/ void main(){ gl_FragColor = vec4(0.6); }"
         vm.replaceSourceFromAssist(rewritten)
+        vm.pin(name: "retry me")
         let untitledFile = vm.file
         let target = root.appendingPathComponent("History-blocked.fs")
         var destinationFile = untitledFile
@@ -259,7 +260,97 @@ final class EditorViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), rewritten)
         XCTAssertEqual(vm.file.url, target)
         XCTAssertFalse(vm.file.isDirty)
-        XCTAssertEqual(vm.snapshots.snapshots(for: untitledFile).count, 1,
+        XCTAssertEqual(vm.snapshots.snapshots(for: untitledFile).count, 2,
                        "failed migration keeps the old history available for a later retry")
+
+        try FileManager.default.removeItem(at: blockedHistoryDirectory)
+        vm.saveInPlace()
+
+        let migrated = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(migrated.count, 3)
+        XCTAssertTrue(migrated.contains { $0.kind == .aiApply })
+        XCTAssertTrue(migrated.contains { $0.kind == .pin(name: "retry me") })
+        XCTAssertTrue(migrated.contains { $0.kind == .save(number: 1) })
+        XCTAssertTrue(vm.snapshots.snapshots(for: untitledFile).isEmpty)
+        XCTAssertEqual(vm.versionCount, 3)
+        XCTAssertEqual(vm.nextSaveVersion, 2)
+        XCTAssertEqual(vm.lastSaveSource, rewritten)
+    }
+
+    func testSaveAsMergesNumberCollisionsBeforeMintingNextSave() throws {
+        let vm = makeVM()
+        let params = ParamSnapshot(params: [:])
+        let sourceV1 = vm.file.source
+        XCTAssertNotNil(vm.snapshots.capture(file: vm.file, params: params,
+                                             label: "v01", kind: .save(number: 1)))
+        let sourceV2 = "/*{}*/ void main(){ gl_FragColor = vec4(0.2); }"
+        vm.file.source = sourceV2
+        XCTAssertNotNil(vm.snapshots.capture(file: vm.file, params: params,
+                                             label: "v02", kind: .save(number: 2)))
+        let sourceFile = vm.file
+
+        let target = root.appendingPathComponent("Existing-timeline.fs")
+        var destinationFile = TrueISFEditor.ISFFile.untitled(
+            source: "/*{}*/ void main(){ gl_FragColor = vec4(0.5); }",
+            suggestedName: "Existing-timeline.fs"
+        )
+        try destinationFile.save(to: target)
+        let destinationV1 = destinationFile.source
+        XCTAssertNotNil(vm.snapshots.capture(file: destinationFile, params: params,
+                                             label: "v01", kind: .save(number: 1)))
+        let destinationV2 = "/*{}*/ void main(){ gl_FragColor = vec4(0.7); }"
+        destinationFile.source = destinationV2
+        XCTAssertNotNil(vm.snapshots.capture(file: destinationFile, params: params,
+                                             label: "v02", kind: .save(number: 2)))
+
+        let currentSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.9); }"
+        vm.file.source = currentSource
+        vm.saveAs(target)
+
+        let saves = vm.snapshots.snapshots(for: vm.file).compactMap { snapshot -> (String, Int)? in
+            if case .save(let number) = snapshot.kind { return (snapshot.source, number) }
+            return nil
+        }
+        let savesBySource = Dictionary(uniqueKeysWithValues: saves)
+        XCTAssertEqual(savesBySource, [
+            destinationV1: 1,
+            destinationV2: 2,
+            sourceV1: 3,
+            sourceV2: 4,
+            currentSource: 5
+        ])
+        XCTAssertEqual(Set(saves.map(\.1)).count, saves.count)
+        XCTAssertTrue(vm.snapshots.snapshots(for: sourceFile).isEmpty)
+        XCTAssertEqual(vm.versionCount, 5)
+        XCTAssertEqual(vm.nextSaveVersion, 6)
+        XCTAssertEqual(vm.lastSaveSource, currentSource)
+    }
+
+    func testDocumentSwitchClearsPendingHistoryMigration() throws {
+        let vm = makeVM()
+        let oldSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.1); }"
+        vm.loadExample(name: "Pending-source.fs", source: oldSource)
+        vm.replaceSourceFromAssist("/*{}*/ void main(){ gl_FragColor = vec4(0.2); }")
+        vm.pin(name: "old pin")
+        let oldFile = vm.file
+        let blockedTarget = root.appendingPathComponent("Blocked-old.fs")
+        var blockedDestination = oldFile
+        try blockedDestination.save(to: blockedTarget)
+        let blocker = root.appendingPathComponent(
+            SnapshotStore.documentKey(for: blockedDestination)
+        )
+        try Data("not a directory".utf8).write(to: blocker)
+        vm.saveAs(blockedTarget)
+
+        let newSource = "/*{}*/ void main(){ gl_FragColor = vec4(0.9); }"
+        vm.loadExample(name: "New-document.fs", source: newSource)
+        try FileManager.default.removeItem(at: blocker)
+        vm.saveAs(root.appendingPathComponent("New-document-saved.fs"))
+
+        let current = vm.snapshots.snapshots(for: vm.file)
+        XCTAssertEqual(current.count, 2, "only the new document's opened safety + v01 belong here")
+        XCTAssertFalse(current.contains { $0.kind == .pin(name: "old pin") })
+        XCTAssertEqual(vm.snapshots.snapshots(for: oldFile).count, 3,
+                       "clearing pending work must not delete the old shader's recoverable history")
     }
 }

@@ -70,6 +70,10 @@ final class EditorViewModel: ObservableObject {
 
     /// D1: version history. Injectable so tests point it at a temp directory.
     let snapshots: SnapshotStore
+    /// Snapshot keys whose Save As migration could not finish. Kept only for the active document
+    /// and retried after each later successful shader save; true document switches clear the queue
+    /// so an old shader's timeline can never leak into the new one.
+    private var pendingHistorySources: [ISFFile] = []
 
     init(file: ISFFile? = nil, snapshots: SnapshotStore? = nil) {
         self.snapshots = snapshots ?? SnapshotStore()
@@ -164,6 +168,7 @@ final class EditorViewModel: ObservableObject {
     func open(_ entry: LibraryEntry) {
         do {
             file = try ISFFile(contentsOf: entry.url)
+            pendingHistorySources.removeAll()
             assistApplied = false
             documentGeneration += 1
             conversionWarnings = []
@@ -183,6 +188,7 @@ final class EditorViewModel: ObservableObject {
 
     func newUntitled() {
         file = .untitled(source: Self.blankTemplate)
+        pendingHistorySources.removeAll()
         assistApplied = false
         documentGeneration += 1
         conversionWarnings = []
@@ -197,6 +203,7 @@ final class EditorViewModel: ObservableObject {
     /// Called by the Shadertoy import sheet on a successful conversion.
     func loadImported(isf: String, warnings: [ConversionWarning], suggestedName: String) {
         file = .untitled(source: isf, suggestedName: suggestedName)
+        pendingHistorySources.removeAll()
         assistApplied = false
         documentGeneration += 1
         conversionWarnings = warnings
@@ -215,6 +222,7 @@ final class EditorViewModel: ObservableObject {
     /// Open a bundled example shader as a fresh untitled document (no conversion report).
     func loadExample(name: String, source: String) {
         file = .untitled(source: source, suggestedName: name)
+        pendingHistorySources.removeAll()
         assistApplied = false
         documentGeneration += 1
         conversionWarnings = []
@@ -230,16 +238,38 @@ final class EditorViewModel: ObservableObject {
     // MARK: save
 
     var needsSaveAs: Bool { file.needsSaveAs }
+
+    private func enqueueHistoryMigration(from sourceFile: ISFFile) {
+        let sourceKey = SnapshotStore.documentKey(for: sourceFile)
+        guard sourceKey != SnapshotStore.documentKey(for: file),
+              !pendingHistorySources.contains(where: {
+                  SnapshotStore.documentKey(for: $0) == sourceKey
+              }) else { return }
+        pendingHistorySources.append(sourceFile)
+    }
+
+    private func retryPendingHistoryMigrations() {
+        let destinationFile = file
+        pendingHistorySources = pendingHistorySources.filter { sourceFile in
+            !snapshots.migrateHistory(from: sourceFile, to: destinationFile)
+        }
+    }
+
     func saveInPlace() {
         guard !file.needsSaveAs else { return }   // App routes untitled to Save As
-        do { try file.save(); mintSaveVersion() }
+        do {
+            try file.save()
+            retryPendingHistoryMigrations()
+            mintSaveVersion()
+        }
         catch { presentSaveError(error) }
     }
     func saveAs(_ url: URL) {
         let previousFile = file
         do {
             try file.save(to: url)
-            snapshots.migrateHistory(from: previousFile, to: file)
+            enqueueHistoryMigration(from: previousFile)
+            retryPendingHistoryMigrations()
             mintSaveVersion()
         }
         catch { presentSaveError(error) }
