@@ -226,4 +226,44 @@ final class ISFConverterTests: XCTestCase {
                       doc.glslBody)
         XCTAssertTrue(doc.glslBody.contains("vec4(usr_mouse / vec3(RENDERSIZE, 1.0).xy, 0., 1.)"), doc.glslBody)
     }
+
+    func test_metadataCommentTerminator_roundTripsThroughConverter() throws {
+        let original = "Title close */ description close */ preserved"
+        let image = RenderPass(
+            inputs: [],
+            outputs: [PassOutput(id: "out0", channel: 0)],
+            code: "void mainImage(out vec4 O, vec2 I){ O = vec4(1.0); }",
+            name: "Image",
+            type: .image)
+        let shader = Shader(
+            info: Info(id: "safe01", name: "fallback */ title",
+                       username: "tester", description: original),
+            renderpass: [image])
+
+        let (doc, _) = ISFConverter.convert(shader)
+        let text = doc.fileText
+        XCTAssertEqual(text.components(separatedBy: "*/").count - 1, 1)
+
+        let headerStart = try XCTUnwrap(text.range(of: "/*")).upperBound
+        let headerEnd = try XCTUnwrap(text.range(of: "*/")).lowerBound
+        let encoded = String(text[headerStart..<headerEnd])
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])
+        XCTAssertEqual(object["DESCRIPTION"] as? String, original)
+
+        let fallbackTitle = "fallback */ title"
+        let fallbackShader = Shader(
+            info: Info(id: "safe02", name: fallbackTitle,
+                       username: "tester", description: nil),
+            renderpass: [image])
+        let (fallbackDoc, _) = ISFConverter.convert(fallbackShader)
+        let fallbackText = fallbackDoc.fileText
+        XCTAssertEqual(fallbackText.components(separatedBy: "*/").count - 1, 1)
+        let fallbackStart = try XCTUnwrap(fallbackText.range(of: "/*")).upperBound
+        let fallbackEnd = try XCTUnwrap(fallbackText.range(of: "*/")).lowerBound
+        let fallbackEncoded = String(fallbackText[fallbackStart..<fallbackEnd])
+        let fallbackObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(fallbackEncoded.utf8)) as? [String: Any])
+        XCTAssertEqual(fallbackObject["DESCRIPTION"] as? String, fallbackTitle)
+    }
 }

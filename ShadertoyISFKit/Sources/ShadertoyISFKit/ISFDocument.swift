@@ -12,7 +12,13 @@ public struct ISFDocument {
         let stripped: String
         if inner.hasPrefix("{") && inner.hasSuffix("}") {
             stripped = String(inner.dropFirst().dropLast())
-        } else { stripped = inner }
-        return "/*{\(stripped)}*/\n\n\(glslBody)\n"
+        } else {
+            stripped = inner
+        }
+        // ISF embeds JSON inside a block comment. JSON's escaped slash decodes identically but
+        // prevents metadata from closing the wrapper early. Already-safe `*\/` has no literal
+        // `*/`, so this is idempotent.
+        let commentSafe = stripped.replacingOccurrences(of: "*/", with: #"*\/"#)
+        return "/*{\(commentSafe)}*/\n\n\(glslBody)\n"
     }
 }
