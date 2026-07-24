@@ -111,6 +111,7 @@ targets:
       - TrueISFEditor/Remix/RemixWorkspaceState.swift
       - TrueISFEditor/Remix/RemixSplitLayout.swift
       - TrueISFEditor/Remix/RemixSession.swift
+      - TrueISFEditor/Remix/RemixSessionStore.swift
       - TrueISFEditor/Remix/RemixActivity.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
