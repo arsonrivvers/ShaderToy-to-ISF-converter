@@ -19,11 +19,53 @@ private final class FakeProvider: AssistProvider {
 }
 
 @MainActor
+private final class SuspendedProvider: AssistProvider {
+    private(set) var didStart = false
+    private var continuation: CheckedContinuation<String, Error>?
+
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
+             onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
+        didStart = true
+        return try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+
+    func finish(with source: String) {
+        continuation?.resume(returning: source)
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class DeterministicAutosaveScheduler {
+    private(set) var scheduledCount = 0
+    private var pending: (@MainActor () -> Void)?
+
+    func schedule(_ action: @escaping @MainActor () -> Void) {
+        scheduledCount += 1
+        pending = action
+    }
+
+    func runPending() {
+        let action = pending
+        pending = nil
+        action?()
+    }
+}
+
+@MainActor
 final class RemixStudioModelTests: XCTestCase {
     private let isf = "/*{ \"ISFVSN\":\"2.0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }"
     private func model(_ scripts: [Result<String, Error>]) -> RemixStudioModel {
         let provider = FakeProvider(scripts)
-        return RemixStudioModel(generator: RemixGenerator(makeProvider: { provider }, model: nil))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-model-legacy-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: RemixSessionStore(
+                fileURL: directory.appendingPathComponent("session.json")
+            )
+        )
     }
 
     func test_setParent_createsSeedNode_inLineage() {
@@ -222,5 +264,340 @@ final class RemixStudioModelTests: XCTestCase {
         let placeholders = RemixStudioModel.makePlaceholders(round: 2, size: 4, parents: [], pool: pool, mode: .mutate)
         let generatorDirectives = RemixDirectives.pick(4, seed: 2, from: pool)
         XCTAssertEqual(placeholders.map(\.directive), generatorDirectives)
+    }
+
+    func test_restoreSession_restoresEverySpecifiedSurface() throws {
+        let fixture = try restorationFixture()
+        try fixture.store.save(fixture.session)
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        XCTAssertEqual(restored.parentAID, "seed-4")
+        XCTAssertEqual(restored.parentBID, "seed-5")
+        XCTAssertEqual(restored.mode, .mutate)
+        XCTAssertEqual(restored.steer, "make it crystalline")
+        XCTAssertEqual(restored.batchSize, 3)
+        XCTAssertEqual(restored.currentBatch, fixture.session.currentBatch)
+        XCTAssertEqual(restored.batchHistory, fixture.session.batchHistory)
+        XCTAssertEqual(restored.lineage, fixture.session.lineage)
+        XCTAssertEqual(restored.workspace, fixture.session.workspace)
+        XCTAssertEqual(restored.selectedNodeID, "r7-0")
+        XCTAssertEqual(restored.crossoverSettings, fixture.session.crossoverSettings)
+        XCTAssertEqual(restored.activity, fixture.session.activity)
+        XCTAssertEqual(restored.pendingParentRequest, fixture.session.pendingParentRequest)
+        XCTAssertEqual(restored.transcript, fixture.session.transcript)
+    }
+
+    func test_restoreThenGenerate_usesCollisionFreeRoundAndSeedIDs() async throws {
+        let fixture = try restorationFixture()
+        try fixture.store.save(fixture.session)
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        restored.setParent(.a, isf: "new seed")
+        XCTAssertEqual(restored.parentAID, "seed-6")
+        restored.mode = .mutate
+        restored.batchSize = 1
+        await restored.generate()
+
+        XCTAssertEqual(restored.currentBatch.map(\.id), ["r8-0"])
+    }
+
+    func test_restorePreservesUndoParentHistory() throws {
+        let fixture = try restorationFixture()
+        try fixture.store.save(fixture.session)
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        restored.stepBack()
+
+        XCTAssertEqual(restored.parentAID, "seed-2")
+        XCTAssertEqual(restored.parentBID, "seed-3")
+    }
+
+    func test_restorePendingShadertoyRequest_preservesUUIDSlotSourceAndTypedPhase() throws {
+        let fixture = try restorationFixture()
+        try fixture.store.save(fixture.session)
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        XCTAssertEqual(restored.pendingParentRequest?.id, fixture.requestID)
+        XCTAssertEqual(restored.pendingParentRequest?.slot, .b)
+        XCTAssertEqual(
+            restored.pendingParentRequest?.source,
+            .shadertoyLink("https://www.shadertoy.com/view/abc123")
+        )
+        XCTAssertEqual(restored.pendingParentRequest?.phase, .verificationRequired)
+        XCTAssertFalse(restored.isGenerating)
+    }
+
+    func test_startNewSession_clearsSessionButKeepsUserDefaultsProviderChoice() throws {
+        let fixture = try restorationFixture()
+        fixture.defaults.set("codex", forKey: "assistProvider")
+        try fixture.store.save(fixture.session)
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        restored.startNewSession()
+
+        XCTAssertNil(restored.parentAID)
+        XCTAssertNil(restored.parentBID)
+        XCTAssertTrue(restored.currentBatch.isEmpty)
+        XCTAssertTrue(restored.batchHistory.isEmpty)
+        XCTAssertTrue(restored.lineage.allNodes.isEmpty)
+        XCTAssertEqual(restored.workspace, RemixWorkspaceState())
+        XCTAssertNil(restored.selectedNodeID)
+        XCTAssertEqual(restored.activity, .idle)
+        XCTAssertNil(restored.pendingParentRequest)
+        XCTAssertEqual(fixture.defaults.string(forKey: "assistProvider"), "codex")
+    }
+
+    func test_modelPersistsAfterEveryNamedMutation() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let restored = storedModel(
+            store: fixture.store,
+            defaults: fixture.defaults,
+            autosaveScheduler: { $0() }
+        )
+
+        restored.setParent(.a, isf: "source A", label: "A")
+        XCTAssertEqual(try loadedSession(fixture.store).parentAID, "seed-0")
+
+        restored.toggleFavorite("seed-0")
+        XCTAssertTrue(try loadedSession(fixture.store).lineage.isFavorite("seed-0"))
+
+        restored.selectedNodeID = "seed-0"
+        XCTAssertEqual(try loadedSession(fixture.store).selectedLineageNodeID, "seed-0")
+
+        var layout = restored.workspace
+        layout.showHero("seed-0")
+        restored.workspace = layout
+        XCTAssertEqual(try loadedSession(fixture.store).workspace.canvasMode, .hero)
+
+        restored.mode = .mutate
+        restored.batchSize = 1
+        await restored.generate()
+        let childID = try XCTUnwrap(restored.currentBatch.first?.id)
+        XCTAssertEqual(try loadedSession(fixture.store).currentBatch.first?.id, childID)
+
+        restored.markCompileResult(id: childID, valid: false, error: "bad GLSL")
+        XCTAssertEqual(
+            try loadedSession(fixture.store).lineage.node(childID)?.status,
+            .failed("bad GLSL")
+        )
+
+        restored.cancelGeneration()
+        XCTAssertEqual(try loadedSession(fixture.store).activity, .cancelled)
+
+        restored.promoteToParent(.a, nodeID: childID)
+        await restored.generate()
+        restored.stepBack()
+        XCTAssertEqual(try loadedSession(fixture.store).parentAID, "seed-0")
+    }
+
+    func test_restoreSession_normalizesActiveRequestAndStandaloneActivityToNonRunningState() throws {
+        let activePhases: [RemixParentRequestPhase] = [.fetching, .resuming, .converting]
+        for phase in activePhases {
+            let fixture = try restorationFixture()
+            var session = fixture.session
+            session.pendingParentRequest = RemixParentRequestSnapshot(
+                id: fixture.requestID,
+                slot: .b,
+                source: .shadertoyLink("abc123"),
+                displayInput: "abc123",
+                phase: phase
+            )
+            session.activity = phase == .resuming
+                ? .resuming(slot: .b, requestID: fixture.requestID)
+                : .generating(total: 1, completed: 0, lastEventAt: nil)
+            try fixture.store.save(session)
+
+            let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+            XCTAssertEqual(restored.pendingParentRequest?.phase, .waitingForHuman)
+            XCTAssertEqual(restored.activity, .interrupted)
+            XCTAssertFalse(restored.isGenerating)
+        }
+    }
+
+    func test_startNewSession_blocksLateGenerationCallbacksFromRepopulatingClearedState() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let provider = SuspendedProvider()
+        let model = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+
+        let generation = Task { await model.generate() }
+        while !provider.didStart { await Task.yield() }
+        model.startNewSession()
+        provider.finish(with: "```glsl\n\(isf)\n```")
+        await generation.value
+
+        XCTAssertTrue(model.currentBatch.isEmpty)
+        XCTAssertTrue(model.batchHistory.isEmpty)
+        XCTAssertTrue(model.lineage.allNodes.isEmpty)
+        XCTAssertEqual(model.activity, .idle)
+        XCTAssertNil(model.parentAID)
+        XCTAssertEqual(try loadedSession(fixture.store).activity, .idle)
+        XCTAssertTrue(try loadedSession(fixture.store).currentBatch.isEmpty)
+    }
+
+    func test_cancelActiveGeneration_keepsCancelledTerminalStateAfterLateChildAndCompletion() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let provider = SuspendedProvider()
+        let model = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+
+        model.startGeneration()
+        while !provider.didStart { await Task.yield() }
+        model.cancelGeneration()
+        XCTAssertEqual(model.activity, .cancelled)
+
+        provider.finish(with: "```glsl\n\(isf)\n```")
+        while model.isGenerating { await Task.yield() }
+
+        XCTAssertEqual(model.activity, .cancelled)
+        XCTAssertEqual(try loadedSession(fixture.store).activity, .cancelled)
+    }
+
+    func test_routineAutosavesCoalesceAndLifecycleTransitionsFlushImmediately() throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let scheduler = DeterministicAutosaveScheduler()
+        let model = storedModel(
+            store: fixture.store,
+            defaults: fixture.defaults,
+            autosaveScheduler: scheduler.schedule
+        )
+
+        model.mode = .mutate
+        model.steer = "first"
+        model.steer = "final"
+        model.selectedNodeID = "selection"
+
+        XCTAssertEqual(scheduler.scheduledCount, 1)
+        guard case .noSession = try fixture.store.load() else {
+            return XCTFail("Routine mutations should wait for the bounded autosave")
+        }
+
+        scheduler.runPending()
+        XCTAssertEqual(try loadedSession(fixture.store).steer, "final")
+        XCTAssertEqual(try loadedSession(fixture.store).selectedLineageNodeID, "selection")
+
+        model.startNewSession()
+        XCTAssertEqual(try loadedSession(fixture.store).activity, .idle)
+        XCTAssertEqual(try loadedSession(fixture.store).steer, "")
+    }
+
+    private struct RestorationFixture {
+        let directory: URL
+        let store: RemixSessionStore
+        let defaults: UserDefaults
+        let requestID: UUID
+        let session: RemixSession
+    }
+
+    private func restorationFixture(saveInitialSession: Bool = true) throws -> RestorationFixture {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-model-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let suiteName = "RemixStudioModelTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suiteName) }
+
+        var lineage = RemixLineage()
+        for index in 2...5 {
+            lineage.insert(RemixNode(
+                id: "seed-\(index)",
+                isfSource: "seed \(index)",
+                parents: [],
+                mode: .crossover,
+                steer: "",
+                directive: "seed",
+                round: 0,
+                status: .compiled
+            ))
+        }
+        let child = RemixNode(
+            id: "r7-0",
+            isfSource: isf,
+            parents: ["seed-4"],
+            mode: .mutate,
+            steer: "make it crystalline",
+            directive: "prismatic",
+            round: 7,
+            status: .compiled
+        )
+        lineage.insert(child)
+        var workspace = RemixWorkspaceState()
+        workspace.showHero(child.id)
+        var settings = RemixCrossoverSettings()
+        settings.balance = 0.75
+        let requestID = UUID()
+        let request = RemixParentRequestSnapshot(
+            id: requestID,
+            slot: .b,
+            source: .shadertoyLink("https://www.shadertoy.com/view/abc123"),
+            displayInput: "abc123",
+            phase: .verificationRequired
+        )
+        let session = RemixSession(
+            round: 7,
+            seedCounter: 6,
+            parentAID: "seed-4",
+            parentBID: "seed-5",
+            parentHistory: [
+                RemixParentConfiguration(parentAID: "seed-2", parentBID: "seed-3"),
+                RemixParentConfiguration(parentAID: "seed-4", parentBID: "seed-5"),
+            ],
+            mode: .mutate,
+            steer: "make it crystalline",
+            batchSize: 3,
+            currentBatch: [child],
+            batchHistory: [RemixBatchRecord(round: 7, nodes: [child], requestsByNodeID: [:])],
+            lineage: lineage,
+            workspace: workspace,
+            selectedLineageNodeID: child.id,
+            crossoverSettings: settings,
+            activity: .completed(failed: 0),
+            pendingParentRequest: request,
+            transcript: ["restored log"]
+        )
+        return RestorationFixture(
+            directory: directory,
+            store: RemixSessionStore(fileURL: directory.appendingPathComponent("session.json")),
+            defaults: defaults,
+            requestID: requestID,
+            session: session
+        )
+    }
+
+    private func storedModel(
+        store: RemixSessionStore,
+        defaults: UserDefaults,
+        autosaveScheduler: RemixStudioModel.AutosaveScheduler? = nil
+    ) -> RemixStudioModel {
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])
+        return RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: store,
+            defaults: defaults,
+            autosaveScheduler: autosaveScheduler
+        )
+    }
+
+    private func loadedSession(_ store: RemixSessionStore) throws -> RemixSession {
+        guard case let .session(session) = try store.load() else {
+            throw NSError(domain: "RemixStudioModelTests", code: 1)
+        }
+        return session
     }
 }

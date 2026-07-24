@@ -9,37 +9,67 @@ enum ParentSlot: String, Codable, Equatable { case a, b }
 /// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
 @MainActor
 final class RemixStudioModel: ObservableObject {
+    typealias AutosaveScheduler = (@escaping @MainActor () -> Void) -> Void
+
     @Published private(set) var parentAID: String?
     @Published private(set) var parentBID: String?
-    @Published var mode: RemixMode = .crossover
-    @Published var steer: String = ""
-    @Published var batchSize: Int = 5
+    @Published var mode: RemixMode = .crossover { didSet { scheduleAutosave() } }
+    @Published var steer: String = "" { didSet { scheduleAutosave() } }
+    @Published var batchSize: Int = 5 { didSet { scheduleAutosave() } }
     @Published var maxLivePreviews: Int = 4
     @Published private(set) var currentBatch: [RemixNode] = []
+    @Published private(set) var batchHistory: [RemixBatchRecord] = []
     @Published private(set) var lineage = RemixLineage()
     @Published private(set) var isGenerating = false
     /// Live, merged terminal of every child's provider output, each line tagged by child id.
     @Published private(set) var transcript: [String] = []
     /// Lineage-tree selection; the right rail's action strip renders while non-nil.
-    @Published var selectedNodeID: String?
+    @Published var selectedNodeID: String? { didSet { scheduleAutosave() } }
+    @Published var workspace = RemixWorkspaceState() { didSet { scheduleAutosave() } }
+    @Published private(set) var activity = RemixActivityState.idle
+    @Published private(set) var pendingParentRequest: RemixParentRequestSnapshot?
+    @Published private(set) var recoveryNotice: URL?
     /// One static frame per node id, captured at compile time — the tree's row swatches.
     @Published private(set) var snapshots: [String: CGImage] = [:]
 
     private static let settingsKey = "remixCrossoverSettings"
-    @Published var crossoverSettings = RemixCrossoverSettings() { didSet { persistSettings() } }
+    @Published var crossoverSettings = RemixCrossoverSettings() {
+        didSet {
+            persistSettings()
+            scheduleAutosave()
+        }
+    }
 
     private let generator: RemixGenerator
+    private let sessionStore: RemixSessionStore
+    private let defaults: UserDefaults
+    private let autosaveScheduler: AutosaveScheduler
     private var generationTask: Task<Void, Never>?
     private var round = 0
     private var seedCounter = 0
     private var history: [(String?, String?)] = []   // parent (A,B) configs for step-back
+    private var isRestoring = false
+    private var autosaveScheduled = false
+    private var autosaveToken = 0
+    private var sessionIdentity = UUID()
+    private var activeGenerationID: UUID?
+    private var cancelledGenerationIDs: Set<UUID> = []
 
-    init(generator: RemixGenerator) {
+    init(
+        generator: RemixGenerator,
+        sessionStore: RemixSessionStore? = nil,
+        defaults: UserDefaults = .standard,
+        autosaveScheduler: AutosaveScheduler? = nil
+    ) {
         self.generator = generator
-        if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
+        self.defaults = defaults
+        self.sessionStore = sessionStore ?? Self.productionSessionStore()
+        self.autosaveScheduler = autosaveScheduler ?? Self.scheduleProductionAutosave
+        if let data = defaults.data(forKey: Self.settingsKey),
            let decoded = try? JSONDecoder().decode(RemixCrossoverSettings.self, from: data) {
             self.crossoverSettings = decoded
         }
+        restoreSession()
     }
 
     // MARK: derived
@@ -66,15 +96,18 @@ final class RemixStudioModel: ObservableObject {
                              steer: "", directive: "seed", round: 0, status: .compiled, label: label)
         lineage.insert(node)
         switch slot { case .a: parentAID = id; case .b: parentBID = id }
+        scheduleAutosave()
     }
 
     /// Promote an existing lineage node (a child) to a parent slot — no new seed.
     func promoteToParent(_ slot: ParentSlot, nodeID: String) {
         switch slot { case .a: parentAID = nodeID; case .b: parentBID = nodeID }
+        scheduleAutosave()
     }
 
     func clearParent(_ slot: ParentSlot) {
         switch slot { case .a: parentAID = nil; case .b: parentBID = nil }
+        scheduleAutosave()
     }
 
     // MARK: generation
@@ -90,26 +123,38 @@ final class RemixStudioModel: ObservableObject {
     }
 
     /// Stop an in-flight batch. Children that were mid-generation resolve as `.failed("cancelled")`.
-    func cancelGeneration() { generationTask?.cancel() }
+    func cancelGeneration() {
+        if let activeGenerationID {
+            cancelledGenerationIDs.insert(activeGenerationID)
+        }
+        generationTask?.cancel()
+        activity = .cancelled
+        persistSession()
+    }
 
     func generate() async {
-        guard canGenerate else { return }
+        guard canGenerate, !Task.isCancelled else { return }
+        let generationIdentity = sessionIdentity
+        let generationID = UUID()
+        activeGenerationID = generationID
         history.append((parentAID, parentBID))
         round += 1
         let r = round
         let pids = parentIDs
         isGenerating = true
+        activity = .generating(total: batchSize, completed: 0, lastEventAt: nil)
         transcript = []
         // Seed the gallery with .generating placeholders up front so cards (⚙) and the "N generating"
         // header appear immediately — otherwise nothing shows until a child returns (~37s+ each).
         let pool = RemixDirectives.catalog.filter(crossoverSettings.enabledDirectives.contains)
         currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool,
                                              mode: mode)
+        persistSession()
         await generator.generate(
             parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
             settings: crossoverSettings, pool: pool,
             onChild: { [weak self] node in
-                guard let self else { return }
+                guard let self, self.sessionIdentity == generationIdentity else { return }
                 var n = node
                 n.parents = pids             // record true parent ids in the lineage graph
                 if let i = self.currentBatch.firstIndex(where: { $0.id == n.id }) {
@@ -118,12 +163,36 @@ final class RemixStudioModel: ObservableObject {
                     self.currentBatch.append(n)
                 }
                 self.lineage.insert(n)
+                let completed = self.currentBatch.filter { $0.status != .generating }.count
+                if !self.cancelledGenerationIDs.contains(generationID) {
+                    self.activity = .generating(
+                        total: self.currentBatch.count,
+                        completed: completed,
+                        lastEventAt: Date()
+                    )
+                }
+                self.persistSession()
             },
             onLog: { [weak self] id, line in
-                Task { @MainActor in self?.appendLog(id, line) }
+                Task { @MainActor in
+                    guard let self, self.sessionIdentity == generationIdentity else { return }
+                    self.appendLog(id, line)
+                }
             }
         )
+        guard sessionIdentity == generationIdentity else { return }
         isGenerating = false
+        activeGenerationID = nil
+        let wasCancelled = cancelledGenerationIDs.remove(generationID) != nil
+        let failed = currentBatch.filter {
+            if case .failed = $0.status { return true }
+            return false
+        }.count
+        activity = wasCancelled ? .cancelled : .completed(failed: failed)
+        batchHistory.append(
+            RemixBatchRecord(round: r, nodes: currentBatch, requestsByNodeID: [:])
+        )
+        persistSession()
     }
 
     /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives
@@ -139,7 +208,7 @@ final class RemixStudioModel: ObservableObject {
 
     private func persistSettings() {
         if let data = try? JSONEncoder().encode(crossoverSettings) {
-            UserDefaults.standard.set(data, forKey: Self.settingsKey)
+            defaults.set(data, forKey: Self.settingsKey)
         }
     }
 
@@ -162,6 +231,7 @@ final class RemixStudioModel: ObservableObject {
         node.status = valid ? .compiled : .failed(error ?? "compile failed")
         lineage.insert(node)
         if let i = currentBatch.firstIndex(where: { $0.id == id }) { currentBatch[i] = node }
+        persistSession()
     }
 
     // MARK: live-preview cap (performance)
@@ -182,7 +252,10 @@ final class RemixStudioModel: ObservableObject {
 
     // MARK: selection
 
-    func toggleFavorite(_ id: String) { lineage.toggleFavorite(id) }
+    func toggleFavorite(_ id: String) {
+        lineage.toggleFavorite(id)
+        scheduleAutosave()
+    }
 
     func storeSnapshot(id: String, image: CGImage) { snapshots[id] = image }
 
@@ -197,5 +270,157 @@ final class RemixStudioModel: ObservableObject {
         guard history.count >= 2 else { return }
         history.removeLast()                       // drop the current round's config
         (parentAID, parentBID) = history[history.count - 1]
+        scheduleAutosave()
+    }
+
+    // MARK: session persistence
+
+    func restoreSession() {
+        isRestoring = true
+        defer { isRestoring = false }
+        do {
+            switch try sessionStore.load() {
+            case .noSession:
+                break
+            case .corruptPayload(let quarantinedURL):
+                recoveryNotice = quarantinedURL
+            case .session(let session):
+                round = session.round
+                seedCounter = session.seedCounter
+                parentAID = session.parentAID
+                parentBID = session.parentBID
+                history = session.parentHistory.map { ($0.parentAID, $0.parentBID) }
+                mode = session.mode
+                steer = session.steer
+                batchSize = session.batchSize
+                currentBatch = session.currentBatch
+                batchHistory = session.batchHistory
+                lineage = session.lineage
+                workspace = session.workspace
+                selectedNodeID = session.selectedLineageNodeID
+                crossoverSettings = session.crossoverSettings
+                activity = Self.restoredActivity(session.activity)
+                pendingParentRequest = Self.restoredParentRequest(session.pendingParentRequest)
+                transcript = session.transcript
+                isGenerating = false
+            }
+        } catch {
+            // The store already quarantines malformed payloads. Other I/O failures leave the
+            // in-memory defaults intact so the studio remains usable.
+        }
+    }
+
+    func persistSession() {
+        guard !isRestoring else { return }
+        autosaveScheduled = false
+        autosaveToken += 1
+        let session = RemixSession(
+            round: round,
+            seedCounter: seedCounter,
+            parentAID: parentAID,
+            parentBID: parentBID,
+            parentHistory: history.map {
+                RemixParentConfiguration(parentAID: $0.0, parentBID: $0.1)
+            },
+            mode: mode,
+            steer: steer,
+            batchSize: batchSize,
+            currentBatch: currentBatch,
+            batchHistory: batchHistory,
+            lineage: lineage,
+            workspace: workspace,
+            selectedLineageNodeID: selectedNodeID,
+            crossoverSettings: crossoverSettings,
+            activity: activity,
+            pendingParentRequest: pendingParentRequest,
+            transcript: transcript
+        )
+        try? sessionStore.save(session)
+    }
+
+    func startNewSession() {
+        generationTask?.cancel()
+        sessionIdentity = UUID()
+        activeGenerationID = nil
+        cancelledGenerationIDs = []
+        autosaveScheduled = false
+        isRestoring = true
+        parentAID = nil
+        parentBID = nil
+        mode = .crossover
+        steer = ""
+        batchSize = 5
+        currentBatch = []
+        batchHistory = []
+        lineage = RemixLineage()
+        isGenerating = false
+        transcript = []
+        selectedNodeID = nil
+        workspace = RemixWorkspaceState()
+        activity = .idle
+        pendingParentRequest = nil
+        recoveryNotice = nil
+        snapshots = [:]
+        round = 0
+        seedCounter = 0
+        history = []
+        transcriptDropped = 0
+        isRestoring = false
+        persistSession()
+    }
+
+    private func scheduleAutosave() {
+        guard !isRestoring, !autosaveScheduled else { return }
+        autosaveScheduled = true
+        autosaveToken += 1
+        let scheduledToken = autosaveToken
+        autosaveScheduler { [weak self] in
+            guard let self, self.autosaveToken == scheduledToken else { return }
+            self.persistSession()
+        }
+    }
+
+    private static func scheduleProductionAutosave(
+        _ action: @escaping @MainActor () -> Void
+    ) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            action()
+        }
+    }
+
+    private static func restoredParentRequest(
+        _ request: RemixParentRequestSnapshot?
+    ) -> RemixParentRequestSnapshot? {
+        guard let request else { return nil }
+        switch request.phase {
+        case .fetching, .resuming, .converting:
+            return RemixParentRequestSnapshot(
+                id: request.id,
+                slot: request.slot,
+                source: request.source,
+                displayInput: request.displayInput,
+                phase: .waitingForHuman
+            )
+        case .verificationRequired, .waitingForHuman:
+            return request
+        }
+    }
+
+    private static func restoredActivity(_ activity: RemixActivityState) -> RemixActivityState {
+        switch activity {
+        case .generating, .quiet, .resuming:
+            return .interrupted
+        default:
+            return activity
+        }
+    }
+
+    private static func productionSessionStore() -> RemixSessionStore {
+        let directory = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TrueISFEditor/RemixStudio", isDirectory: true)
+        return RemixSessionStore(fileURL: directory.appendingPathComponent("session.json"))
     }
 }
