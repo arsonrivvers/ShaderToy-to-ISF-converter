@@ -7,10 +7,12 @@ import CoreGraphics
 private final class FakeProvider: AssistProvider {
     var scripts: [Result<String, Error>]
     private var i = 0
+    private(set) var prompts: [String] = []
     init(_ scripts: [Result<String, Error>]) { self.scripts = scripts }
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
              onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
         defer { i += 1 }
+        prompts.append(prompt)
         switch scripts[min(i, scripts.count - 1)] {
         case .success(let s): return s
         case .failure(let e): throw e
@@ -194,6 +196,229 @@ final class RemixStudioModelTests: XCTestCase {
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 3
         await m.generate()
         XCTAssertEqual(m.generatingCount, 0)   // all replies landed -> none left generating
+    }
+
+    func test_retryChild_replacesOnlyFailedSlotUsingStoredRequestAfterControlsChange() async throws {
+        let provider = FakeProvider([
+            .success("```glsl\n\(isf)\n```"),
+            .failure(AssistRunError.timedOut(partialStdout: "")),
+            .success("```glsl\n\(isf.replacingOccurrences(of: "1.0", with: "0.5"))\n```"),
+        ])
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: { provider },
+                model: nil,
+                maxConcurrent: 1,
+                systemProvider: { "" }
+            ),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        var originalSettings = RemixCrossoverSettings()
+        originalSettings.balance = 0.8
+        originalSettings.variation = 0.9
+        originalSettings.setSource(.b, for: .motion)
+        m.mode = .crossover
+        m.steer = "original steer"
+        m.crossoverSettings = originalSettings
+        m.batchSize = 2
+        m.setParent(.a, isf: "ORIGINAL_SOURCE_A")
+        m.setParent(.b, isf: "ORIGINAL_SOURCE_B")
+        await m.generate()
+        let originalBatch = m.currentBatch
+        let failedID = try XCTUnwrap(originalBatch.first { node in
+            if case .failed = node.status { return true }
+            return false
+        }?.id)
+        let request = try XCTUnwrap(m.batchHistory.last?.requestsByNodeID[failedID])
+
+        m.mode = .mutate
+        m.steer = "changed steer"
+        m.crossoverSettings = RemixCrossoverSettings()
+        m.clearParent(.a)
+        m.clearParent(.b)
+        await m.retryChild(id: failedID, steerOverride: nil)
+
+        XCTAssertEqual(m.currentBatch.count, originalBatch.count)
+        for original in originalBatch where original.id != failedID {
+            XCTAssertEqual(m.currentBatch.first { $0.id == original.id }, original)
+        }
+        let retried = try XCTUnwrap(m.currentBatch.first { $0.id == failedID })
+        XCTAssertEqual(retried.status, .compiled)
+        XCTAssertEqual(retried.parents, request.parentIDs)
+        XCTAssertEqual(retried.mode, request.mode)
+        XCTAssertEqual(retried.steer, request.steer)
+        XCTAssertEqual(retried.directive, request.directive)
+        XCTAssertTrue(provider.prompts.last?.contains("ORIGINAL_SOURCE_A") == true)
+        XCTAssertTrue(provider.prompts.last?.contains("ORIGINAL_SOURCE_B") == true)
+        XCTAssertTrue(provider.prompts.last?.contains("original steer") == true)
+        XCTAssertFalse(provider.prompts.last?.contains("changed steer") == true)
+        XCTAssertTrue(provider.prompts.last?.contains("80% toward Parent B") == true)
+        XCTAssertTrue(provider.prompts.last?.contains("Take the motion primarily from Parent B") == true)
+    }
+
+    func test_retryChild_steerOverrideChangesOnlyStoredSteer() async throws {
+        let provider = FakeProvider([
+            .failure(AssistRunError.timedOut(partialStdout: "")),
+            .success("```glsl\n\(isf)\n```"),
+        ])
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: { provider },
+                model: nil,
+                maxConcurrent: 1,
+                systemProvider: { "" }
+            ),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        m.mode = .mutate
+        m.steer = "original steer"
+        m.batchSize = 1
+        m.setParent(.a, isf: "ORIGINAL_SOURCE")
+        await m.generate()
+        let id = try XCTUnwrap(m.currentBatch.first?.id)
+        let original = try XCTUnwrap(m.batchHistory.last?.requestsByNodeID[id])
+
+        await m.retryChild(id: id, steerOverride: "retry steer")
+
+        let updated = try XCTUnwrap(m.batchHistory.last?.requestsByNodeID[id])
+        XCTAssertEqual(updated.parentIDs, original.parentIDs)
+        XCTAssertEqual(updated.parentSources, original.parentSources)
+        XCTAssertEqual(updated.mode, original.mode)
+        XCTAssertEqual(updated.directive, original.directive)
+        XCTAssertEqual(updated.settings, original.settings)
+        XCTAssertEqual(updated.steer, "original steer")
+        XCTAssertTrue(provider.prompts.last?.contains("retry steer") == true)
+        XCTAssertFalse(provider.prompts.last?.contains("original steer") == true)
+    }
+
+    func test_activeBatchPersistsRequestSnapshotsBeforeAnyReply() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let provider = SuspendedProvider()
+        let m = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        m.mode = .mutate
+        m.steer = "persist before reply"
+        m.batchSize = 1
+        m.setParent(.a, isf: "ORIGINAL_SOURCE")
+
+        let generation = Task { await m.generate() }
+        while !provider.didStart { await Task.yield() }
+        let persisted = try loadedSession(fixture.store)
+
+        let batch = try XCTUnwrap(persisted.batchHistory.first)
+        let request = try XCTUnwrap(
+            batch.requestsByNodeID["r1-0"]
+        )
+        XCTAssertEqual(request.parentSources, ["ORIGINAL_SOURCE"])
+        XCTAssertEqual(request.steer, "persist before reply")
+
+        generation.cancel()
+        provider.finish(with: "```glsl\n\(isf)\n```")
+        await generation.value
+    }
+
+    func test_retryFailedAndInterruptedBatch_touchOnlyTheirScopedStatuses() async throws {
+        let fixture = try restorationFixture()
+        var session = fixture.session
+        let compiled = session.currentBatch[0]
+        var failed = compiled
+        failed = RemixNode(
+            id: "r7-1", isfSource: "", parents: compiled.parents, mode: .mutate,
+            steer: "failed steer", directive: "failed directive", round: 7,
+            status: .failed("provider failed")
+        )
+        let interrupted = RemixNode(
+            id: "r7-2", isfSource: "", parents: compiled.parents, mode: .mutate,
+            steer: "interrupted steer", directive: "interrupted directive", round: 7,
+            status: .interrupted
+        )
+        let requests = Dictionary(uniqueKeysWithValues: [compiled, failed, interrupted].map { node in
+            (
+                node.id,
+                RemixGenerationRequestSnapshot(
+                    parentIDs: node.parents,
+                    parentSources: ["RESTORED_PARENT"],
+                    mode: node.mode,
+                    steer: node.steer,
+                    directive: node.directive,
+                    settings: session.crossoverSettings
+                )
+            )
+        })
+        session.currentBatch = [compiled, failed, interrupted]
+        session.batchHistory = [
+            RemixBatchRecord(round: 7, nodes: session.currentBatch, requestsByNodeID: requests)
+        ]
+        var restoredLineage = session.lineage
+        restoredLineage.insert(failed)
+        restoredLineage.insert(interrupted)
+        session.lineage = restoredLineage
+        try fixture.store.save(session)
+        let provider = FakeProvider([
+            .success("```glsl\n\(isf)\n```"),
+            .success("```glsl\n\(isf)\n```"),
+        ])
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: { provider },
+                model: nil,
+                maxConcurrent: 1,
+                systemProvider: { "" }
+            ),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+
+        await m.retryFailed()
+        XCTAssertEqual(m.currentBatch[0], compiled)
+        XCTAssertEqual(m.currentBatch[1].status, .compiled)
+        XCTAssertEqual(m.currentBatch[2].status, .interrupted)
+        XCTAssertEqual(provider.prompts.count, 1)
+
+        await m.retryInterruptedBatch()
+        XCTAssertEqual(m.currentBatch[0], compiled)
+        XCTAssertEqual(m.currentBatch[1].status, .compiled)
+        XCTAssertEqual(m.currentBatch[2].status, .compiled)
+        XCTAssertEqual(provider.prompts.count, 2)
+    }
+
+    func test_restoredInterruptedBatchRetainsGenerationRequestSnapshots() throws {
+        let fixture = try restorationFixture()
+        var session = fixture.session
+        var interrupted = session.currentBatch[0]
+        interrupted.status = .generating
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: interrupted.parents,
+            parentSources: ["RESTORED_PARENT"],
+            mode: interrupted.mode,
+            steer: interrupted.steer,
+            directive: interrupted.directive,
+            settings: session.crossoverSettings
+        )
+        session.currentBatch = [interrupted]
+        session.batchHistory = [
+            RemixBatchRecord(
+                round: interrupted.round,
+                nodes: [interrupted],
+                requestsByNodeID: [interrupted.id: request]
+            )
+        ]
+        try fixture.store.save(session)
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        XCTAssertEqual(restored.currentBatch[0].status, .interrupted)
+        XCTAssertEqual(
+            restored.batchHistory[0].requestsByNodeID[interrupted.id],
+            request
+        )
     }
 
     func test_stepBack_restoresPreviousParents() async {

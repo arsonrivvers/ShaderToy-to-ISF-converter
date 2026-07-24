@@ -215,6 +215,28 @@ final class RemixStudioModel: ObservableObject {
         let pool = RemixDirectives.catalog.filter(crossoverSettings.enabledDirectives.contains)
         currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool,
                                              mode: mode)
+        let requestSnapshots = Dictionary(
+            uniqueKeysWithValues: currentBatch.map { placeholder in
+                (
+                    placeholder.id,
+                    RemixGenerationRequestSnapshot(
+                        parentIDs: pids,
+                        parentSources: parentSources,
+                        mode: mode,
+                        steer: steer,
+                        directive: placeholder.directive,
+                        settings: crossoverSettings
+                    )
+                )
+            }
+        )
+        batchHistory.append(
+            RemixBatchRecord(
+                round: r,
+                nodes: currentBatch,
+                requestsByNodeID: requestSnapshots
+            )
+        )
         persistSession()
         await generator.generate(
             parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
@@ -229,6 +251,7 @@ final class RemixStudioModel: ObservableObject {
                     self.currentBatch.append(n)
                 }
                 self.lineage.insert(n)
+                self.updateBatchRecord(round: r, nodes: self.currentBatch)
                 let completed = self.currentBatch.filter { $0.status != .generating }.count
                 if !self.cancelledGenerationIDs.contains(generationID) {
                     self.activity = .generating(
@@ -255,10 +278,108 @@ final class RemixStudioModel: ObservableObject {
             return false
         }.count
         activity = wasCancelled ? .cancelled : .completed(failed: failed)
-        batchHistory.append(
-            RemixBatchRecord(round: r, nodes: currentBatch, requestsByNodeID: [:])
-        )
+        updateBatchRecord(round: r, nodes: currentBatch)
         persistSession()
+    }
+
+    /// Retry one failed or interrupted slot from its captured request. An explicit steer override
+    /// creates a new immutable snapshot by replacing only the steer field.
+    func retryChild(id: String, steerOverride: String? = nil) async {
+        guard !isGenerating,
+              let batchIndex = batchHistory.lastIndex(where: {
+                  $0.requestsByNodeID[id] != nil
+              }),
+              let storedRequest = batchHistory[batchIndex].requestsByNodeID[id],
+              let currentIndex = currentBatch.firstIndex(where: { $0.id == id }),
+              Self.isRetryable(currentBatch[currentIndex].status)
+        else {
+            return
+        }
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: storedRequest.parentIDs,
+            parentSources: storedRequest.parentSources,
+            mode: storedRequest.mode,
+            steer: steerOverride ?? storedRequest.steer,
+            directive: storedRequest.directive,
+            settings: storedRequest.settings
+        )
+
+        var placeholder = currentBatch[currentIndex]
+        placeholder.status = .generating
+        currentBatch[currentIndex] = placeholder
+        lineage.insert(placeholder)
+        isGenerating = true
+        activity = .generating(total: 1, completed: 0, lastEventAt: nil)
+        persistSession()
+
+        let generationIdentity = sessionIdentity
+        let child = await generator.generateChild(
+            id: id,
+            request: request,
+            onLog: { [weak self] childID, line in
+                Task { @MainActor in
+                    guard let self, self.sessionIdentity == generationIdentity else { return }
+                    self.appendLog(childID, line)
+                }
+            }
+        )
+        guard sessionIdentity == generationIdentity else { return }
+        replaceRetriedNode(child, batchIndex: batchIndex)
+        isGenerating = false
+        activity = .completed(failed: Self.isFailed(child.status) ? 1 : 0)
+        persistSession()
+    }
+
+    func retryFailed() async {
+        let ids = currentBatch.compactMap { node -> String? in
+            Self.isFailed(node.status) ? node.id : nil
+        }
+        for id in ids {
+            await retryChild(id: id)
+        }
+    }
+
+    func retryInterruptedBatch() async {
+        let ids = currentBatch.compactMap { node -> String? in
+            node.status == .interrupted ? node.id : nil
+        }
+        for id in ids {
+            await retryChild(id: id)
+        }
+    }
+
+    private func replaceRetriedNode(_ child: RemixNode, batchIndex: Int) {
+        if let index = currentBatch.firstIndex(where: { $0.id == child.id }) {
+            currentBatch[index] = child
+        }
+        lineage.insert(child)
+        var nodes = batchHistory[batchIndex].nodes
+        if let index = nodes.firstIndex(where: { $0.id == child.id }) {
+            nodes[index] = child
+        }
+        batchHistory[batchIndex] = RemixBatchRecord(
+            round: batchHistory[batchIndex].round,
+            nodes: nodes,
+            requestsByNodeID: batchHistory[batchIndex].requestsByNodeID
+        )
+    }
+
+    private func updateBatchRecord(round: Int, nodes: [RemixNode]) {
+        guard let index = batchHistory.lastIndex(where: { $0.round == round }) else { return }
+        batchHistory[index] = RemixBatchRecord(
+            round: round,
+            nodes: nodes,
+            requestsByNodeID: batchHistory[index].requestsByNodeID
+        )
+    }
+
+    private static func isRetryable(_ status: RemixNode.Status) -> Bool {
+        status == .interrupted || isFailed(status)
+    }
+
+    private static func isFailed(_ status: RemixNode.Status) -> Bool {
+        if case .failed = status { return true }
+        return false
     }
 
     /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives

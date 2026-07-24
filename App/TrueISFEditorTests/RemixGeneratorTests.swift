@@ -7,6 +7,7 @@ private final class FakeProvider: AssistProvider {
     var scripts: [Result<String, Error>]
     private(set) var lastTimeout: TimeInterval = 0
     private(set) var lastModel: String?
+    private(set) var prompts: [String] = []
     private var i = 0
     init(_ scripts: [Result<String, Error>]) { self.scripts = scripts }
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
@@ -14,6 +15,7 @@ private final class FakeProvider: AssistProvider {
         defer { i += 1 }
         lastTimeout = timeout
         lastModel = model
+        prompts.append(prompt)
         switch scripts[min(i, scripts.count - 1)] {
         case .success(let s): return s
         case .failure(let e): throw e
@@ -79,6 +81,44 @@ final class RemixGeneratorTests: XCTestCase {
         }
         XCTAssertEqual(children.count, 1)
         if case .failed = children[0].status {} else { XCTFail("expected .failed") }
+    }
+
+    func test_generateChild_usesFixedIDAndImmutableRequestSnapshot() async {
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])
+        let gen = RemixGenerator(makeProvider: { provider }, model: nil, systemProvider: { "" })
+        var settings = RemixCrossoverSettings()
+        settings.balance = 0.8
+        settings.variation = 0.9
+        settings.setSource(.b, for: .motion)
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-original-a", "seed-original-b"],
+            parentSources: ["ORIGINAL_SOURCE_A", "ORIGINAL_SOURCE_B"],
+            mode: .crossover,
+            steer: "original steer",
+            directive: "original directive",
+            settings: settings
+        )
+
+        let child = await gen.generateChild(id: "r12-3", request: request)
+
+        XCTAssertEqual(child.id, "r12-3")
+        XCTAssertEqual(child.round, 12)
+        XCTAssertEqual(child.mode, request.mode)
+        XCTAssertEqual(child.steer, request.steer)
+        XCTAssertEqual(child.directive, request.directive)
+        XCTAssertEqual(
+            provider.prompts,
+            [RemixPrompt.user(
+                parents: [
+                    (label: "B", source: "ORIGINAL_SOURCE_B"),
+                    (label: "A", source: "ORIGINAL_SOURCE_A"),
+                ],
+                mode: request.mode,
+                steer: request.steer,
+                directive: request.directive,
+                settings: request.settings
+            )]
+        )
     }
 
     func test_orderedParents_evenSeed_keepsAFirst() {

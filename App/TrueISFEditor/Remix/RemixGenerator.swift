@@ -54,32 +54,30 @@ final class RemixGenerator {
         let system = systemProvider()
         await withTaskGroup(of: RemixNode.self) { group in
             var launched = 0
-            func launch(_ slot: Int) {
+            @MainActor func launch(_ slot: Int) {
                 let directive = directives[slot]
-                let labeled = parents.enumerated().map { (label: $0.offset == 0 ? "A" : "B", source: $0.element) }
-                let ordered = RemixGenerator.orderedParents(labeled, seed: round * 1000 + slot)
-                let prompt = RemixPrompt.user(parents: ordered, mode: mode, steer: steer,
-                                              directive: directive, settings: settings)
+                let id = "r\(round)-\(slot)"
+                let request = RemixGenerationRequestSnapshot(
+                    parentIDs: [],
+                    parentSources: parents,
+                    mode: mode,
+                    steer: steer,
+                    directive: directive,
+                    settings: settings
+                )
                 let provider = makeProvider()
                 let mdl = modelProvider()
                 let to = timeout
                 group.addTask { @MainActor in
-                    let id = "r\(round)-\(slot)"
-                    do {
-                        let out = try await provider.run(prompt: prompt, system: system, model: mdl, timeout: to) { line in
-                            onLog(id, line)
-                        }
-                        if let isf = RemixResponseParser.extractISF(out) {
-                            return RemixNode(id: id, isfSource: isf, parents: [], mode: mode, steer: steer,
-                                             directive: directive, round: round, status: .compiled)
-                        }
-                        return RemixNode(id: id, isfSource: out, parents: [], mode: mode, steer: steer,
-                                         directive: directive, round: round, status: .failed("No ISF in reply"))
-                    } catch {
-                        let reason = (error is CancellationError) ? "cancelled" : "\(error)"
-                        return RemixNode(id: id, isfSource: "", parents: [], mode: mode, steer: steer,
-                                         directive: directive, round: round, status: .failed(reason))
-                    }
+                    await Self.runChild(
+                        id: id,
+                        request: request,
+                        provider: provider,
+                        model: mdl,
+                        system: system,
+                        timeout: to,
+                        onLog: onLog
+                    )
                 }
             }
             while launched < min(maxConcurrent, batchSize) { launch(launched); launched += 1 }
@@ -90,5 +88,101 @@ final class RemixGenerator {
                 if !Task.isCancelled, launched < batchSize { launch(launched); launched += 1 }
             }
         }
+    }
+
+    /// Generate exactly one child into a stable lineage slot. Retry callers supply the immutable
+    /// request captured for that slot, so changing the studio controls cannot alter retry inputs.
+    func generateChild(
+        id: String,
+        request: RemixGenerationRequestSnapshot,
+        onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }
+    ) async -> RemixNode {
+        await Self.runChild(
+            id: id,
+            request: request,
+            provider: makeProvider(),
+            model: modelProvider(),
+            system: systemProvider(),
+            timeout: timeout,
+            onLog: onLog
+        )
+    }
+
+    private static func runChild(
+        id: String,
+        request: RemixGenerationRequestSnapshot,
+        provider: AssistProvider,
+        model: String?,
+        system: String,
+        timeout: TimeInterval,
+        onLog: @escaping @Sendable (String, String) -> Void
+    ) async -> RemixNode {
+        let round = roundIndex(in: id)
+        let slot = slotIndex(in: id)
+        let labeled = request.parentSources.enumerated().map {
+            (label: $0.offset == 0 ? "A" : "B", source: $0.element)
+        }
+        let ordered = orderedParents(labeled, seed: round * 1000 + slot)
+        let prompt = RemixPrompt.user(
+            parents: ordered,
+            mode: request.mode,
+            steer: request.steer,
+            directive: request.directive,
+            settings: request.settings
+        )
+        do {
+            let out = try await provider.run(
+                prompt: prompt,
+                system: system,
+                model: model,
+                timeout: timeout
+            ) { line in
+                onLog(id, line)
+            }
+            if let isf = RemixResponseParser.extractISF(out) {
+                return RemixNode(
+                    id: id,
+                    isfSource: isf,
+                    parents: request.parentIDs,
+                    mode: request.mode,
+                    steer: request.steer,
+                    directive: request.directive,
+                    round: round,
+                    status: .compiled
+                )
+            }
+            return RemixNode(
+                id: id,
+                isfSource: out,
+                parents: request.parentIDs,
+                mode: request.mode,
+                steer: request.steer,
+                directive: request.directive,
+                round: round,
+                status: .failed("No ISF in reply")
+            )
+        } catch {
+            let reason = (error is CancellationError) ? "cancelled" : "\(error)"
+            return RemixNode(
+                id: id,
+                isfSource: "",
+                parents: request.parentIDs,
+                mode: request.mode,
+                steer: request.steer,
+                directive: request.directive,
+                round: round,
+                status: .failed(reason)
+            )
+        }
+    }
+
+    private static func roundIndex(in id: String) -> Int {
+        guard id.first == "r", let separator = id.firstIndex(of: "-") else { return 0 }
+        return Int(id[id.index(after: id.startIndex)..<separator]) ?? 0
+    }
+
+    private static func slotIndex(in id: String) -> Int {
+        guard let separator = id.firstIndex(of: "-") else { return 0 }
+        return Int(id[id.index(after: separator)...]) ?? 0
     }
 }
