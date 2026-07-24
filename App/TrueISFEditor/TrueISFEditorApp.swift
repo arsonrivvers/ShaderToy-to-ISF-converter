@@ -254,9 +254,11 @@ void main() {
                 openInEditor: { isf in
                     vm.loadImported(isf: isf, warnings: [], suggestedName: "Remixed shader")
                 },
-                libraryEntries: library.filtered(query: "")
+                libraryEntries: library.filtered(query: ""),
+                currentEditorLabel: vm.file.displayName
             )
         }
+        .defaultSize(width: 1280, height: 800)
         Settings { SettingsView(store: settings) }
     }
 

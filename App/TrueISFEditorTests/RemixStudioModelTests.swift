@@ -986,4 +986,64 @@ final class RemixStudioModelTests: XCTestCase {
         }
         return session
     }
+
+    func test_continueVerification_foregroundsExistingChallengeWithoutRestartingRequest() async {
+        let m = model([.success(isf)])
+        var foregroundCount = 0
+        let resolver = RemixParentResolver(
+            currentEditorSource: { nil },
+            fetchShadertoy: { _, onState in
+                onState(.verificationRequired)
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+                return "unreachable"
+            },
+            foregroundVerification: {
+                foregroundCount += 1
+                return true
+            }
+        )
+        let request = RemixParentRequest(
+            slot: .b,
+            spec: .shadertoyLink("abc123"),
+            displayInput: "abc123"
+        )
+        m.loadParent(request, from: resolver)
+        await Task.yield()
+
+        let result = m.continueParentVerification(from: resolver)
+
+        XCTAssertEqual(result, .foregrounded(requestID: request.id, slot: .b))
+        XCTAssertEqual(foregroundCount, 1)
+        XCTAssertEqual(m.parentLoadState.request, request)
+        _ = m.cancelParentLoad()
+    }
+
+    func test_continueVerification_afterRestoreRestartsExactTypedRequest() async throws {
+        let fixture = try restorationFixture()
+        try fixture.store.save(fixture.session)
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+        var fetchInput: String?
+        let fetchStarted = expectation(description: "restored fetch started")
+        let resolver = RemixParentResolver(
+            currentEditorSource: { nil },
+            fetchShadertoy: { input in
+                fetchInput = input
+                fetchStarted.fulfill()
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+                return "unreachable"
+            }
+        )
+
+        let result = restored.continueParentVerification(from: resolver)
+        await fulfillment(of: [fetchStarted], timeout: 1)
+
+        let expected = try XCTUnwrap(RemixParentRequest(snapshot: fixture.session.pendingParentRequest!))
+        guard case .shadertoyLink(let expectedFetchInput) = expected.spec else {
+            return XCTFail("Expected restored Shadertoy request")
+        }
+        XCTAssertEqual(result, .restarted(expected))
+        XCTAssertEqual(restored.parentLoadState.request, expected)
+        XCTAssertEqual(fetchInput, expectedFetchInput)
+        _ = restored.cancelParentLoad()
+    }
 }

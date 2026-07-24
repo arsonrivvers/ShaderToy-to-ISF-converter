@@ -3,7 +3,13 @@ import Combine
 import CoreGraphics
 
 /// Which parent slot a source/child fills.
-enum ParentSlot: String, Codable, Equatable { case a, b }
+enum ParentSlot: String, Codable, Equatable, Hashable { case a, b }
+
+enum RemixVerificationContinuationResult: Equatable {
+    case foregrounded(requestID: UUID, slot: ParentSlot)
+    case restarted(RemixParentRequest)
+    case unavailable
+}
 
 /// Owns the Remix Studio state and drives the Module 1 generator. Parents are real lineage nodes
 /// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
@@ -176,6 +182,19 @@ final class RemixStudioModel: ObservableObject {
         activity = .cancelled
         persistSession()
         return parentLoadState.focusTarget
+    }
+
+    @discardableResult
+    func continueParentVerification(
+        from resolver: RemixParentResolver
+    ) -> RemixVerificationContinuationResult {
+        guard let request = parentLoadState.request else { return .unavailable }
+        if activeParentRequestID == request.id {
+            guard resolver.foregroundVerification() else { return .unavailable }
+            return .foregrounded(requestID: request.id, slot: request.slot)
+        }
+        loadParent(request, from: resolver)
+        return .restarted(request)
     }
 
     // MARK: generation

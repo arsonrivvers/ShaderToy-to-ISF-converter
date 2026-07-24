@@ -32,6 +32,7 @@ final class WebKitShaderFetcher: NSObject {
 
     private let webView: WKWebView
     private let window: NSWindow
+    private static weak var activeVerificationFetcher: WebKitShaderFetcher?
 
     /// Diagnostics for the last poll (used by the debug-fetch affordance).
     private(set) var lastTitle: String = "(none)"
@@ -57,6 +58,13 @@ final class WebKitShaderFetcher: NSObject {
         webView.customUserAgent =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         // Persistent (default) data store → Cloudflare clearance cookie persists across fetches.
+    }
+
+    static func foregroundActiveVerification() -> Bool {
+        guard let fetcher = activeVerificationFetcher else { return false }
+        fetcher.window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        return true
     }
 
     /// Harvests real public shader IDs from Shadertoy's results page (for the conversion-conformance
@@ -114,7 +122,13 @@ final class WebKitShaderFetcher: NSObject {
         window.title = "Fetching from Shadertoy… (if a checkbox appears, click it)"
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        defer { window.orderOut(nil) }
+        Self.activeVerificationFetcher = self
+        defer {
+            if Self.activeVerificationFetcher === self {
+                Self.activeVerificationFetcher = nil
+            }
+            window.orderOut(nil)
+        }
         onState(.loading)
 
         // Retry transient failures once (Cloudflare challenges and 429/5xx are often transient):

@@ -24,13 +24,18 @@ struct RemixParentResolver {
         String,
         @MainActor (WebKitShaderFetcher.State) -> Void
     ) async throws -> String
+    var foregroundVerification: @MainActor () -> Bool
 
     init(
         currentEditorSource: @escaping () -> String?,
-        fetchShadertoy: @escaping (String) async throws -> String
+        fetchShadertoy: @escaping (String) async throws -> String,
+        foregroundVerification: @escaping @MainActor () -> Bool = {
+            WebKitShaderFetcher.foregroundActiveVerification()
+        }
     ) {
         self.currentEditorSource = currentEditorSource
         self.fetchShadertoy = { input, _ in try await fetchShadertoy(input) }
+        self.foregroundVerification = foregroundVerification
     }
 
     init(
@@ -38,10 +43,14 @@ struct RemixParentResolver {
         fetchShadertoy: @escaping (
             String,
             @MainActor (WebKitShaderFetcher.State) -> Void
-        ) async throws -> String
+        ) async throws -> String,
+        foregroundVerification: @escaping @MainActor () -> Bool = {
+            WebKitShaderFetcher.foregroundActiveVerification()
+        }
     ) {
         self.currentEditorSource = currentEditorSource
         self.fetchShadertoy = fetchShadertoy
+        self.foregroundVerification = foregroundVerification
     }
 
     func resolve(_ spec: ParentSpec) async throws -> String {

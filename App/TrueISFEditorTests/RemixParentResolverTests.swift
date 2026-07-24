@@ -31,4 +31,24 @@ final class RemixParentResolverTests: XCTestCase {
         let linkOut = try await r.resolve(.shadertoyLink("https://shadertoy.com/view/abc"))
         XCTAssertEqual(linkOut, "ISF for https://shadertoy.com/view/abc")
     }
+
+    func test_foregroundVerification_invokesExplicitHandoffWithoutFetchingOrPressing() {
+        var foregroundCount = 0
+        var fetchCount = 0
+        let resolver = RemixParentResolver(
+            currentEditorSource: { nil },
+            fetchShadertoy: { _ in
+                fetchCount += 1
+                return "unused"
+            },
+            foregroundVerification: {
+                foregroundCount += 1
+                return true
+            }
+        )
+
+        XCTAssertTrue(resolver.foregroundVerification())
+        XCTAssertEqual(foregroundCount, 1)
+        XCTAssertEqual(fetchCount, 0)
+    }
 }
