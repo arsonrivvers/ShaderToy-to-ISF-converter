@@ -97,10 +97,12 @@ Ranked by payoff:
 
 ## Conversion pipeline (parallel track, independent of A/B/D)
 
-1. **Sanitize Shadertoy metadata into the ISF header** — a `*/` in a title/description corrupts
-   the emitted file (`HeaderBuilder.swift:35`, `ISFDocument.swift:16`). Untested, unguarded.
-2. **Wire the unresolved-uniform tripwire for per-pass bodies** (it covers Common only) —
-   bare `iChannelResolution` in a pass ships raw → silent black import.
+1. ✅ **Sanitize Shadertoy metadata into the ISF header** — landed in Plan 3
+   (2026-07-24): `ISFDocument.fileText` losslessly escapes literal block-comment terminators
+   at the final wrapper boundary; direct and converter-path regressions pin exact round-tripping.
+2. ✅ **Wire the unresolved-uniform tripwire for per-pass bodies** — landed in Plan 3
+   (2026-07-24): every isolated pass runs `UniformRewriter.unresolvedUniformUses` immediately
+   after scoped rewriting and emits a pass-named warning for survivors.
 3. **Pixel-BLACK residue classes** (M42 + friends): persistent-buffer first-frame state, iMouse
    zw mirror, IMG_PIXEL half-texel drift in feedback sims.
 4. **Keyboard-texture emulation** — synthesize Shadertoy's 256×3 keystate texture from ISF

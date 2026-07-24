@@ -69,6 +69,16 @@ public enum ISFConverter {
             // protected; everything else rewrites exactly as the whole-string rewriter did.
             code = UniformRewriter.rewriteScoped(code)
 
+            // Tripwire parity with Common: if a detectable Shadertoy uniform survives the
+            // scope-aware rewrite outside a parameter-shadowed position, retain the best-effort
+            // conversion but identify the originating pass loudly.
+            for name in UniformRewriter.unresolvedUniformUses(code) {
+                warnings.append(ConversionWarning(
+                    severity: .warning,
+                    message: "\(name) survived uniform rewriting in pass \(pass.name) (no ISF mapping applies at this use) — the shader may fail to compile. Verify or rework the use.",
+                    context: pass.name))
+            }
+
             // Auto-stub any iChannelN used in the code but not declared as a renderpass input —
             // some Shadertoy shaders reference a channel the API/internal response never lists, which
             // would otherwise leave a bare `iChannelN` / `texture(iChannelN,…)` undeclared.

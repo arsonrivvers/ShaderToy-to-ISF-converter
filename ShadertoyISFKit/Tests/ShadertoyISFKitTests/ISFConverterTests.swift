@@ -266,4 +266,65 @@ final class ISFConverterTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(fallbackEncoded.utf8)) as? [String: Any])
         XCTAssertEqual(fallbackObject["DESCRIPTION"] as? String, fallbackTitle)
     }
+
+    func test_perPassUnresolvedUniform_emitsPassScopedWarning() {
+        let shader = ShaderFactory.singlePass(
+            imageCode: """
+                void mainImage(out vec4 O, vec2 I) {
+                    vec3 nativeSize = iChannelResolution;
+                    O = vec4(nativeSize.xy, 0.0, 1.0);
+                }
+                """)
+
+        let (_, warnings) = ISFConverter.convert(shader)
+        let tripwires = warnings.filter {
+            $0.message.contains("iChannelResolution survived uniform rewriting")
+        }
+        XCTAssertEqual(tripwires.count, 1, "\(warnings)")
+        XCTAssertEqual(tripwires[0].severity, .warning)
+        XCTAssertEqual(tripwires[0].context, "Image")
+    }
+
+    func test_perPassUnresolvedUniform_namesOnlyOffendingPass() {
+        let buffer = RenderPass(
+            inputs: [],
+            outputs: [PassOutput(id: "buf0", channel: 0)],
+            code: "void mainImage(out vec4 O, vec2 I){ O = vec4(1.0); }",
+            name: "Buffer A",
+            type: .buffer)
+        let image = RenderPass(
+            inputs: [],
+            outputs: [PassOutput(id: "out0", channel: 0)],
+            code: """
+                void mainImage(out vec4 O, vec2 I) {
+                    vec3 nativeSize = iChannelResolution;
+                    O = vec4(nativeSize.xy, 0.0, 1.0);
+                }
+                """,
+            name: "Image",
+            type: .image)
+        let shader = Shader(
+            info: Info(id: "tripwire", name: "Tripwire", username: nil, description: nil),
+            renderpass: [buffer, image])
+
+        let (_, warnings) = ISFConverter.convert(shader)
+        let contexts = warnings
+            .filter { $0.message.contains("survived uniform rewriting") }
+            .compactMap(\.context)
+        XCTAssertEqual(contexts, ["Image"], "\(warnings)")
+    }
+
+    func test_perPassUnresolvedUniform_parameterShadow_remainsUnwarned() {
+        let shader = ShaderFactory.singlePass(imageCode: """
+            vec3 nativeSize(vec3 iChannelResolution) { return iChannelResolution; }
+            void mainImage(out vec4 O, vec2 I) {
+                O = vec4(nativeSize(vec3(1.0)).xy, 0.0, 1.0);
+            }
+            """)
+
+        let (_, warnings) = ISFConverter.convert(shader)
+        XCTAssertFalse(warnings.contains {
+            $0.message.contains("iChannelResolution survived uniform rewriting")
+        }, "\(warnings)")
+    }
 }
