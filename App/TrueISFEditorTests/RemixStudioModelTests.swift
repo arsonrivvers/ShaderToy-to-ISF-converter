@@ -617,6 +617,167 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(try loadedSession(fixture.store).parentAID, "seed-0")
     }
 
+    func test_compileFailureRetainsSourceDiagnosticAndExposesSalvageActions() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let model = storedModel(store: fixture.store, defaults: fixture.defaults)
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+        await model.generate()
+        let childID = try XCTUnwrap(model.currentBatch.first?.id)
+        let generatedSource = try XCTUnwrap(model.currentBatch.first?.isfSource)
+
+        model.markCompileResult(id: childID, valid: false, error: "line 8: unknown symbol")
+
+        XCTAssertEqual(model.currentBatch.first?.isfSource, generatedSource)
+        XCTAssertEqual(model.compileDiagnostic(for: childID), "line 8: unknown symbol")
+        XCTAssertEqual(
+            model.compileSalvageActions(for: childID),
+            [
+                .viewCompileSummary,
+                .openSourceInEditorToFix,
+                .copyDiagnostic,
+                .retryThisChild,
+            ]
+        )
+    }
+
+    func test_compileFailurePersistsProvenanceAndUpdatesEveryStoredNodeCopy() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let model = storedModel(store: fixture.store, defaults: fixture.defaults)
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+        await model.generate()
+        let childID = try XCTUnwrap(model.currentBatch.first?.id)
+
+        model.markCompileResult(id: childID, valid: false, error: "line 12: bad uniform")
+
+        let saved = try loadedSession(fixture.store)
+        XCTAssertEqual(saved.currentBatch.first?.status, .failed("line 12: bad uniform"))
+        XCTAssertEqual(saved.batchHistory.first?.nodes.first?.status, .failed("line 12: bad uniform"))
+        XCTAssertEqual(saved.lineage.node(childID)?.status, .failed("line 12: bad uniform"))
+        XCTAssertEqual(saved.compileDiagnosticsByNodeID?[childID], "line 12: bad uniform")
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+        XCTAssertEqual(restored.compileDiagnostic(for: childID), "line 12: bad uniform")
+        XCTAssertEqual(
+            restored.compileSalvageActions(for: childID),
+            [
+                .viewCompileSummary,
+                .openSourceInEditorToFix,
+                .copyDiagnostic,
+                .retryThisChild,
+            ]
+        )
+    }
+
+    func test_restoreLegacySessionWithoutCompileDiagnosticsDefaultsToEmpty() throws {
+        let fixture = try restorationFixture()
+        var legacySession = fixture.session
+        legacySession.compileDiagnosticsByNodeID = nil
+        try fixture.store.save(legacySession)
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        XCTAssertNil(restored.compileDiagnostic(for: "r7-0"))
+        XCTAssertEqual(restored.compileSalvageActions(for: "r7-0"), [])
+    }
+
+    func test_compileFailureProducesStructuredActivityThatUnrelatedSuccessDoesNotErase() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let model = storedModel(store: fixture.store, defaults: fixture.defaults)
+        model.mode = .mutate
+        model.batchSize = 2
+        model.setParent(.a, isf: "seed")
+        await model.generate()
+        let failedID = try XCTUnwrap(model.currentBatch.first?.id)
+        let successfulID = try XCTUnwrap(model.currentBatch.last?.id)
+
+        model.markCompileResult(id: failedID, valid: false, error: "line 3: syntax error")
+
+        XCTAssertEqual(
+            model.activity,
+            .childFailed(id: failedID, message: "Compile failed: line 3: syntax error")
+        )
+        XCTAssertEqual(model.activity.summary.compactStatus, "\(failedID) failed")
+        XCTAssertEqual(
+            model.activity.summary.accessibilityAnnouncement,
+            "\(failedID) failed. Compile failed: line 3: syntax error"
+        )
+
+        model.markPreviewFailure(id: successfulID, message: "renderer unavailable")
+        model.retryPreview(id: successfulID)
+        model.markCompileResult(id: successfulID, valid: true, error: nil)
+
+        XCTAssertEqual(
+            model.activity,
+            .childFailed(id: failedID, message: "Compile failed: line 3: syntax error")
+        )
+    }
+
+    func test_unparseableProviderReplyDoesNotExposeCompileSalvageActions() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let provider = FakeProvider([.success("This reply contains no shader source.")])
+        let model = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+
+        await model.generate()
+
+        let childID = try XCTUnwrap(model.currentBatch.first?.id)
+        XCTAssertEqual(model.currentBatch.first?.status, .failed("No ISF in reply"))
+        XCTAssertNil(model.compileDiagnostic(for: childID))
+        XCTAssertEqual(model.compileSalvageActions(for: childID), [])
+    }
+
+    func test_previewFailureHasRendererScopedActions() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let model = storedModel(store: fixture.store, defaults: fixture.defaults)
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+        await model.generate()
+        let childID = try XCTUnwrap(model.currentBatch.first?.id)
+
+        model.markPreviewFailure(id: childID, message: "Metal device unavailable")
+
+        XCTAssertEqual(model.previewFailuresByNodeID[childID], "Metal device unavailable")
+        XCTAssertEqual(model.previewFailureActions(for: childID), [.retryPreview, .openInEditor])
+        XCTAssertEqual(model.currentBatch.first?.status, .compiled)
+    }
+
+    func test_retryPreviewDoesNotInvokeProviderOrChangeGenerationStatus() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])
+        let model = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        model.mode = .mutate
+        model.batchSize = 1
+        model.setParent(.a, isf: "seed")
+        await model.generate()
+        let childID = try XCTUnwrap(model.currentBatch.first?.id)
+        let providerCallCount = provider.prompts.count
+        let activityBeforeRetry = model.activity
+        let statusBeforeRetry = model.currentBatch.first?.status
+        model.markPreviewFailure(id: childID, message: "renderer stopped")
+
+        model.retryPreview(id: childID)
+
+        XCTAssertNil(model.previewFailuresByNodeID[childID])
+        XCTAssertEqual(provider.prompts.count, providerCallCount)
+        XCTAssertEqual(model.activity, activityBeforeRetry)
+        XCTAssertEqual(model.currentBatch.first?.status, statusBeforeRetry)
+    }
+
     func test_restoreSession_normalizesActiveRequestAndStandaloneActivityToNonRunningState() throws {
         let activePhases: [RemixParentRequestPhase] = [.fetching, .resuming, .converting]
         for phase in activePhases {

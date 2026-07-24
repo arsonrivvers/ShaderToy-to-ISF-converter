@@ -30,6 +30,8 @@ final class RemixStudioModel: ObservableObject {
     @Published private(set) var pendingParentRequest: RemixParentRequestSnapshot?
     @Published private(set) var parentLoadState = RemixParentLoadState.idle
     @Published private(set) var recoveryNotice: URL?
+    @Published private(set) var compileDiagnosticsByNodeID: [String: String] = [:]
+    @Published private(set) var previewFailuresByNodeID: [String: String] = [:]
     /// One static frame per node id, captured at compile time — the tree's row swatches.
     @Published private(set) var snapshots: [String: CGImage] = [:]
 
@@ -277,7 +279,13 @@ final class RemixStudioModel: ObservableObject {
             if case .failed = $0.status { return true }
             return false
         }.count
-        activity = wasCancelled ? .cancelled : .completed(failed: failed)
+        if wasCancelled {
+            activity = .cancelled
+        } else if failed > 0 {
+            activity = .partialFailure(total: currentBatch.count, failed: failed)
+        } else {
+            activity = .completed(failed: 0)
+        }
         updateBatchRecord(round: r, nodes: currentBatch)
         persistSession()
     }
@@ -308,6 +316,8 @@ final class RemixStudioModel: ObservableObject {
         placeholder.status = .generating
         currentBatch[currentIndex] = placeholder
         lineage.insert(placeholder)
+        compileDiagnosticsByNodeID.removeValue(forKey: id)
+        previewFailuresByNodeID.removeValue(forKey: id)
         isGenerating = true
         activity = .generating(total: 1, completed: 0, lastEventAt: nil)
         persistSession()
@@ -415,10 +425,60 @@ final class RemixStudioModel: ObservableObject {
     /// Card preview reports the real compile outcome; update status in the batch and the lineage.
     func markCompileResult(id: String, valid: Bool, error: String?) {
         guard var node = lineage.node(id) else { return }
-        node.status = valid ? .compiled : .failed(error ?? "compile failed")
+        let diagnostic = error ?? "compile failed"
+        node.status = valid ? .compiled : .failed(diagnostic)
+        if valid {
+            compileDiagnosticsByNodeID.removeValue(forKey: id)
+        } else {
+            compileDiagnosticsByNodeID[id] = diagnostic
+        }
+        previewFailuresByNodeID.removeValue(forKey: id)
         lineage.insert(node)
         if let i = currentBatch.firstIndex(where: { $0.id == id }) { currentBatch[i] = node }
+        for batchIndex in batchHistory.indices {
+            if let nodeIndex = batchHistory[batchIndex].nodes.firstIndex(where: { $0.id == id }) {
+                batchHistory[batchIndex].nodes[nodeIndex] = node
+            }
+        }
+        if !valid {
+            activity = .childFailed(id: id, message: "Compile failed: \(diagnostic)")
+        }
         persistSession()
+    }
+
+    func compileDiagnostic(for id: String) -> String? {
+        guard let node = lineage.node(id),
+              case .failed = node.status
+        else {
+            return nil
+        }
+        return compileDiagnosticsByNodeID[id]
+    }
+
+    func compileSalvageActions(for id: String) -> [RemixCompileSalvageAction] {
+        guard compileDiagnostic(for: id) != nil else { return [] }
+        return [
+            .viewCompileSummary,
+            .openSourceInEditorToFix,
+            .copyDiagnostic,
+            .retryThisChild,
+        ]
+    }
+
+    func markPreviewFailure(id: String, message: String) {
+        guard lineage.node(id)?.status == .compiled else { return }
+        previewFailuresByNodeID[id] = message
+    }
+
+    func previewFailureActions(for id: String) -> [RemixPreviewFailureAction] {
+        guard previewFailuresByNodeID[id] != nil else { return [] }
+        return [.retryPreview, .openInEditor]
+    }
+
+    /// Requests a renderer-only retry by clearing its failure latch. The card observes this
+    /// published dictionary and rebuilds its preview without touching provider or generation state.
+    func retryPreview(id: String) {
+        previewFailuresByNodeID.removeValue(forKey: id)
     }
 
     // MARK: live-preview cap (performance)
@@ -487,6 +547,7 @@ final class RemixStudioModel: ObservableObject {
                 selectedNodeID = session.selectedLineageNodeID
                 crossoverSettings = session.crossoverSettings
                 activity = Self.restoredActivity(session.activity)
+                compileDiagnosticsByNodeID = session.compileDiagnosticsByNodeID ?? [:]
                 pendingParentRequest = Self.restoredParentRequest(session.pendingParentRequest)
                 if let pendingParentRequest,
                    let request = RemixParentRequest(snapshot: pendingParentRequest) {
@@ -525,6 +586,7 @@ final class RemixStudioModel: ObservableObject {
             selectedLineageNodeID: selectedNodeID,
             crossoverSettings: crossoverSettings,
             activity: activity,
+            compileDiagnosticsByNodeID: compileDiagnosticsByNodeID,
             pendingParentRequest: pendingParentRequest,
             transcript: transcript
         )
@@ -557,6 +619,8 @@ final class RemixStudioModel: ObservableObject {
         pendingParentRequest = nil
         parentLoadState = .idle
         recoveryNotice = nil
+        compileDiagnosticsByNodeID = [:]
+        previewFailuresByNodeID = [:]
         snapshots = [:]
         round = 0
         seedCounter = 0

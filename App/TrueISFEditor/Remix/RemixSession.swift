@@ -60,6 +60,8 @@ struct RemixSession: Codable, Equatable {
     var selectedLineageNodeID: String?
     var crossoverSettings: RemixCrossoverSettings
     var activity: RemixActivityState
+    /// Optional so sessions written before compile provenance existed remain decodable.
+    var compileDiagnosticsByNodeID: [String: String]? = nil
     var pendingParentRequest: RemixParentRequestSnapshot?
     var transcript: [String]
 

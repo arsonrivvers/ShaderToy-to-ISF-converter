@@ -12,3 +12,101 @@ enum RemixActivityState: Codable, Equatable {
     case completed(failed: Int)
     case cancelled
 }
+
+struct RemixActivitySummary: Equatable {
+    let compactStatus: String
+    let accessibilityAnnouncement: String
+}
+
+enum RemixCompileSalvageAction: String, Codable, Equatable {
+    case viewCompileSummary = "View Compile Summary"
+    case openSourceInEditorToFix = "Open Source in Editor to Fix"
+    case copyDiagnostic = "Copy Diagnostic"
+    case retryThisChild = "Retry This Child"
+}
+
+enum RemixPreviewFailureAction: String, Codable, Equatable {
+    case retryPreview = "Retry Preview"
+    case openInEditor = "Open in Editor"
+}
+
+extension RemixActivityState {
+    var summary: RemixActivitySummary {
+        switch self {
+        case .idle:
+            return RemixActivitySummary(
+                compactStatus: "Ready",
+                accessibilityAnnouncement: "Remix Studio is ready."
+            )
+        case .generating(let total, let completed, _):
+            return RemixActivitySummary(
+                compactStatus: "Generating \(completed) of \(total)",
+                accessibilityAnnouncement:
+                    "Generating batch. \(completed) of \(total) children complete."
+            )
+        case .quiet(let total, let completed, _):
+            return RemixActivitySummary(
+                compactStatus: "Generating \(completed) of \(total), quiet",
+                accessibilityAnnouncement:
+                    "Generating batch. \(completed) of \(total) children complete. "
+                    + "The provider is quiet but still working."
+            )
+        case .verificationRequired(let slot, _):
+            let parent = Self.parentName(slot)
+            return RemixActivitySummary(
+                compactStatus: "Verification required for \(parent)",
+                accessibilityAnnouncement:
+                    "Verification required for \(parent). "
+                    + "Complete the visible security check to continue."
+            )
+        case .resuming(let slot, _):
+            let parent = Self.parentName(slot)
+            return RemixActivitySummary(
+                compactStatus: "Resuming \(parent) import",
+                accessibilityAnnouncement:
+                    "Verification cleared. Resuming the \(parent) import."
+            )
+        case .childFailed(let id, let message):
+            return RemixActivitySummary(
+                compactStatus: "\(id) failed",
+                accessibilityAnnouncement: "\(id) failed. \(message)"
+            )
+        case .partialFailure(let total, let failed):
+            return RemixActivitySummary(
+                compactStatus: "\(failed) of \(total) children failed",
+                accessibilityAnnouncement:
+                    "Batch finished with \(failed) of \(total) children failed."
+            )
+        case .interrupted:
+            return RemixActivitySummary(
+                compactStatus: "Generation interrupted",
+                accessibilityAnnouncement:
+                    "Generation was interrupted. The original inputs are available to retry."
+            )
+        case .completed(let failed):
+            if failed > 0 {
+                return RemixActivitySummary(
+                    compactStatus: "\(failed) children failed",
+                    accessibilityAnnouncement:
+                        "Generation finished with \(failed) children failed."
+                )
+            }
+            return RemixActivitySummary(
+                compactStatus: "Generation complete",
+                accessibilityAnnouncement: "Generation complete."
+            )
+        case .cancelled:
+            return RemixActivitySummary(
+                compactStatus: "Generation cancelled",
+                accessibilityAnnouncement: "Generation cancelled."
+            )
+        }
+    }
+
+    private static func parentName(_ slot: ParentSlot) -> String {
+        switch slot {
+        case .a: return "Parent A"
+        case .b: return "Parent B"
+        }
+    }
+}
