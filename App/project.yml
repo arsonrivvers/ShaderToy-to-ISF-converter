@@ -108,6 +108,8 @@ targets:
       - TrueISFEditor/Remix/RemixTreeBuilder.swift
       - TrueISFEditor/Remix/RemixCrossoverSettings.swift
       - TrueISFEditor/Remix/TextureSnapshot.swift
+      - TrueISFEditor/Remix/RemixWorkspaceState.swift
+      - TrueISFEditor/Remix/RemixSplitLayout.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
       - TrueISFEditor/ISFSceneSource.swift
