@@ -23,6 +23,13 @@ enum WebFetchError: Error, Equatable {
 ///     interactive challenge), then hide it.
 @MainActor
 final class WebKitShaderFetcher: NSObject {
+    enum State: Equatable {
+        case loading
+        case verificationRequired
+        case cleared
+        case failed(String)
+    }
+
     private let webView: WKWebView
     private let window: NSWindow
 
@@ -85,14 +92,30 @@ final class WebKitShaderFetcher: NSObject {
     }
 
     func fetchShader(id: String) async throws -> Shader {
+        try await fetchShader(id: id, onState: { _ in })
+    }
+
+    func fetchShader(
+        id: String,
+        onState: @MainActor (State) -> Void
+    ) async throws -> Shader {
+        var completed = false
+        defer {
+            if !completed {
+                onState(.failed("fetch failed"))
+            }
+        }
         // Reset per fetch: a stale value would attribute the PREVIOUS fetch's HTTP status to this
         // one in the import log (e.g. a challenge-timeout logging the prior fetch's 200).
         lastResponseStatus = -1
-        guard let url = URL(string: "https://www.shadertoy.com/view/\(id)") else { throw WebFetchError.badID }
+        guard let url = URL(string: "https://www.shadertoy.com/view/\(id)") else {
+            throw WebFetchError.badID
+        }
         window.title = "Fetching from Shadertoy… (if a checkbox appears, click it)"
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         defer { window.orderOut(nil) }
+        onState(.loading)
 
         // Retry transient failures once (Cloudflare challenges and 429/5xx are often transient):
         // reload and try again. Definitive outcomes (parse = not-found/private, badID, other HTTP)
@@ -101,9 +124,11 @@ final class WebKitShaderFetcher: NSObject {
         for attempt in 0..<2 {
             do {
                 if attempt == 0 { webView.load(URLRequest(url: url)) } else { webView.reload() }
-                try await waitUntilReady(timeout: 20)
+                try await waitUntilReady(timeout: 20, onState: onState)
                 let json = try await runInPageFetch(id: id)
-                return try ShadertoyInternalParser.parse(Data(json.utf8))
+                let shader = try ShadertoyInternalParser.parse(Data(json.utf8))
+                completed = true
+                return shader
             } catch let e as WebFetchError {
                 lastError = e
                 switch e {
@@ -120,23 +145,59 @@ final class WebKitShaderFetcher: NSObject {
 
     /// Polls the page until Cloudflare's interstitial is gone AND we're positively on shadertoy.com
     /// (so a redirect/error page isn't mistaken for a loaded shader). Throws `challengeTimeout`.
-    private func waitUntilReady(timeout: TimeInterval) async throws {
-        let start = Date()
+    private func waitUntilReady(
+        timeout: TimeInterval,
+        onState: @MainActor (State) -> Void = { _ in }
+    ) async throws {
+        try await Self.waitForReadiness(
+            timeout: timeout,
+            now: { Date().timeIntervalSinceReferenceDate },
+            sleep: { try await Task.sleep(nanoseconds: 600_000_000) },
+            pageInfo: {
+                let info = (try? await webView.evaluateJavaScript(
+                    "JSON.stringify({t: document.title, h: location.hostname})")) as? String ?? ""
+                let (title, host) = Self.parseReadyInfo(info)
+                lastTitle = title
+                lastURL = webView.url?.absoluteString ?? "(nil)"
+                lastBody = ((try? await webView.evaluateJavaScript(
+                    "(document.body ? document.body.innerText : '').slice(0,400)")) as? String ?? "")
+                    .replacingOccurrences(of: "\n", with: " | ")
+                return (title, host)
+            },
+            onState: onState
+        )
+        try await Task.sleep(nanoseconds: 400_000_000)   // let scripts settle
+    }
+
+    /// Ordinary network loads retain a bounded deadline. Once an interactive verification page is
+    /// positively identified on Shadertoy, that deadline no longer owns the handoff: the visible
+    /// page remains available until legitimate clearance or task/user cancellation.
+    static func waitForReadiness(
+        timeout: TimeInterval,
+        now: () -> TimeInterval,
+        sleep: () async throws -> Void,
+        pageInfo: () async -> (title: String, host: String),
+        onState: @MainActor (State) -> Void
+    ) async throws {
+        let start = now()
         let challengeTitles: Set<String> = ["Just a moment...", "Just a moment…", ""]
-        while Date().timeIntervalSince(start) < timeout {
-            try await Task.sleep(nanoseconds: 600_000_000)
-            let info = (try? await webView.evaluateJavaScript(
-                "JSON.stringify({t: document.title, h: location.hostname})")) as? String ?? ""
-            let (title, host) = Self.parseReadyInfo(info)
-            lastTitle = title
-            lastURL = webView.url?.absoluteString ?? "(nil)"
-            lastBody = ((try? await webView.evaluateJavaScript(
-                "(document.body ? document.body.innerText : '').slice(0,400)")) as? String ?? "")
-                .replacingOccurrences(of: "\n", with: " | ")
-            // Positive readiness: on shadertoy.com AND past the challenge interstitial.
+        var waitingForHuman = false
+        var reportedVerification = false
+
+        while waitingForHuman || now() - start < timeout {
+            try Task.checkCancellation()
+            try await sleep()
+            let (title, host) = await pageInfo()
             if host.hasSuffix("shadertoy.com"), !challengeTitles.contains(title) {
-                try await Task.sleep(nanoseconds: 400_000_000)   // let scripts settle
+                onState(.cleared)
                 return
+            }
+            if host.hasSuffix("shadertoy.com"),
+               challengeTitles.contains(title),
+               !reportedVerification {
+                reportedVerification = true
+                waitingForHuman = true
+                onState(.verificationRequired)
             }
         }
         throw WebFetchError.challengeTimeout

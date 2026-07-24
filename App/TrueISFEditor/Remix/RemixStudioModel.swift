@@ -28,6 +28,7 @@ final class RemixStudioModel: ObservableObject {
     @Published var workspace = RemixWorkspaceState() { didSet { scheduleAutosave() } }
     @Published private(set) var activity = RemixActivityState.idle
     @Published private(set) var pendingParentRequest: RemixParentRequestSnapshot?
+    @Published private(set) var parentLoadState = RemixParentLoadState.idle
     @Published private(set) var recoveryNotice: URL?
     /// One static frame per node id, captured at compile time — the tree's row swatches.
     @Published private(set) var snapshots: [String: CGImage] = [:]
@@ -54,6 +55,8 @@ final class RemixStudioModel: ObservableObject {
     private var sessionIdentity = UUID()
     private var activeGenerationID: UUID?
     private var cancelledGenerationIDs: Set<UUID> = []
+    private var activeParentRequestID: UUID?
+    private var parentLoadTask: Task<Void, Never>?
 
     init(
         generator: RemixGenerator,
@@ -108,6 +111,69 @@ final class RemixStudioModel: ObservableObject {
     func clearParent(_ slot: ParentSlot) {
         switch slot { case .a: parentAID = nil; case .b: parentBID = nil }
         scheduleAutosave()
+    }
+
+    func loadParent(
+        _ request: RemixParentRequest,
+        from resolver: RemixParentResolver
+    ) {
+        parentLoadTask?.cancel()
+        activeParentRequestID = request.id
+        parentLoadState = .fetching(request)
+        pendingParentRequest = Self.persistedParentRequest(request, phase: .fetching)
+        persistSession()
+        parentLoadTask = Task { [weak self] in
+            await self?.performParentLoad(request, from: resolver)
+        }
+    }
+
+    private func performParentLoad(
+        _ request: RemixParentRequest,
+        from resolver: RemixParentResolver
+    ) async {
+        do {
+            let isf = try await resolver.resolve(request.spec) { [weak self] state in
+                self?.receiveParentFetchState(state, requestID: request.id)
+            }
+            guard activeParentRequestID == request.id else { return }
+            parentLoadState = parentLoadState.transitioning(
+                to: .converting,
+                requestID: request.id
+            )
+            pendingParentRequest = Self.persistedParentRequest(request, phase: .converting)
+            persistSession()
+            guard activeParentRequestID == request.id else { return }
+            setParent(request.slot, isf: isf, label: Self.parentLabel(for: request.spec))
+            parentLoadState = parentLoadState.transitioning(
+                to: .succeeded,
+                requestID: request.id
+            )
+            pendingParentRequest = nil
+            activeParentRequestID = nil
+            parentLoadTask = nil
+            activity = .idle
+            persistSession()
+        } catch {
+            guard activeParentRequestID == request.id else { return }
+            parentLoadState = .failed(request, message: String(describing: error))
+            pendingParentRequest = Self.persistedParentRequest(request, phase: .waitingForHuman)
+            activeParentRequestID = nil
+            parentLoadTask = nil
+            persistSession()
+        }
+    }
+
+    @discardableResult
+    func cancelParentLoad() -> RemixParentFocusTarget? {
+        guard let request = parentLoadState.request else { return nil }
+        parentLoadTask?.cancel()
+        parentLoadTask = nil
+        activeParentRequestID = nil
+        parentLoadState = .cancelled(request)
+        pendingParentRequest = Self.persistedParentRequest(request, phase: .waitingForHuman)
+        activity = .cancelled
+        persistSession()
+        return parentLoadState.focusTarget
     }
 
     // MARK: generation
@@ -301,6 +367,12 @@ final class RemixStudioModel: ObservableObject {
                 crossoverSettings = session.crossoverSettings
                 activity = Self.restoredActivity(session.activity)
                 pendingParentRequest = Self.restoredParentRequest(session.pendingParentRequest)
+                if let pendingParentRequest,
+                   let request = RemixParentRequest(snapshot: pendingParentRequest) {
+                    parentLoadState = .waitingForHuman(request)
+                } else {
+                    parentLoadState = .idle
+                }
                 transcript = session.transcript
                 isGenerating = false
             }
@@ -340,6 +412,9 @@ final class RemixStudioModel: ObservableObject {
 
     func startNewSession() {
         generationTask?.cancel()
+        activeParentRequestID = nil
+        parentLoadTask?.cancel()
+        parentLoadTask = nil
         sessionIdentity = UUID()
         activeGenerationID = nil
         cancelledGenerationIDs = []
@@ -359,6 +434,7 @@ final class RemixStudioModel: ObservableObject {
         workspace = RemixWorkspaceState()
         activity = .idle
         pendingParentRequest = nil
+        parentLoadState = .idle
         recoveryNotice = nil
         snapshots = [:]
         round = 0
@@ -406,6 +482,66 @@ final class RemixStudioModel: ObservableObject {
         case .verificationRequired, .waitingForHuman:
             return request
         }
+    }
+
+    private func receiveParentFetchState(
+        _ state: WebKitShaderFetcher.State,
+        requestID: UUID
+    ) {
+        guard activeParentRequestID == requestID,
+              let request = parentLoadState.request
+        else {
+            return
+        }
+        switch state {
+        case .loading:
+            break
+        case .verificationRequired:
+            parentLoadState = parentLoadState.transitioning(
+                to: .verificationRequired,
+                requestID: requestID
+            )
+            activity = .verificationRequired(slot: request.slot, requestID: requestID)
+            pendingParentRequest = request.snapshot(phase: .verificationRequired)
+            parentLoadState = parentLoadState.transitioning(
+                to: .waitingForHuman,
+                requestID: requestID
+            )
+            pendingParentRequest = request.snapshot(phase: .waitingForHuman)
+        case .cleared:
+            parentLoadState = parentLoadState.transitioning(to: .cleared, requestID: requestID)
+            if case .resuming = parentLoadState {
+                activity = .resuming(slot: request.slot, requestID: requestID)
+                pendingParentRequest = request.snapshot(phase: .resuming)
+            }
+        case .failed(let message):
+            parentLoadState = parentLoadState.transitioning(
+                to: .failed(message),
+                requestID: requestID
+            )
+        }
+        persistSession()
+    }
+
+    private static func parentLabel(for spec: ParentSpec) -> String {
+        switch spec {
+        case .pastedISF:
+            return "pasted"
+        case .libraryFile(let url):
+            return url.deletingPathExtension().lastPathComponent
+        case .shadertoyLink:
+            return "shadertoy"
+        case .currentEditor:
+            return "editor"
+        }
+    }
+
+    private static func persistedParentRequest(
+        _ request: RemixParentRequest,
+        phase: RemixParentRequestPhase
+    ) -> RemixParentRequestSnapshot? {
+        guard case .shadertoyLink = request.spec else { return nil }
+        return request.snapshot(phase: phase)
     }
 
     private static func restoredActivity(_ activity: RemixActivityState) -> RemixActivityState {
