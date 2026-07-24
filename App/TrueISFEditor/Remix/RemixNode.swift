@@ -1,9 +1,14 @@
 import Foundation
 
-enum RemixMode: String, Equatable, CaseIterable { case crossover, mutate }
+enum RemixMode: String, Codable, Equatable, CaseIterable { case crossover, mutate }
 
-struct RemixNode: Identifiable, Equatable {
-    enum Status: Equatable { case generating, compiled, failed(String) }
+struct RemixNode: Identifiable, Codable, Equatable {
+    enum Status: Codable, Equatable {
+        case generating
+        case compiled
+        case interrupted
+        case failed(String)
+    }
     let id: String
     var isfSource: String
     var parents: [String]

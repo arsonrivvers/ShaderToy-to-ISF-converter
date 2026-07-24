@@ -227,6 +227,12 @@ struct RemixStudioView: View {
                 switch node.status {
                 case .generating:
                     ProgressView().controlSize(.small)
+                case .interrupted:
+                    VStack {
+                        Image(systemName: "pause.circle")
+                        Text("Interrupted").font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
                 case .failed(let msg):
                     VStack { Image(systemName: "exclamationmark.triangle"); Text(msg).font(.caption2).lineLimit(2) }
                         .foregroundStyle(.orange).padding(4)

@@ -3,7 +3,7 @@ import Combine
 import CoreGraphics
 
 /// Which parent slot a source/child fills.
-enum ParentSlot { case a, b }
+enum ParentSlot: String, Codable, Equatable { case a, b }
 
 /// Owns the Remix Studio state and drives the Module 1 generator. Parents are real lineage nodes
 /// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
