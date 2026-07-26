@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+enum RemixAccessibilityAnnouncement {
+    @discardableResult
+    static func post(_ message: String, application: NSApplication?) -> Bool {
+        guard let application else { return false }
+        NSAccessibility.post(
+            element: application,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
+        return true
+    }
+}
+
 struct RemixActivityDrawerView: View {
     @ObservedObject var model: RemixStudioModel
     let openInEditor: (String) -> Void
@@ -59,7 +75,12 @@ struct RemixActivityDrawerView: View {
                                 id: \.offset
                             ) { _, line in
                                 Text(line)
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(
+                                        .system(
+                                            size: RemixTextPolicy.basePointSize,
+                                            design: .monospaced
+                                        )
+                                    )
                                     .textSelection(.enabled)
                             }
                         }
@@ -80,14 +101,7 @@ struct RemixActivityDrawerView: View {
                 from: announcedActivity,
                 to: activity
             ) {
-                NSAccessibility.post(
-                    element: NSApp!,
-                    notification: .announcementRequested,
-                    userInfo: [
-                        .announcement: message,
-                        .priority: NSAccessibilityPriorityLevel.medium.rawValue,
-                    ]
-                )
+                RemixAccessibilityAnnouncement.post(message, application: NSApp)
             }
             announcedActivity = activity
         }

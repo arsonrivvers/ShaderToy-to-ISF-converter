@@ -2,6 +2,43 @@ import XCTest
 @testable import TrueISFEditor
 
 final class RemixLineagePresentationTests: XCTestCase {
+    func test_salvageButtonIdentity_isStableAndSemantic() {
+        let first = RemixSalvageButton(title: "Retry Preview") {}
+        let second = RemixSalvageButton(title: "Retry Preview") {}
+
+        XCTAssertEqual(first.id, "Retry Preview")
+        XCTAssertEqual(second.id, first.id)
+    }
+
+    func test_focusedCanvasActions_explainWhyUnavailableWithoutFocus() {
+        let unavailable = RemixCanvasFocusedActionAvailability(focusedChildID: nil)
+        XCTAssertFalse(unavailable.isEnabled)
+        XCTAssertEqual(
+            unavailable.reason,
+            "Focus a child card to use focused child actions."
+        )
+
+        let available = RemixCanvasFocusedActionAvailability(focusedChildID: "child-1")
+        XCTAssertTrue(available.isEnabled)
+        XCTAssertNil(available.reason)
+    }
+
+    func test_accessibilityAnnouncementSafelySkipsMissingApplication() {
+        XCTAssertFalse(
+            RemixAccessibilityAnnouncement.post(
+                "Generation completed.",
+                application: nil
+            )
+        )
+    }
+
+    func test_emptyCanvasInstruction_canGrowVerticallyAtNarrowWidths() {
+        XCTAssertNil(RemixCanvasEmptyStatePolicy.instructionLineLimit)
+        XCTAssertTrue(RemixCanvasEmptyStatePolicy.usesFixedVerticalSize)
+        XCTAssertTrue(RemixCanvasEmptyStatePolicy.fillsAvailableHeight)
+        XCTAssertEqual(RemixCanvasEmptyStatePolicy.horizontalPadding, 16)
+    }
+
     private func node(
         id: String,
         parents: [String] = [],

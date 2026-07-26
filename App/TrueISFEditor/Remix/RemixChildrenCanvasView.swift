@@ -38,6 +38,22 @@ enum RemixCanvasWidthPolicy {
     }
 }
 
+enum RemixCanvasEmptyStatePolicy {
+    static let instructionLineLimit: Int? = nil
+    static let usesFixedVerticalSize = true
+    static let fillsAvailableHeight = true
+    static let horizontalPadding: CGFloat = 16
+}
+
+struct RemixCanvasFocusedActionAvailability: Equatable {
+    let focusedChildID: String?
+
+    var isEnabled: Bool { focusedChildID != nil }
+    var reason: String? {
+        isEnabled ? nil : "Focus a child card to use focused child actions."
+    }
+}
+
 struct RemixChildrenCanvasView: View {
     @ObservedObject var model: RemixStudioModel
     let openInEditor: (String) -> Void
@@ -60,6 +76,7 @@ struct RemixChildrenCanvasView: View {
             Divider()
             content
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .focusable()
         .focused($canvasFocused)
         .background(
@@ -178,18 +195,27 @@ struct RemixChildrenCanvasView: View {
 
     @ViewBuilder
     private var focusedCommands: some View {
+        let availability = RemixCanvasFocusedActionAvailability(
+            focusedChildID: model.workspace.focusedChildID
+        )
         Button("Compare Focused") {
             model.routeCanvasCommand(.toggleComparison, columns: gridColumnCount)
         }
-        .help("Space while a child card is focused")
+        .disabled(!availability.isEnabled)
+        .help(availability.reason ?? "Space while a child card is focused")
+        .accessibilityHint(availability.reason ?? "Space while a child card is focused")
         Button("Favorite Focused") {
             model.routeCanvasCommand(.favorite, columns: gridColumnCount)
         }
-        .help("F while a child card is focused")
+        .disabled(!availability.isEnabled)
+        .help(availability.reason ?? "F while a child card is focused")
+        .accessibilityHint(availability.reason ?? "F while a child card is focused")
         Button("Show Focused as Hero") {
             model.routeCanvasCommand(.hero, columns: gridColumnCount)
         }
-        .help("Return while a child card is focused")
+        .disabled(!availability.isEnabled)
+        .help(availability.reason ?? "Return while a child card is focused")
+        .accessibilityHint(availability.reason ?? "Return while a child card is focused")
     }
 
     @ViewBuilder
@@ -203,6 +229,10 @@ struct RemixChildrenCanvasView: View {
                     .font(.title2.bold())
                 Text("Add the required parents in the Breeding Bay, then choose Generate.")
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(RemixCanvasEmptyStatePolicy.instructionLineLimit)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, RemixCanvasEmptyStatePolicy.horizontalPadding)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

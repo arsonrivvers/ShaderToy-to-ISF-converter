@@ -25,6 +25,8 @@ enum RemixActionFontContainer: Equatable {
     case workspaceToolbar
     case reopenControls
     case resizeMenus
+    case lineageInspector
+    case activityDrawer
 }
 
 enum RemixTextPolicy {
@@ -38,6 +40,8 @@ enum RemixTextPolicy {
         .workspaceToolbar,
         .reopenControls,
         .resizeMenus,
+        .lineageInspector,
+        .activityDrawer,
     ]
     static let bodyFont = Font.custom(
         ".AppleSystemUIFont",

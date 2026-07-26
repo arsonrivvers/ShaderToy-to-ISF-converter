@@ -124,6 +124,44 @@ final class RemixParentLoadStateTests: XCTestCase {
         }
     }
 
+    func test_readyPageOnLookalikeHost_isRejected() async {
+        var elapsed: TimeInterval = 0
+        var states: [WebKitShaderFetcher.State] = []
+
+        do {
+            try await WebKitShaderFetcher.waitForReadiness(
+                timeout: 20,
+                now: { elapsed },
+                sleep: { elapsed += 10 },
+                pageInfo: { (title: "Shader abc123", host: "evilshadertoy.com") },
+                onState: { states.append($0) }
+            )
+            XCTFail("expected timeout")
+        } catch {
+            XCTAssertEqual(error as? WebFetchError, .challengeTimeout)
+            XCTAssertEqual(states, [])
+        }
+    }
+
+    func test_challengePageOnLookalikeHost_neverEntersHumanHandoff() async {
+        var elapsed: TimeInterval = 0
+        var states: [WebKitShaderFetcher.State] = []
+
+        do {
+            try await WebKitShaderFetcher.waitForReadiness(
+                timeout: 20,
+                now: { elapsed },
+                sleep: { elapsed += 10 },
+                pageInfo: { (title: "Just a moment...", host: "evilshadertoy.com") },
+                onState: { states.append($0) }
+            )
+            XCTFail("expected timeout")
+        } catch {
+            XCTAssertEqual(error as? WebFetchError, .challengeTimeout)
+            XCTAssertEqual(states, [])
+        }
+    }
+
     func test_cancelParentLoad_cancelsOwnedTaskAndIgnoresLateResult() async throws {
         let probe = ParentLoadCancellationProbe()
         let resolver = RemixParentResolver(

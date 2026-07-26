@@ -27,11 +27,13 @@ struct RemixLineageTreeView: View {
             .help(model.undoParentChangeReason ?? "Restore the parent configuration used by the prior round.")
             if let reason = model.undoParentChangeReason {
                 Text(reason)
-                    .font(.caption)
+                    .font(RemixTextPolicy.bodyFont)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Lineage: \(model.lineage.order.count) nodes").font(.caption2).foregroundStyle(.secondary)
+            Text("Lineage: \(model.lineage.order.count) nodes")
+                .font(RemixTextPolicy.bodyFont)
+                .foregroundStyle(.secondary)
         }
         .padding(10)
     }
@@ -41,7 +43,7 @@ struct RemixLineageTreeView: View {
             Text("Lineage").font(.headline)
             Spacer()
             Toggle("★ only", isOn: $favoritesOnly)
-                .toggleStyle(.button).font(.caption).controlSize(.small)
+                .toggleStyle(.button).font(RemixTextPolicy.bodyFont).controlSize(.small)
         }
     }
 
@@ -51,7 +53,7 @@ struct RemixLineageTreeView: View {
             LazyVStack(alignment: .leading, spacing: 2) {
                 if rows.isEmpty {
                     Text(emptyHint)
-                        .font(.caption).foregroundStyle(.tertiary)
+                        .font(RemixTextPolicy.bodyFont).foregroundStyle(.tertiary)
                         .padding(.top, 8)
                 } else {
                     ForEach(rows) { row in treeRow(row) }
@@ -105,7 +107,7 @@ struct RemixLineageTreeView: View {
                     .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
-                .font(.caption2)
+                .font(RemixTextPolicy.bodyFont)
                 .frame(width: 20, height: 20)
                 .help(
                     (isCollapsed
@@ -116,7 +118,7 @@ struct RemixLineageTreeView: View {
                 Spacer().frame(width: 20)
             }
             swatch(row.id)
-            Text(node.label ?? row.id).font(.caption).lineLimit(1)
+            Text(node.label ?? row.id).font(RemixTextPolicy.bodyFont).lineLimit(1)
             if let sec = row.secondaryParentID, let secNode = model.lineage.node(sec) {
                 Button {
                     model.selectedNodeID = sec
@@ -126,7 +128,7 @@ struct RemixLineageTreeView: View {
                         "\(RemixLineagePresentation.RowAction.selectSecondary.rawValue): "
                         + "\(secNode.label ?? sec)"
                     )
-                    .font(.caption2)
+                    .font(RemixTextPolicy.bodyFont)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -137,7 +139,7 @@ struct RemixLineageTreeView: View {
             }
             if model.lineage.isFavorite(row.id) {
                 Image(systemName: "star.fill")
-                    .font(.caption2)
+                    .font(RemixTextPolicy.bodyFont)
                     .foregroundStyle(.yellow)
                     .accessibilityHidden(true)
             }
@@ -243,7 +245,9 @@ struct RemixLineageTreeView: View {
             if let img = model.snapshots[id] {
                 Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Image(systemName: "photo").font(.caption2).foregroundStyle(.tertiary)
+                Image(systemName: "photo")
+                    .font(RemixTextPolicy.bodyFont)
+                    .foregroundStyle(.tertiary)
             }
         }
         .frame(width: 24, height: 16)
@@ -257,7 +261,9 @@ struct RemixLineageTreeView: View {
         )
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(node.label ?? node.id).font(.caption.bold()).lineLimit(1)
+                Text(node.label ?? node.id)
+                    .font(RemixTextPolicy.bodyFont.bold())
+                    .lineLimit(1)
                 Spacer()
                 Button(RemixLineagePresentation.RowAction.deselect.rawValue) {
                     model.selectedNodeID = nil
@@ -275,7 +281,10 @@ struct RemixLineageTreeView: View {
                                onSnapshot: { img in model.storeSnapshot(id: node.id, image: img) }) { _, _ in }
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text(node.directive).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            Text(node.directive)
+                .font(RemixTextPolicy.bodyFont)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(actions.filter { $0 != .deselect }, id: \.rawValue) { action in
                     Button(action.rawValue) {

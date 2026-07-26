@@ -202,11 +202,11 @@ final class WebKitShaderFetcher: NSObject {
             try Task.checkCancellation()
             try await sleep()
             let (title, host) = await pageInfo()
-            if host.hasSuffix("shadertoy.com"), !challengeTitles.contains(title) {
+            if isTrustedShadertoyHost(host), !challengeTitles.contains(title) {
                 onState(.cleared)
                 return
             }
-            if host.hasSuffix("shadertoy.com"),
+            if isTrustedShadertoyHost(host),
                challengeTitles.contains(title),
                !reportedVerification {
                 reportedVerification = true
@@ -215,6 +215,10 @@ final class WebKitShaderFetcher: NSObject {
             }
         }
         throw WebFetchError.challengeTimeout
+    }
+
+    private static func isTrustedShadertoyHost(_ host: String) -> Bool {
+        host == "shadertoy.com" || host.hasSuffix(".shadertoy.com")
     }
 
     private static func parseReadyInfo(_ json: String) -> (title: String, host: String) {

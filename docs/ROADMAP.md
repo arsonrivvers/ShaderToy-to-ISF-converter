@@ -94,6 +94,14 @@ Ranked by payoff:
     MECHANISM landed in Plan 2 (bundled `/templates` folder + `TemplateCatalog` + File ▸ New
     from Template); generic starters + header autocomplete remain open._
 11. **Shortcut pass:** jump-to-next-error, apply-fix key, focus-editor key.
+12. ~~**Accessible Remix Studio workspace.**~~ **LANDED (2026-07-26, STAGED).** Persistent
+    three-zone breeding, canvas, lineage, and activity workspace; explicit Parent A/B targeting;
+    adaptive Grid, synchronized 2-up, and Hero views; session restore and immutable retry
+    requests; structured compile/preview recovery; keyboard resize, collapse, focus, and reset;
+    scalable 14pt-minimum text and VoiceOver status/action language. Shadertoy verification uses
+    a visible human handoff with exact-slot resume and persistent legitimate clearance, never
+    synthetic checkbox or AXPress automation. Ordinary-interaction acceptance remains STAGED
+    until Conner completes the on-device checklist.
 
 ## Conversion pipeline (parallel track, independent of A/B/D)
 

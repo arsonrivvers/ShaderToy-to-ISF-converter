@@ -169,7 +169,14 @@ final class RemixBreedingBayPresentationTests: XCTestCase {
         XCTAssertTrue(RemixTextPolicy.usesRelativeScaling)
         XCTAssertEqual(
             RemixTextPolicy.actionContainers,
-            [.breedingBay, .workspaceToolbar, .reopenControls, .resizeMenus]
+            [
+                .breedingBay,
+                .workspaceToolbar,
+                .reopenControls,
+                .resizeMenus,
+                .lineageInspector,
+                .activityDrawer,
+            ]
         )
         XCTAssertNil(RemixTextPolicy.criticalTextLineLimit)
         XCTAssertTrue(RemixTextPolicy.allowsFlexibleVerticalGrowth)

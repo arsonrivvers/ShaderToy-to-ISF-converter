@@ -189,8 +189,8 @@ struct RemixChildCardView: View {
     }
 }
 
-private struct RemixSalvageButton: Identifiable {
-    let id = UUID()
+struct RemixSalvageButton: Identifiable {
+    var id: String { title }
     let title: String
     let perform: () -> Void
 }
