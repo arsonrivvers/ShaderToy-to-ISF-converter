@@ -101,83 +101,9 @@ struct RemixWorkspaceView: View {
     }
 
     private var childrenCanvas: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], spacing: 12) {
-                if model.currentBatch.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "sparkles.rectangle.stack")
-                            .font(.largeTitle)
-                            .accessibilityHidden(true)
-                        Text("Children Canvas")
-                            .font(.title2.bold())
-                        Text("Add the required parents in the Breeding Bay, then choose Generate.")
-                            .font(RemixAccessibleTextLayout.bodyFont)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(minHeight: 320)
-                } else {
-                    ForEach(Array(model.currentBatch.enumerated()), id: \.element.id) { index, node in
-                        childCard(node, position: index + 1)
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Children Canvas")
+        RemixChildrenCanvasView(model: model, openInEditor: openInEditor)
         .accessibilitySortPriority(2)
         .accessibilityFocused($focusedControl, equals: .canvas)
-    }
-
-    private func childCard(_ node: RemixNode, position: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.08))
-                switch node.status {
-                case .generating:
-                    ProgressView("Generating")
-                case .interrupted:
-                    Text("Interrupted")
-                case .failed(let message):
-                    Text("Failed: \(message)").foregroundStyle(.orange)
-                case .compiled:
-                    RemixThumbnailView(
-                        isf: node.isfSource,
-                        animating: model.shouldAnimate(node.id),
-                        onSnapshot: { model.storeSnapshot(id: node.id, image: $0) }
-                    ) { valid, error in
-                        model.markCompileResult(id: node.id, valid: valid, error: error)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-            }
-            .frame(height: 140)
-
-            Text(node.directive)
-                .font(RemixAccessibleTextLayout.bodyFont)
-                .fixedSize(horizontal: false, vertical: true)
-            Button(model.lineage.isFavorite(node.id) ? "Remove Favorite" : "Favorite") {
-                model.toggleFavorite(node.id)
-            }
-            Button("Promote to Parent A") {
-                model.promoteToParent(.a, nodeID: node.id)
-            }
-            Button("Open in Editor") {
-                openInEditor(node.isfSource)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(.background))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(RemixWorkspaceState.accessibilitySummary(
-            name: node.label ?? node.id,
-            status: statusName(node.status),
-            position: position,
-            total: model.currentBatch.count,
-            directive: node.directive,
-            actions: ["Favorite", "Promote to Parent A", "Open in Editor"]
-        ))
     }
 
     private func resizeMenu(_ zone: RemixZone) -> some View {
@@ -264,12 +190,4 @@ struct RemixWorkspaceView: View {
         }
     }
 
-    private func statusName(_ status: RemixNode.Status) -> String {
-        switch status {
-        case .generating: return "Generating"
-        case .interrupted: return "Interrupted"
-        case .failed: return "Failed"
-        case .compiled: return "Compiled"
-        }
-    }
 }

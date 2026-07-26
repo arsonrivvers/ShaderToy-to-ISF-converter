@@ -22,6 +22,7 @@ enum RemixKeyboardCommand: Equatable {
     case hero
     case promoteA
     case promoteB
+    case exitCanvasMode
 }
 
 struct RemixWorkspaceState: Codable, Equatable {

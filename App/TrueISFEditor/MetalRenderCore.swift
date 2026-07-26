@@ -33,7 +33,7 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
     private let lock = NSLock()
     // ── lock-guarded state ──
     /// B2: app-owned shader clock — survives scene swaps so recompiles don't restart TIME.
-    private let clock = RenderClock()
+    private let clock: RenderClock
     private var scene: ISFMSLScene?
     private var imageInputNames: [String] = []
     private var renderWidth = 1920   // matches EditorViewModel's 16:9 default
@@ -44,9 +44,10 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
     private var blitPipeline: MTLRenderPipelineState?
     private var blitPipelineFormat: MTLPixelFormat = .invalid
 
-    init(device: MTLDevice, renderQueue: MTLCommandQueue) {
+    init(device: MTLDevice, renderQueue: MTLCommandQueue, clock: RenderClock = RenderClock()) {
         self.device = device
         self.renderQueue = renderQueue
+        self.clock = clock
     }
 
     // MARK: main-thread API (each call serializes against the render thread via `lock`)

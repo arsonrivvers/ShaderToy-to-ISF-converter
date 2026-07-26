@@ -38,6 +38,8 @@ final class RemixStudioModel: ObservableObject {
     @Published private(set) var recoveryNotice: URL?
     @Published private(set) var compileDiagnosticsByNodeID: [String: String] = [:]
     @Published private(set) var previewFailuresByNodeID: [String: String] = [:]
+    @Published private(set) var frozenPreviewIDs: Set<String> = []
+    @Published private(set) var reduceMotionPlaybackEnabled = false
     /// One static frame per node id, captured at compile time — the tree's row swatches.
     @Published private(set) var snapshots: [String: CGImage] = [:]
 
@@ -484,6 +486,11 @@ final class RemixStudioModel: ObservableObject {
         ]
     }
 
+    func compileSummary(for id: String) -> String? {
+        guard let diagnostic = compileDiagnostic(for: id) else { return nil }
+        return "Compile summary for \(id)\n\(diagnostic)"
+    }
+
     func markPreviewFailure(id: String, message: String) {
         guard lineage.node(id)?.status == .compiled else { return }
         previewFailuresByNodeID[id] = message
@@ -502,21 +509,72 @@ final class RemixStudioModel: ObservableObject {
 
     // MARK: live-preview cap (performance)
 
-    /// Favorites always animate; remaining slots up to `maxLivePreviews` go to the most-recent
-    /// compiled, non-favorite children. Everything else freezes a single frame. Failed children
-    /// never animate.
-    func livePreviewIDs() -> Set<String> {
-        let compiled = currentBatch.filter { $0.status == .compiled }
-        var live = Set(compiled.filter { lineage.isFavorite($0.id) }.map(\.id))
-        let slots = max(0, maxLivePreviews - live.count)
-        let fillers = compiled.filter { !live.contains($0.id) }.suffix(slots)
-        live.formUnion(fillers.map(\.id))
-        return live
+    /// Strict live-preview budget. User context is prioritized before favorites and recency;
+    /// failed and explicitly frozen children are never scheduled.
+    func livePreviewIDs(reduceMotion: Bool = false) -> Set<String> {
+        guard !workspace.previewsPaused,
+              (!reduceMotion || reduceMotionPlaybackEnabled),
+              maxLivePreviews > 0
+        else {
+            return []
+        }
+        let eligible = currentBatch.filter {
+            $0.status == .compiled && !frozenPreviewIDs.contains($0.id)
+        }
+        let eligibleIDs = Set(eligible.map(\.id))
+        var priority: [String] = []
+        func append(_ id: String?) {
+            guard let id, eligibleIDs.contains(id), !priority.contains(id) else { return }
+            priority.append(id)
+        }
+        append(workspace.heroChildID)
+        workspace.comparedChildIDs.forEach { append($0) }
+        append(workspace.focusedChildID)
+        eligible.reversed()
+            .filter { lineage.isFavorite($0.id) }
+            .forEach { append($0.id) }
+        eligible.reversed().forEach { append($0.id) }
+        return Set(priority.prefix(maxLivePreviews))
     }
 
-    func shouldAnimate(_ id: String) -> Bool { livePreviewIDs().contains(id) }
+    func shouldAnimate(_ id: String, reduceMotion: Bool = false) -> Bool {
+        livePreviewIDs(reduceMotion: reduceMotion).contains(id)
+    }
+
+    func setPreviewFrozen(_ frozen: Bool, for id: String) {
+        if frozen {
+            frozenPreviewIDs.insert(id)
+        } else {
+            frozenPreviewIDs.remove(id)
+        }
+    }
+
+    func explicitlyPlayPreviews() {
+        reduceMotionPlaybackEnabled = true
+        workspace.previewsPaused = false
+    }
 
     // MARK: selection
+
+    func routeCanvasCommand(_ command: RemixKeyboardCommand, columns: Int) {
+        let childIDs = currentBatch.map(\.id)
+        switch command {
+        case .moveLeft, .moveRight, .moveUp, .moveDown:
+            workspace.moveFocus(command, columns: columns, childIDs: childIDs)
+        case .toggleComparison:
+            if let id = workspace.focusedChildID { workspace.toggleComparison(id) }
+        case .favorite:
+            if let id = workspace.focusedChildID { toggleFavorite(id) }
+        case .hero:
+            if let id = workspace.focusedChildID { workspace.showHero(id) }
+        case .promoteA:
+            if let id = workspace.focusedChildID { promoteToParent(.a, nodeID: id) }
+        case .promoteB:
+            if let id = workspace.focusedChildID { promoteToParent(.b, nodeID: id) }
+        case .exitCanvasMode:
+            workspace.showGrid()
+        }
+    }
 
     func toggleFavorite(_ id: String) {
         lineage.toggleFavorite(id)

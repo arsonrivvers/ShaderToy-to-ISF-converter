@@ -38,13 +38,22 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     private let transpileQueue = DispatchQueue(label: "isfmsl.transpile", qos: .userInitiated)
     private let tempURL: URL
     private var lastLoadedSource: String?
+    private var pendingInputJSON: [String: String] = [:]
 
-    override init() {
+    override convenience init() {
+        self.init(renderClock: nil)
+    }
+
+    init(renderClock: RenderClock?) {
         let props = RenderProperties.global()
         self.device = props.device
         self.renderQueue = props.renderQueue
         self.imageSources = SourceRouter(device: props.device, queue: props.renderQueue)
-        self.core = MetalRenderCore(device: props.device, renderQueue: props.renderQueue)
+        self.core = MetalRenderCore(
+            device: props.device,
+            renderQueue: props.renderQueue,
+            clock: renderClock ?? RenderClock()
+        )
         // Global singletons ISFMSLKit needs BEFORE any scene work:
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: props.device) }
         if ISFMSLCache.primary == nil {
@@ -175,6 +184,7 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             inputs = Self.mapInputs(s.inputs)
             imageSources.updateInputs(inputs)
             core.setScene(s, imageInputNames: inputs.filter { $0.type == "image" }.map(\.name))
+            pendingInputJSON.forEach { applyInput($0.key, $0.value) }
             // B4 NOTE: VVMTLPool.global.housekeeping() was tried here and on setRenderSize to stop
             // the pool's memory ratchet, but trimming the SHARED pool while other live controllers'
             // render threads hold in-flight pooled textures crashed the full test suite (and would
@@ -273,6 +283,11 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
     }
 
     func setInput(_ name: String, _ jsonValue: String) {
+        pendingInputJSON[name] = jsonValue
+        applyInput(name, jsonValue)
+    }
+
+    private func applyInput(_ name: String, _ jsonValue: String) {
         // Parse the JSON fragment (bool/number/array).
         guard let data = jsonValue.data(using: .utf8),
               let raw = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) else { return }
@@ -300,6 +315,31 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             // thread draws the same scene is safe; the lock here only guards the scene REFERENCE
             // against a concurrent swap, and is held for just the setValue call.
             core.withScene { $0?.setValue(val, forInputNamed: name) }
+        }
+    }
+
+    func setInput(_ name: String, _ value: RemixParameterValue) {
+        setInput(name, value.rendererJSON)
+    }
+
+    func clearInput(_ name: String) {
+        pendingInputJSON.removeValue(forKey: name)
+        guard let input = inputs.first(where: { $0.name == name }),
+              let defaultValue = input.defaultValue,
+              JSONSerialization.isValidJSONObject(["value": defaultValue]),
+              let data = try? JSONSerialization.data(withJSONObject: defaultValue, options: [.fragmentsAllowed])
+        else {
+            return
+        }
+        applyInput(name, String(decoding: data, as: UTF8.self))
+    }
+
+    func setRenderLoopPaused(_ paused: Bool) {
+        userPaused = paused
+        updateDriverRunning()
+        if paused {
+            core.resetStats()
+            statsModel.stats = nil
         }
     }
     func setRenderSize(width: Int, height: Int, fitToWindow: Bool) {
@@ -401,6 +441,16 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             }
             return PixelGate.verdict(frames)
         }
+    }
+}
+
+extension MetalPreviewController: RemixPreviewInputApplying {
+    func setRemixInput(_ name: String, value: RemixParameterValue) {
+        setInput(name, value)
+    }
+
+    func resetRemixInput(_ name: String) {
+        clearInput(name)
     }
 }
 

@@ -134,20 +134,71 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(m.parentAID, childID)
     }
 
-    func test_livePreviewCap_favoritesAlwaysAnimate_othersFillUpToCap() async {
+    func test_livePreviewCap_neverExceededAndPrioritizesHeroComparisonFocusThenFavorites() async {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
         m.batchSize = 6; m.maxLivePreviews = 4
         await m.generate()
         for n in m.currentBatch { m.markCompileResult(id: n.id, valid: true, error: nil) }
-        // No favorites yet: exactly maxLivePreviews animate.
-        XCTAssertEqual(m.currentBatch.filter { m.shouldAnimate($0.id) }.count, 4)
-        // Favorite two of the frozen ones -> both animate even though we're over the cap.
-        let frozen = m.currentBatch.filter { !m.shouldAnimate($0.id) }
-        m.toggleFavorite(frozen[0].id); m.toggleFavorite(frozen[1].id)
-        XCTAssertTrue(m.shouldAnimate(frozen[0].id))
-        XCTAssertTrue(m.shouldAnimate(frozen[1].id))
-        XCTAssertGreaterThanOrEqual(m.currentBatch.filter { m.shouldAnimate($0.id) }.count, 4)
+        let ids = m.currentBatch.map(\.id)
+        m.workspace.heroChildID = ids[0]
+        m.workspace.comparedChildIDs = [ids[1], ids[2]]
+        m.workspace.focusedChildID = ids[3]
+        m.toggleFavorite(ids[4])
+        m.toggleFavorite(ids[5])
+
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false), Set(ids.prefix(4)))
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false).count, m.maxLivePreviews)
+    }
+
+    func test_livePreviewBudget_honorsPauseReduceMotionFailureAndExplicitFreeze() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 4; m.maxLivePreviews = 4
+        await m.generate()
+        for n in m.currentBatch { m.markCompileResult(id: n.id, valid: true, error: nil) }
+        let ids = m.currentBatch.map(\.id)
+
+        m.setPreviewFrozen(true, for: ids[0])
+        m.markCompileResult(id: ids[1], valid: false, error: "bad")
+        XCTAssertFalse(m.livePreviewIDs(reduceMotion: false).contains(ids[0]))
+        XCTAssertFalse(m.livePreviewIDs(reduceMotion: false).contains(ids[1]))
+        XCTAssertTrue(m.livePreviewIDs(reduceMotion: true).isEmpty)
+        m.explicitlyPlayPreviews()
+        XCTAssertFalse(m.livePreviewIDs(reduceMotion: true).isEmpty)
+        m.workspace.previewsPaused = true
+        XCTAssertTrue(m.livePreviewIDs(reduceMotion: false).isEmpty)
+    }
+
+    func test_canvasModeChangesKeepFocusAndComparisonIndependent() {
+        let m = model([.success(isf)])
+        m.workspace.focusedChildID = "focused"
+        m.workspace.comparedChildIDs = ["left", "right"]
+        m.workspace.canvasMode = .hero
+        m.workspace.canvasMode = .grid
+
+        XCTAssertEqual(m.workspace.focusedChildID, "focused")
+        XCTAssertEqual(m.workspace.comparedChildIDs, ["left", "right"])
+    }
+
+    func test_keyboardCommandsRouteThroughFocusedChild() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 2
+        await m.generate()
+        let ids = m.currentBatch.map(\.id)
+        m.workspace.focusedChildID = ids[0]
+
+        m.routeCanvasCommand(.favorite, columns: 2)
+        XCTAssertTrue(m.lineage.isFavorite(ids[0]))
+        m.routeCanvasCommand(.toggleComparison, columns: 2)
+        XCTAssertEqual(m.workspace.comparedChildIDs, [ids[0]])
+        m.routeCanvasCommand(.hero, columns: 2)
+        XCTAssertEqual(m.workspace.heroChildID, ids[0])
+        m.routeCanvasCommand(.promoteA, columns: 2)
+        XCTAssertEqual(m.parentAID, ids[0])
+        m.routeCanvasCommand(.moveRight, columns: 2)
+        XCTAssertEqual(m.workspace.focusedChildID, ids[1])
     }
 
     func test_failedChildren_neverAnimate() async {
@@ -734,6 +785,21 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(model.currentBatch.first?.status, .failed("No ISF in reply"))
         XCTAssertNil(model.compileDiagnostic(for: childID))
         XCTAssertEqual(model.compileSalvageActions(for: childID), [])
+    }
+
+    func test_compileSummaryIsVisibleContentNotOnlySelection() async {
+        let m = model([.success("```glsl\n\(isf)\n```")])
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 1
+        await m.generate()
+        let id = m.currentBatch[0].id
+        m.markCompileResult(id: id, valid: false, error: "line 7: bad token")
+
+        XCTAssertEqual(
+            m.compileSummary(for: id),
+            "Compile summary for \(id)\nline 7: bad token"
+        )
     }
 
     func test_previewFailureHasRendererScopedActions() async throws {
