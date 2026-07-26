@@ -73,7 +73,11 @@ struct RemixChildCardView: View {
                 } else {
                     RemixThumbnailView(
                         isf: node.isfSource,
-                        animating: model.shouldAnimate(node.id, reduceMotion: reduceMotion),
+                        animating: model.shouldAnimate(
+                            node.id,
+                            on: .canvas,
+                            reduceMotion: reduceMotion
+                        ),
                         sharedClock: comparisonCoordinator?.clock,
                         renderSize: comparisonCoordinator?.renderSize,
                         inputValues: comparisonPreviewID.map {

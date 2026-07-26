@@ -294,6 +294,50 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertTrue(m.livePreviewIDs(reduceMotion: false).isEmpty)
     }
 
+    func test_selectedCanvasChildAndInspectorRequireSeparatePreviewReservations() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 2))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 2
+        await m.generate()
+        let selectedID = try XCTUnwrap(m.currentBatch.first?.id)
+        m.workspace.heroChildID = selectedID
+        m.selectedNodeID = selectedID
+        m.maxLivePreviews = 1
+
+        XCTAssertTrue(
+            m.shouldAnimate(selectedID, on: .canvas, reduceMotion: false)
+        )
+        XCTAssertFalse(
+            m.shouldAnimate(selectedID, on: .inspector, reduceMotion: false)
+        )
+        XCTAssertEqual(m.livePreviewReservations(reduceMotion: false).count, 1)
+    }
+
+    func test_inspectorDuplicateAnimatesOnlyWhenASeparateSlotRemains() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 2))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        m.batchSize = 2
+        await m.generate()
+        let selectedID = try XCTUnwrap(m.currentBatch.first?.id)
+        m.workspace.heroChildID = selectedID
+        m.selectedNodeID = selectedID
+        m.maxLivePreviews = 2
+
+        XCTAssertEqual(
+            m.livePreviewReservations(reduceMotion: false),
+            Set([
+                RemixPreviewReservation(nodeID: selectedID, surface: .canvas),
+                RemixPreviewReservation(nodeID: selectedID, surface: .inspector),
+            ])
+        )
+        XCTAssertEqual(m.livePreviewReservations(reduceMotion: false).count, 2)
+        XCTAssertTrue(
+            m.shouldAnimate(selectedID, on: .inspector, reduceMotion: false)
+        )
+    }
+
     func test_appendLog_tagsByChildId_andBoundsMemory() {
         let m = model([.success(isf)])
         m.appendLog("r1-0", "thinking…")

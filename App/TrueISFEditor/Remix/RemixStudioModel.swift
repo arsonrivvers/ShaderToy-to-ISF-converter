@@ -11,6 +11,16 @@ enum RemixVerificationContinuationResult: Equatable {
     case unavailable
 }
 
+enum RemixPreviewSurface: Hashable {
+    case canvas
+    case inspector
+}
+
+struct RemixPreviewReservation: Hashable {
+    let nodeID: String
+    let surface: RemixPreviewSurface
+}
+
 /// Owns the Remix Studio state and drives the Module 1 generator. Parents are real lineage nodes
 /// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
 @MainActor
@@ -509,9 +519,11 @@ final class RemixStudioModel: ObservableObject {
 
     // MARK: live-preview cap (performance)
 
-    /// Strict live-preview budget. User context is prioritized before favorites and recency;
-    /// failed and explicitly frozen children are never scheduled.
-    func livePreviewIDs(reduceMotion: Bool = false) -> Set<String> {
+    /// Strict live-renderer budget. Reservations identify both the node and its UI surface because
+    /// the canvas and inspector can host separate Metal controllers for the same node.
+    func livePreviewReservations(
+        reduceMotion: Bool = false
+    ) -> Set<RemixPreviewReservation> {
         guard !workspace.previewsPaused,
               (!reduceMotion || reduceMotionPlaybackEnabled),
               maxLivePreviews > 0
@@ -529,24 +541,43 @@ final class RemixStudioModel: ObservableObject {
             eligible.append(selected)
         }
         let eligibleIDs = Set(eligible.map(\.id))
-        var priority: [String] = []
-        func append(_ id: String?) {
-            guard let id, eligibleIDs.contains(id), !priority.contains(id) else { return }
-            priority.append(id)
+        let canvasIDs = Set(currentBatch.map(\.id))
+        var priority: [RemixPreviewReservation] = []
+        func append(_ id: String?, on surface: RemixPreviewSurface) {
+            guard let id, eligibleIDs.contains(id) else { return }
+            if surface == .canvas, !canvasIDs.contains(id) { return }
+            let reservation = RemixPreviewReservation(nodeID: id, surface: surface)
+            guard !priority.contains(reservation) else { return }
+            priority.append(reservation)
         }
-        append(workspace.heroChildID)
-        workspace.comparedChildIDs.forEach { append($0) }
-        append(workspace.focusedChildID)
-        append(selectedNodeID)
+        append(workspace.heroChildID, on: .canvas)
+        workspace.comparedChildIDs.forEach { append($0, on: .canvas) }
+        append(workspace.focusedChildID, on: .canvas)
+        append(selectedNodeID, on: .canvas)
+        append(selectedNodeID, on: .inspector)
         eligible.reversed()
             .filter { lineage.isFavorite($0.id) }
-            .forEach { append($0.id) }
-        eligible.reversed().forEach { append($0.id) }
+            .forEach { append($0.id, on: .canvas) }
+        eligible.reversed().forEach { append($0.id, on: .canvas) }
         return Set(priority.prefix(maxLivePreviews))
+    }
+
+    func livePreviewIDs(reduceMotion: Bool = false) -> Set<String> {
+        Set(livePreviewReservations(reduceMotion: reduceMotion).map(\.nodeID))
     }
 
     func shouldAnimate(_ id: String, reduceMotion: Bool = false) -> Bool {
         livePreviewIDs(reduceMotion: reduceMotion).contains(id)
+    }
+
+    func shouldAnimate(
+        _ id: String,
+        on surface: RemixPreviewSurface,
+        reduceMotion: Bool = false
+    ) -> Bool {
+        livePreviewReservations(reduceMotion: reduceMotion).contains(
+            RemixPreviewReservation(nodeID: id, surface: surface)
+        )
     }
 
     func setPreviewFrozen(_ frozen: Bool, for id: String) {

@@ -267,7 +267,11 @@ struct RemixLineageTreeView: View {
             }
             RemixThumbnailView(
                 isf: node.isfSource,
-                animating: model.shouldAnimate(node.id, reduceMotion: reduceMotion),
+                animating: model.shouldAnimate(
+                    node.id,
+                    on: .inspector,
+                    reduceMotion: reduceMotion
+                ),
                                onSnapshot: { img in model.storeSnapshot(id: node.id, image: img) }) { _, _ in }
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
