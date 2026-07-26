@@ -116,6 +116,7 @@ targets:
       - TrueISFEditor/Remix/RemixParentLoadState.swift
       - TrueISFEditor/Remix/RemixBreedingBayPresentation.swift
       - TrueISFEditor/Remix/RemixComparisonCoordinator.swift
+      - TrueISFEditor/Remix/RemixLineagePresentation.swift
       - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
       - TrueISFEditor/ISFSceneSource.swift

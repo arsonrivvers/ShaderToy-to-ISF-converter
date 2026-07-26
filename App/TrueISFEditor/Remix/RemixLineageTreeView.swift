@@ -1,14 +1,15 @@
+import AppKit
 import SwiftUI
 
-/// The right rail: flattened lineage tree (snapshot swatches, ⚭ secondary-parent badges, ★),
-/// a [★ only] filter, the selected node's action strip — the rail's ONLY live Metal engine —
-/// and Step Back. Rows come from RemixTreeBuilder via model.treeRows.
+/// Accessible ancestry inspector backed by the stable flattened lineage tree.
 struct RemixLineageTreeView: View {
     @ObservedObject var model: RemixStudioModel
     let openInEditor: (String) -> Void
 
     @State private var collapsed: Set<String> = []
     @State private var favoritesOnly = false
+    @FocusState private var focusedRowID: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -19,7 +20,17 @@ struct RemixLineageTreeView: View {
                 actionStrip(node)
             }
             Divider()
-            Button { model.stepBack() } label: { Label("Step Back", systemImage: "arrow.uturn.backward") }
+            Button("Undo Parent Change") {
+                model.undoParentChange()
+            }
+            .disabled(!model.canUndoParentChange)
+            .help(model.undoParentChangeReason ?? "Restore the parent configuration used by the prior round.")
+            if let reason = model.undoParentChangeReason {
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text("Lineage: \(model.lineage.order.count) nodes").font(.caption2).foregroundStyle(.secondary)
         }
         .padding(10)
@@ -47,6 +58,15 @@ struct RemixLineageTreeView: View {
                 }
             }
         }
+        .background(
+            RemixLineageKeyCapture(active: focusedRowID != nil) { keyCode, modifiersPresent in
+                handleKey(
+                    keyCode: keyCode,
+                    modifiersPresent: modifiersPresent,
+                    visibleIDs: rows.map(\.id)
+                )
+            }
+        )
     }
 
     private var emptyHint: String {
@@ -56,31 +76,70 @@ struct RemixLineageTreeView: View {
     }
 
     private func treeRow(_ row: RemixTreeRow) -> some View {
-        let node = model.lineage.node(row.id)
+        guard let node = model.lineage.node(row.id) else {
+            return AnyView(EmptyView())
+        }
         let isSelected = model.selectedNodeID == row.id
-        return HStack(spacing: 4) {
-            if RemixTreeBuilder.hasRenderedChildren(model.lineage, id: row.id) {
+        let hasChildren = RemixTreeBuilder.hasRenderedChildren(model.lineage, id: row.id)
+        let isCollapsed = collapsed.contains(row.id)
+        let presentation = RemixLineagePresentation.row(
+            row,
+            node: node,
+            lineage: model.lineage,
+            selected: isSelected,
+            collapsed: isCollapsed,
+            hasChildren: hasChildren
+        )
+        let content = HStack(spacing: 4) {
+            if hasChildren {
                 Button {
-                    if collapsed.contains(row.id) { collapsed.remove(row.id) }
-                    else { collapsed.insert(row.id) }
+                    toggleCollapsed(row.id)
+                    focusedRowID = row.id
                 } label: {
-                    Image(systemName: collapsed.contains(row.id) ? "chevron.right" : "chevron.down")
+                    Label(
+                        (isCollapsed
+                            ? RemixLineagePresentation.RowAction.expand
+                            : RemixLineagePresentation.RowAction.collapse).rawValue,
+                        systemImage: isCollapsed ? "chevron.right" : "chevron.down"
+                    )
+                    .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.borderless).font(.caption2).frame(width: 14)
+                .buttonStyle(.borderless)
+                .font(.caption2)
+                .frame(width: 20, height: 20)
+                .help(
+                    (isCollapsed
+                        ? RemixLineagePresentation.RowAction.expand
+                        : RemixLineagePresentation.RowAction.collapse).rawValue
+                )
             } else {
-                Spacer().frame(width: 14)
+                Spacer().frame(width: 20)
             }
             swatch(row.id)
-            Text(node?.label ?? row.id).font(.caption).lineLimit(1)
+            Text(node.label ?? row.id).font(.caption).lineLimit(1)
             if let sec = row.secondaryParentID, let secNode = model.lineage.node(sec) {
-                Button { model.selectedNodeID = sec } label: {
-                    Text("⚭\(secNode.label ?? sec)").font(.caption2)
+                Button {
+                    model.selectedNodeID = sec
+                    focusedRowID = sec
+                } label: {
+                    Text(
+                        "\(RemixLineagePresentation.RowAction.selectSecondary.rawValue): "
+                        + "\(secNode.label ?? sec)"
+                    )
+                    .font(.caption2)
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .help("Second parent — click to select it")
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help(
+                    "\(RemixLineagePresentation.RowAction.selectSecondary.rawValue) "
+                    + "\(secNode.label ?? sec)"
+                )
             }
             if model.lineage.isFavorite(row.id) {
-                Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
+                Image(systemName: "star.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.yellow)
+                    .accessibilityHidden(true)
             }
             Spacer(minLength: 0)
         }
@@ -88,9 +147,95 @@ struct RemixLineageTreeView: View {
         .padding(.vertical, 2).padding(.horizontal, 4)
         .background(RoundedRectangle(cornerRadius: 4)
             .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(
+                    focusedRowID == row.id ? Color.accentColor : Color.clear,
+                    lineWidth: 2
+                )
+        )
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { if let n = node { openInEditor(n.isfSource) } }
-        .onTapGesture { model.selectedNodeID = row.id }
+        .onTapGesture(count: 2) { openInEditor(node.isfSource) }
+        .onTapGesture {
+            model.selectedNodeID = row.id
+            focusedRowID = row.id
+        }
+        .focusable()
+        .focused($focusedRowID, equals: row.id)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(presentation.label)
+        .accessibilityValue(presentation.value)
+        .accessibilityHint(presentation.help)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityActions {
+            if hasChildren {
+                Button(
+                    (isCollapsed
+                        ? RemixLineagePresentation.RowAction.expand
+                        : RemixLineagePresentation.RowAction.collapse).rawValue
+                ) {
+                    toggleCollapsed(row.id)
+                }
+            }
+            if let primaryID = node.parents.first {
+                Button(RemixLineagePresentation.RowAction.selectPrimary.rawValue) {
+                    model.selectedNodeID = primaryID
+                }
+            }
+            if node.parents.count > 1 {
+                Button(RemixLineagePresentation.RowAction.selectSecondary.rawValue) {
+                    model.selectedNodeID = node.parents[1]
+                }
+            }
+            Button(RemixLineagePresentation.RowAction.open.rawValue) {
+                openInEditor(node.isfSource)
+            }
+            Button(RemixLineagePresentation.RowAction.promoteA.rawValue) {
+                model.promoteToParent(.a, nodeID: row.id)
+            }
+            Button(RemixLineagePresentation.RowAction.promoteB.rawValue) {
+                model.promoteToParent(.b, nodeID: row.id)
+            }
+            Button(
+                (model.lineage.isFavorite(row.id)
+                    ? RemixLineagePresentation.RowAction.removeFavorite
+                    : RemixLineagePresentation.RowAction.favorite).rawValue
+            ) {
+                model.toggleFavorite(row.id)
+            }
+        }
+        return AnyView(content)
+    }
+
+    private func toggleCollapsed(_ id: String) {
+        if collapsed.contains(id) {
+            collapsed.remove(id)
+        } else {
+            collapsed.insert(id)
+        }
+    }
+
+    private func handleKey(
+        keyCode: UInt16,
+        modifiersPresent: Bool,
+        visibleIDs: [String]
+    ) -> Bool {
+        switch RemixLineageKeyboardRoute.route(
+            keyCode: keyCode,
+            modifiersPresent: modifiersPresent,
+            focusedID: focusedRowID,
+            visibleIDs: visibleIDs
+        ) {
+        case .ignore:
+            return false
+        case .focus(let id):
+            focusedRowID = id
+            return true
+        case .select(let id):
+            model.selectedNodeID = id
+            focusedRowID = id
+            return true
+        }
     }
 
     private func swatch(_ id: String) -> some View {
@@ -107,33 +252,106 @@ struct RemixLineageTreeView: View {
 
     /// Compact actions for the selected node. Hosts the rail's only live Metal preview.
     private func actionStrip(_ node: RemixNode) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let actions = RemixLineagePresentation.selectedNodeActions(
+            favorite: model.lineage.isFavorite(node.id)
+        )
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(node.label ?? node.id).font(.caption.bold()).lineLimit(1)
                 Spacer()
-                Button { model.selectedNodeID = nil } label: { Image(systemName: "xmark.circle") }
-                    .buttonStyle(.borderless).help("Deselect")
+                Button(RemixLineagePresentation.RowAction.deselect.rawValue) {
+                    model.selectedNodeID = nil
+                    focusedRowID = node.id
+                }
+                .buttonStyle(.borderless)
             }
-            RemixThumbnailView(isf: node.isfSource, animating: true,
+            RemixThumbnailView(
+                isf: node.isfSource,
+                animating: model.shouldAnimate(node.id, reduceMotion: reduceMotion),
                                onSnapshot: { img in model.storeSnapshot(id: node.id, image: img) }) { _, _ in }
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text(node.directive).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-            HStack(spacing: 10) {
-                Button { model.promoteToParent(.a, nodeID: node.id) } label: {
-                    Label("A", systemImage: "arrow.up.circle")
-                }.help("Promote to Parent A")
-                Button { model.promoteToParent(.b, nodeID: node.id) } label: {
-                    Label("B", systemImage: "arrow.up.circle")
-                }.help("Promote to Parent B")
-                Button { model.toggleFavorite(node.id) } label: {
-                    Image(systemName: model.lineage.isFavorite(node.id) ? "star.fill" : "star")
-                }.help("Favorite")
-                Button { openInEditor(node.isfSource) } label: {
-                    Image(systemName: "square.and.pencil")
-                }.help("Open in editor")
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(actions.filter { $0 != .deselect }, id: \.rawValue) { action in
+                    Button(action.rawValue) {
+                        perform(action, node: node)
+                    }
+                }
             }
-            .buttonStyle(.borderless)
+        }
+    }
+
+    private func perform(
+        _ action: RemixLineagePresentation.RowAction,
+        node: RemixNode
+    ) {
+        switch action {
+        case .promoteA:
+            model.promoteToParent(.a, nodeID: node.id)
+        case .promoteB:
+            model.promoteToParent(.b, nodeID: node.id)
+        case .favorite, .removeFavorite:
+            model.toggleFavorite(node.id)
+        case .open:
+            openInEditor(node.isfSource)
+        case .deselect:
+            model.selectedNodeID = nil
+        case .expand, .collapse:
+            toggleCollapsed(node.id)
+        case .selectPrimary:
+            if let id = node.parents.first { model.selectedNodeID = id }
+        case .selectSecondary:
+            if node.parents.count > 1 { model.selectedNodeID = node.parents[1] }
+        }
+    }
+}
+
+private struct RemixLineageKeyCapture: NSViewRepresentable {
+    let active: Bool
+    let handler: (UInt16, Bool) -> Bool
+
+    func makeNSView(context: Context) -> KeyView {
+        KeyView(handler: handler)
+    }
+
+    func updateNSView(_ view: KeyView, context: Context) {
+        view.active = active
+        view.handler = handler
+    }
+
+    final class KeyView: NSView {
+        var active = false
+        var handler: (UInt16, Bool) -> Bool
+        private var monitor: Any?
+
+        init(handler: @escaping (UInt16, Bool) -> Bool) {
+            self.handler = handler
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      self.active,
+                      event.window === self.window
+                else {
+                    return event
+                }
+                let modifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+                return self.handler(
+                    event.keyCode,
+                    !event.modifierFlags.intersection(modifiers).isEmpty
+                ) ? nil : event
+            }
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
         }
     }
 }

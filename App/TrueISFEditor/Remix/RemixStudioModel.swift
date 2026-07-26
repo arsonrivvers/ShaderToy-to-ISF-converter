@@ -58,7 +58,7 @@ final class RemixStudioModel: ObservableObject {
     private var generationTask: Task<Void, Never>?
     private var round = 0
     private var seedCounter = 0
-    private var history: [(String?, String?)] = []   // parent (A,B) configs for step-back
+    private var parentHistory: [(String?, String?)] = []
     private var isRestoring = false
     private var autosaveScheduled = false
     private var autosaveToken = 0
@@ -226,7 +226,7 @@ final class RemixStudioModel: ObservableObject {
         let generationIdentity = sessionIdentity
         let generationID = UUID()
         activeGenerationID = generationID
-        history.append((parentAID, parentBID))
+        parentHistory.append((parentAID, parentBID))
         round += 1
         let r = round
         let pids = parentIDs
@@ -518,8 +518,15 @@ final class RemixStudioModel: ObservableObject {
         else {
             return []
         }
-        let eligible = currentBatch.filter {
+        var eligible = currentBatch.filter {
             $0.status == .compiled && !frozenPreviewIDs.contains($0.id)
+        }
+        if let selectedNodeID,
+           !eligible.contains(where: { $0.id == selectedNodeID }),
+           let selected = lineage.node(selectedNodeID),
+           selected.status == .compiled,
+           !frozenPreviewIDs.contains(selectedNodeID) {
+            eligible.append(selected)
         }
         let eligibleIDs = Set(eligible.map(\.id))
         var priority: [String] = []
@@ -530,6 +537,7 @@ final class RemixStudioModel: ObservableObject {
         append(workspace.heroChildID)
         workspace.comparedChildIDs.forEach { append($0) }
         append(workspace.focusedChildID)
+        append(selectedNodeID)
         eligible.reversed()
             .filter { lineage.isFavorite($0.id) }
             .forEach { append($0.id) }
@@ -587,13 +595,20 @@ final class RemixStudioModel: ObservableObject {
         RemixTreeBuilder.flatten(lineage, collapsed: collapsed, favoritesOnly: favoritesOnly)
     }
 
-    /// Restore the parent config from the previous round. `generate()` records the config it used
-    /// before each round, so the top of `history` is the current round's config — discard it and
-    /// restore the one beneath. No-op until at least two rounds have run.
-    func stepBack() {
-        guard history.count >= 2 else { return }
-        history.removeLast()                       // drop the current round's config
-        (parentAID, parentBID) = history[history.count - 1]
+    var canUndoParentChange: Bool {
+        parentHistory.count >= 2
+    }
+
+    var undoParentChangeReason: String? {
+        canUndoParentChange ? nil : "No prior parent configuration is available."
+    }
+
+    /// Restores only the parent ids used by the prior round. Lineage, favorites, batches,
+    /// activity, selection, diagnostics, and snapshots remain untouched.
+    func undoParentChange() {
+        guard canUndoParentChange else { return }
+        parentHistory.removeLast()
+        (parentAID, parentBID) = parentHistory[parentHistory.count - 1]
         scheduleAutosave()
     }
 
@@ -613,7 +628,7 @@ final class RemixStudioModel: ObservableObject {
                 seedCounter = session.seedCounter
                 parentAID = session.parentAID
                 parentBID = session.parentBID
-                history = session.parentHistory.map { ($0.parentAID, $0.parentBID) }
+                parentHistory = session.parentHistory.map { ($0.parentAID, $0.parentBID) }
                 mode = session.mode
                 steer = session.steer
                 batchSize = session.batchSize
@@ -650,7 +665,7 @@ final class RemixStudioModel: ObservableObject {
             seedCounter: seedCounter,
             parentAID: parentAID,
             parentBID: parentBID,
-            parentHistory: history.map {
+            parentHistory: parentHistory.map {
                 RemixParentConfiguration(parentAID: $0.0, parentBID: $0.1)
             },
             mode: mode,
@@ -701,7 +716,7 @@ final class RemixStudioModel: ObservableObject {
         snapshots = [:]
         round = 0
         seedCounter = 0
-        history = []
+        parentHistory = []
         transcriptDropped = 0
         isRestoring = false
         persistSession()

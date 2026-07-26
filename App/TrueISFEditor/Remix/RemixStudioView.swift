@@ -9,13 +9,17 @@ struct RemixStudioView: View {
     let currentEditorLabel: String
 
     var body: some View {
-        RemixWorkspaceView(
-            model: model,
-            resolver: resolver,
-            openInEditor: openInEditor,
-            libraryEntries: libraryEntries,
-            currentEditorLabel: currentEditorLabel
-        )
+        VStack(spacing: 0) {
+            RemixWorkspaceView(
+                model: model,
+                resolver: resolver,
+                openInEditor: openInEditor,
+                libraryEntries: libraryEntries,
+                currentEditorLabel: currentEditorLabel
+            )
+            Divider()
+            RemixActivityDrawerView(model: model, openInEditor: openInEditor)
+        }
         .frame(minWidth: 720, minHeight: 600)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Remix Studio")

@@ -208,6 +208,92 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertTrue(m.currentBatch.allSatisfy { !m.shouldAnimate($0.id) })
     }
 
+    func test_selectedLineagePreviewSharesGlobalBudgetAndHonorsPauseReduceMotionAndZeroCap() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 5))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        let seedID = try XCTUnwrap(m.parentAID)
+        m.batchSize = 5
+        m.maxLivePreviews = 4
+        await m.generate()
+        m.selectedNodeID = seedID
+
+        XCTAssertTrue(m.shouldAnimate(seedID, reduceMotion: false))
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false).count, 4)
+
+        m.workspace.previewsPaused = true
+        XCTAssertFalse(m.shouldAnimate(seedID, reduceMotion: false))
+
+        m.workspace.previewsPaused = false
+        XCTAssertFalse(m.shouldAnimate(seedID, reduceMotion: true))
+
+        m.explicitlyPlayPreviews()
+        XCTAssertTrue(m.shouldAnimate(seedID, reduceMotion: true))
+
+        m.maxLivePreviews = 0
+        XCTAssertFalse(m.shouldAnimate(seedID, reduceMotion: false))
+    }
+
+    func test_historicalSelectionDoesNotDisplaceHeroAtCapOne() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 2))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        let historicalID = try XCTUnwrap(m.parentAID)
+        m.batchSize = 2
+        await m.generate()
+        let heroID = try XCTUnwrap(m.currentBatch.first?.id)
+        m.selectedNodeID = historicalID
+        m.workspace.heroChildID = heroID
+        m.maxLivePreviews = 1
+
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false), Set([heroID]))
+        XCTAssertFalse(m.shouldAnimate(historicalID, reduceMotion: false))
+    }
+
+    func test_historicalSelectionDoesNotDisplaceComparedPairAtCapTwo() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 3))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        let historicalID = try XCTUnwrap(m.parentAID)
+        m.batchSize = 3
+        await m.generate()
+        let compared = Array(m.currentBatch.prefix(2).map(\.id))
+        m.selectedNodeID = historicalID
+        m.workspace.comparedChildIDs = compared
+        m.maxLivePreviews = 2
+
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false), Set(compared))
+        XCTAssertFalse(m.shouldAnimate(historicalID, reduceMotion: false))
+    }
+
+    func test_historicalSelectionUsesOnlySlotRemainingAfterCanvasPriorities() async throws {
+        let m = model(Array(repeating: .success("```glsl\n\(isf)\n```"), count: 4))
+        m.mode = .mutate
+        m.setParent(.a, isf: "/*{A}*/")
+        let historicalID = try XCTUnwrap(m.parentAID)
+        m.batchSize = 4
+        await m.generate()
+        let ids = m.currentBatch.map(\.id)
+        m.selectedNodeID = historicalID
+        m.workspace.heroChildID = ids[0]
+        m.workspace.comparedChildIDs = [ids[1], ids[2]]
+        m.workspace.focusedChildID = ids[3]
+        m.maxLivePreviews = 4
+
+        XCTAssertEqual(m.livePreviewIDs(reduceMotion: false), Set(ids))
+        XCTAssertFalse(m.shouldAnimate(historicalID, reduceMotion: false))
+
+        m.maxLivePreviews = 5
+        XCTAssertTrue(m.shouldAnimate(historicalID, reduceMotion: false))
+
+        m.workspace.previewsPaused = true
+        XCTAssertTrue(m.livePreviewIDs(reduceMotion: false).isEmpty)
+        m.workspace.previewsPaused = false
+        XCTAssertTrue(m.livePreviewIDs(reduceMotion: true).isEmpty)
+        m.maxLivePreviews = 0
+        XCTAssertTrue(m.livePreviewIDs(reduceMotion: false).isEmpty)
+    }
+
     func test_appendLog_tagsByChildId_andBoundsMemory() {
         let m = model([.success(isf)])
         m.appendLog("r1-0", "thinking…")
@@ -472,17 +558,47 @@ final class RemixStudioModelTests: XCTestCase {
         )
     }
 
-    func test_stepBack_restoresPreviousParents() async {
+    func test_undoParentChange_restoresPreviousParentsWithoutDeletingSessionState() async throws {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 1
         await m.generate()                       // round 1, parent = seed
         let seedID = m.parentAID
         let childID = m.currentBatch[0].id
+        m.toggleFavorite(childID)
+        m.selectedNodeID = childID
         m.promoteToParent(.a, nodeID: childID)
         await m.generate()                       // round 2, parent = child
+        m.markCompileResult(id: m.currentBatch[0].id, valid: false, error: "bad token")
+        let lineageBefore = m.lineage
+        let batchesBefore = m.batchHistory
+        let activityBefore = m.activity
+        let snapshotsBefore = m.snapshots
         XCTAssertEqual(m.parentAID, childID)
-        m.stepBack()
+        XCTAssertTrue(m.canUndoParentChange)
+        XCTAssertNil(m.undoParentChangeReason)
+
+        m.undoParentChange()
+
         XCTAssertEqual(m.parentAID, seedID)      // restored to the round-1 config
+        XCTAssertEqual(m.lineage, lineageBefore)
+        XCTAssertEqual(m.batchHistory, batchesBefore)
+        XCTAssertEqual(m.activity, activityBefore)
+        XCTAssertEqual(m.snapshots.count, snapshotsBefore.count)
+        XCTAssertTrue(m.lineage.isFavorite(childID))
+        XCTAssertEqual(m.selectedNodeID, childID)
+    }
+
+    func test_undoParentChange_disabledReasonExplainsWhenNoHistoryExists() {
+        let m = model([.success(isf)])
+
+        XCTAssertFalse(m.canUndoParentChange)
+        XCTAssertEqual(
+            m.undoParentChangeReason,
+            "No prior parent configuration is available."
+        )
+        m.undoParentChange()
+        XCTAssertNil(m.parentAID)
+        XCTAssertNil(m.parentBID)
     }
 
     func test_setParent_recordsLabel_onSeedNode() {
@@ -583,7 +699,8 @@ final class RemixStudioModelTests: XCTestCase {
         try fixture.store.save(fixture.session)
         let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
 
-        restored.stepBack()
+        XCTAssertTrue(restored.canUndoParentChange)
+        restored.undoParentChange()
 
         XCTAssertEqual(restored.parentAID, "seed-2")
         XCTAssertEqual(restored.parentBID, "seed-3")
@@ -664,7 +781,7 @@ final class RemixStudioModelTests: XCTestCase {
 
         restored.promoteToParent(.a, nodeID: childID)
         await restored.generate()
-        restored.stepBack()
+        restored.undoParentChange()
         XCTAssertEqual(try loadedSession(fixture.store).parentAID, "seed-0")
     }
 
