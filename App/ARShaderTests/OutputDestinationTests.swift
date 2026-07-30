@@ -8,6 +8,29 @@ final class OutputDestinationTests: XCTestCase {
                                        frame: CGRect(x: 1728, y: 0, width: 1920, height: 1080),
                                        isMain: false)
 
+    // MARK: projected sharpness
+
+    func testALowScaleIsFreeWhileOutputIsClosed() {
+        // Nothing needs full resolution when the only consumers are ~340px monitor tiles, so a low
+        // scale there costs no image quality at all and must not nag.
+        XCTAssertFalse(OutputSharpness.isProjectingUpscaled(
+            destination: .off, scale: RenderScale(percent: 10)))
+    }
+
+    func testProjectingBelowFullScaleIsFlagged() {
+        // The scale is manual and never snaps back on its own (operator's call, 2026-07-30), so
+        // walking on stage still at a rehearsal value has to be visible.
+        XCTAssertTrue(OutputSharpness.isProjectingUpscaled(
+            destination: .screen(id: "2"), scale: RenderScale(percent: 25)))
+        XCTAssertTrue(OutputSharpness.isProjectingUpscaled(
+            destination: .floating, scale: RenderScale(percent: 99)))
+    }
+
+    func testProjectingAtFullScaleIsNotFlagged() {
+        XCTAssertFalse(OutputSharpness.isProjectingUpscaled(
+            destination: .screen(id: "2"), scale: .full))
+    }
+
     func testOffIsClosedNoMatterWhatIsPluggedIn() {
         XCTAssertEqual(OutputPlacement.resolve(.off, screens: [laptop, projector]), .closed)
         XCTAssertEqual(OutputPlacement.resolve(.off, screens: [laptop]), .closed)

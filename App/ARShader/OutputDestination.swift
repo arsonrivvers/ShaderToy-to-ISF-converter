@@ -66,6 +66,23 @@ enum OutputPlacement {
     }
 }
 
+/// Whether what reaches the projector is being upscaled.
+///
+/// The render scale is MANUAL by the operator's choice (2026-07-30): it never changes behind your
+/// back when output opens. The cost of that choice is that you can walk on stage still rasterising
+/// at the value you set during rehearsal, so the surface has to say so out loud.
+enum OutputSharpness {
+    /// True when the program output is live AND the chain rasterises below the typed output
+    /// resolution — the projected image is an upscale.
+    ///
+    /// While output is CLOSED this is always false, however low the scale: nothing needs full
+    /// resolution when the only consumers are ~340px monitor tiles, so a low scale there is pure
+    /// saving with no image cost at all.
+    static func isProjectingUpscaled(destination: OutputDestination, scale: RenderScale) -> Bool {
+        destination != .off && scale.percent < RenderScale.maxPercent
+    }
+}
+
 enum OutputMenu {
     static func options(for screens: [ScreenInfo]) -> [OutputDestination] {
         [.off, .floating] + screens.map { .screen(id: $0.id) }

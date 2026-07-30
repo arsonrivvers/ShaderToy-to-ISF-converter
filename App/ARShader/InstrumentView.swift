@@ -224,8 +224,11 @@ struct InstrumentView: View {
                            .applied(to: instrument.renderer.outputResolution),
                        caption: "rasterising",
                        help: "What live decks AND the program composite actually rasterise at. "
-                           + "Output stays the size you typed — the projector upscales — so low "
-                           + "values trade sharpness for GPU.",
+                           + "While output is closed this is free money — nothing needs full "
+                           + "resolution when the only consumers are the monitor tiles. While "
+                           + "projecting it also softens the projected image, which is what the "
+                           + "warning is for.",
+                       warning: projectingUpscaled ? "PROJECTING BELOW 100%" : nil,
                        apply: { instrument.renderer.outputRenderScale = $0 })
 
             scaleField(title: "CUE SCALE",
@@ -234,9 +237,11 @@ struct InstrumentView: View {
                        resolved: instrument.renderer.cueRenderScale
                            .applied(to: instrument.renderer.outputResolution),
                        caption: "cued decks",
-                       help: "What a deck rasterises at while it is NOT on program. It only feeds "
-                           + "a small monitor there, and this reallocates nothing — so it is safe "
-                           + "to drop very low.",
+                       help: "What a deck rasterises at while it is NOT on program — a loaded deck "
+                           + "you have faded out. This reallocates nothing and never touches the "
+                           + "projected image, so it is safe to drop very low. It is also the only "
+                           + "saving still available while you ARE projecting.",
+                       warning: nil,
                        apply: { instrument.renderer.cueRenderScale = $0 })
         }
         .onAppear { syncResolutionFields() }
@@ -252,6 +257,7 @@ struct InstrumentView: View {
                             resolved: RenderSize,
                             caption: String,
                             help: String,
+                            warning: String?,
                             apply: @escaping (RenderScale) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -286,8 +292,20 @@ struct InstrumentView: View {
             Text("→ \(caption) \(resolved.label)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
+            if let warning {
+                Text(warning)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.orange)
+            }
         }
         .help(help)
+    }
+
+    /// The scale is manual and never snaps back on its own, so the surface says when that is
+    /// costing sharpness on a wall rather than only on a 340px tile.
+    private var projectingUpscaled: Bool {
+        OutputSharpness.isProjectingUpscaled(destination: output.destination,
+                                             scale: instrument.renderer.outputRenderScale)
     }
 
     private func applyOutput(_ size: RenderSize) {
