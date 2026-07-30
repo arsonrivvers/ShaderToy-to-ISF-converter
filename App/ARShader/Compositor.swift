@@ -21,6 +21,10 @@ final class Compositor: @unchecked Sendable {
     private struct Uniforms {
         var opacity: Float
         var mode: Int32
+        /// 0 = force alpha 1 (the master is opaque by contract).
+        /// 1 = carry alpha through — required MID-CHAIN, where forcing opacity would change how a
+        /// deck with FX stages composites into the master.
+        var preserveAlpha: Int32
     }
 
     init?(device: MTLDevice) {
@@ -37,18 +41,24 @@ final class Compositor: @unchecked Sendable {
 
     /// Encode one layer. `backdrop` and `destination` must be different textures — a render target
     /// cannot also be sampled in the same pass.
+    ///
+    /// `preserveAlpha` defaults to `false`, the master's contract: the program output is opaque and
+    /// never propagates a layer's alpha. Mid-chain callers pass `true` — an FX stage that forced
+    /// alpha to 1 would silently turn any deck carrying a stage fully opaque.
     func encodeLayer(source: MTLTexture,
                      backdrop: MTLTexture,
                      destination: MTLTexture,
                      opacity: Double,
                      mode: BlendMode,
+                     preserveAlpha: Bool = false,
                      in cb: MTLCommandBuffer) {
         let rpd = MTLRenderPassDescriptor()
         rpd.colorAttachments[0].texture = destination
         rpd.colorAttachments[0].loadAction = .dontCare   // every pixel is written
         rpd.colorAttachments[0].storeAction = .store
         guard let enc = cb.makeRenderCommandEncoder(descriptor: rpd) else { return }
-        var uniforms = Uniforms(opacity: Float(min(max(opacity, 0), 1)), mode: mode.shaderIndex)
+        var uniforms = Uniforms(opacity: Float(min(max(opacity, 0), 1)), mode: mode.shaderIndex,
+                                preserveAlpha: preserveAlpha ? 1 : 0)
         enc.setRenderPipelineState(pipeline)
         enc.setFragmentTexture(source, index: 0)
         enc.setFragmentTexture(backdrop, index: 1)
@@ -63,7 +73,7 @@ final class Compositor: @unchecked Sendable {
 
     struct VOut { float4 pos [[position]]; float2 uv; };
 
-    struct Uniforms { float opacity; int mode; };
+    struct Uniforms { float opacity; int mode; int preserveAlpha; };
 
     vertex VOut ar_composite_v(uint vid [[vertex_id]]) {
         float2 corner = float2(float(vid & 1), float((vid >> 1) & 1));
@@ -160,8 +170,12 @@ final class Compositor: @unchecked Sendable {
         float3 blended = apply_blend(u.mode, clamp(cb, 0.0, 1.0), clamp(src.rgb, 0.0, 1.0));
         // Source-over onto an OPAQUE backdrop: Co = (1 - a)*Cb + a*B(Cb, Cs).
         float3 co = mix(cb, blended, a);
-        // The master is opaque by contract. Never propagate a layer's alpha into it.
-        return float4(co, 1.0);
+        // Master: opaque by contract. Mid-chain: the wet/dry mix of the two alphas, so a filter
+        // that outputs partial alpha stays a partial layer instead of becoming opaque.
+        float ao = (u.preserveAlpha != 0)
+            ? mix(backTex.sample(s, v.uv).a, src.a, clamp(u.opacity, 0.0, 1.0))
+            : 1.0;
+        return float4(co, ao);
     }
     """
 }
