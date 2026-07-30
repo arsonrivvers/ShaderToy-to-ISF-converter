@@ -14,6 +14,8 @@ struct DeckStripView: View {
     let id: DeckID
     @ObservedObject var unit: ShaderUnit
     @ObservedObject var mixer: MixerState
+    @ObservedObject var fx: FXChain
+    @ObservedObject var stats: RenderStatsModel
 
     private var layer: LayerParams? { mixer.layers().first { $0.deck == id } }
 
@@ -64,6 +66,8 @@ struct DeckStripView: View {
             }
 
             Divider()
+            FXChainView(title: "FX", chain: fx, stats: stats)
+            Divider()
             ShaderControlsView(unit: unit)
         }
         .padding(10)
@@ -78,7 +82,7 @@ struct InstrumentView: View {
     @ObservedObject private var mixer: MixerState
     @ObservedObject private var output: OutputWindowController
     @ObservedObject private var stats: RenderStatsModel
-    @State private var libraryTarget: DeckID = .one
+    @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
     @State private var widthField = ""
     @State private var heightField = ""
@@ -97,7 +101,7 @@ struct InstrumentView: View {
             monitors
             Divider()
             HSplitView {
-                LibraryPanelView(instrument: instrument, targetDeck: $libraryTarget)
+                LibraryPanelView(instrument: instrument, target: $libraryTarget)
                     .frame(minWidth: 260, idealWidth: 300)
                 deckStrips
                 mixerStrip.frame(width: 200)
@@ -131,11 +135,28 @@ struct InstrumentView: View {
     private var deckStrips: some View {
         HStack(spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
-                DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer)
-                if id != MixerState.layerOrder.last { Divider() }
+                DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
+                              fx: instrument.deck(id).fx, stats: stats)
+                Divider()
+            }
+            masterStrip
+        }
+        .frame(minWidth: 620)
+    }
+
+    /// The master FX chain reads exactly like a deck chain — one mental model for both.
+    private var masterStrip: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("MASTER").font(.system(size: 12, weight: .bold, design: .monospaced))
+            Text("Applied to the program feed, before blackout.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            Divider()
+            ScrollView {
+                FXChainView(title: "MASTER FX", chain: instrument.renderer.masterFX, stats: stats)
             }
         }
-        .frame(minWidth: 420)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var mixerStrip: some View {

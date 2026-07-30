@@ -74,6 +74,13 @@ final class LibraryPanelTests: XCTestCase {
         XCTAssertEqual(deck.unit.shaderName, "loadme.fs")
     }
 
+    func testLibraryTargetsCoverEveryDeckAndEveryChain() {
+        XCTAssertEqual(LibraryTarget.allCases.count, 5,
+                       "two decks, two deck chains, one master chain")
+        XCTAssertEqual(LibraryTarget.allCases.map(\.shortLabel),
+                       ["A", "A FX", "B", "B FX", "MST FX"])
+    }
+
     func testAnUnreadableEntryReportsRatherThanCrashing() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())

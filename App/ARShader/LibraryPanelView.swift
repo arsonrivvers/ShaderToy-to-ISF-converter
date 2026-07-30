@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// Where a clicked library shader goes. Clicking loads onto a deck, or APPENDS a stage to a chain.
+enum LibraryTarget: Hashable, CaseIterable, Identifiable {
+    case deck(DeckID)
+    case deckFX(DeckID)
+    case masterFX
+
+    /// Hand-written because the associated values stop `CaseIterable` synthesising it. The order
+    /// is the picker's order: each deck sits beside its own chain.
+    static var allCases: [LibraryTarget] {
+        [.deck(.one), .deckFX(.one), .deck(.two), .deckFX(.two), .masterFX]
+    }
+
+    var id: Self { self }
+
+    /// Short enough for a five-way segmented picker in a 300pt panel.
+    var shortLabel: String {
+        switch self {
+        case .deck(let d):   return d.displayName
+        case .deckFX(let d): return "\(d.displayName) FX"
+        case .masterFX:      return "MST FX"
+        }
+    }
+}
+
 /// Search and sort state for the library browser. Separate from `LibraryModel` (which owns the
 /// folders and their entries) so the view can filter without the model recooking.
 @MainActor
@@ -15,14 +39,36 @@ final class LibrarySelection: ObservableObject {
 /// Browse the corpus and load a shader onto a deck.
 struct LibraryPanelView: View {
     let instrument: Instrument
-    @Binding var targetDeck: DeckID
+    @Binding var target: LibraryTarget
     @StateObject private var selection = LibrarySelection()
     @ObservedObject private var library: LibraryModel
 
-    init(instrument: Instrument, targetDeck: Binding<DeckID>) {
+    init(instrument: Instrument, target: Binding<LibraryTarget>) {
         self.instrument = instrument
-        self._targetDeck = targetDeck
+        self._target = target
         self.library = instrument.library
+    }
+
+    /// A deck REPLACES its shader; a chain APPENDS a stage.
+    private func load(_ url: URL) {
+        switch target {
+        case .deck(let id):
+            instrument.deck(id).unit.load(url: url)
+        case .deckFX(let id):
+            append(url, to: instrument.deck(id).fx)
+        case .masterFX:
+            append(url, to: instrument.renderer.masterFX)
+        }
+    }
+
+    private func append(_ url: URL, to chain: FXChain) {
+        let stage = FXStage(device: instrument.device, queue: instrument.queue,
+                            clock: instrument.renderer.clock)
+        // Republish once the scene lands, so a stage starts encoding as soon as it compiles rather
+        // than waiting for an unrelated mutation.
+        stage.unit.onCompileFinished = { [weak chain] in chain?.stageDidChangeScene() }
+        chain.append(stage)
+        stage.unit.load(url: url)
     }
 
     private var entries: [LibraryEntry] { selection.results(in: library) }
@@ -39,14 +85,14 @@ struct LibraryPanelView: View {
                 .frame(width: 150)
             }
 
-            Picker("Load onto", selection: $targetDeck) {
-                ForEach(DeckID.allCases) { Text("Deck \($0.displayName)").tag($0) }
+            Picker("Load onto", selection: $target) {
+                ForEach(LibraryTarget.allCases) { Text($0.shortLabel).tag($0) }
             }
             .pickerStyle(.segmented)
 
             List(entries) { entry in
                 Button {
-                    instrument.deck(targetDeck).unit.load(url: entry.url)
+                    load(entry.url)
                 } label: {
                     Text(entry.name)
                         .font(.system(size: 12, design: .monospaced))
