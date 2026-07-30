@@ -162,8 +162,11 @@ final class Deck: ObservableObject {
         return owned
     }
 
-    /// The deck's last rendered output, for monitors. Nil until the first successful render.
-    nonisolated var currentOutput: MTLTexture? { renderOwnedOutput }
+    // NOTE: deliberately NO public accessor for `renderOwnedOutput`. Monitors read deck textures
+    // through `InstrumentRenderer.deckTexture(_:)`, which serves a lock-guarded snapshot taken
+    // during the frame. An accessor here would hand any caller an unsynchronized read of a field
+    // the render thread owns — a race with no symptom until it tears. (Removed during the Task 13
+    // manual review, having been added and never called.)
 
     nonisolated private static func makeOutputTexture(device: MTLDevice) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
