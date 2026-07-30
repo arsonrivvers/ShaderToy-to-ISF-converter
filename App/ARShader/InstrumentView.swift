@@ -213,12 +213,14 @@ struct InstrumentView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
 
+            // Temporary stand-in so the build passes between plan Task 2 and Task 3, which
+            // replaces this whole section with typed fields and resolved-size readouts.
             HStack {
                 Text("Cue").font(.system(size: 11))
                 Picker("", selection: Binding(
-                    get: { instrument.renderer.cueRenderQuality },
-                    set: { instrument.renderer.cueRenderQuality = $0 })) {
-                    ForEach(CueQuality.allCases) { Text($0.rawValue).tag($0) }
+                    get: { instrument.renderer.cueRenderScale },
+                    set: { instrument.renderer.cueRenderScale = $0 })) {
+                    ForEach(RenderScale.presets, id: \.self) { Text($0.label).tag($0) }
                 }
                 .labelsHidden()
             }

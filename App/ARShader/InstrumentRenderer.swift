@@ -54,18 +54,28 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var masterIndex = 0
     private var driver: DisplayLinkDriver?
     private var deckOutputs: [DeckID: MTLTexture] = [:]
+    /// The size each deck was actually asked to RASTERISE last frame — as opposed to the size of
+    /// its owned texture, which is fixed at the live size so a fade never reallocates.
+    ///
+    /// Observability, not decoration: "a live deck follows the render scale" is the whole claim of
+    /// this feature, and without this it is not assertable — the owned texture is the same size
+    /// either way, so a test reading `deckTexture` would pass even if the scale never reached the
+    /// rasteriser.
+    private var deckRasterSizes: [DeckID: MTLSize] = [:]
     /// Test observability: how many command buffers this renderer has committed.
     private var committedBuffers = 0
     /// Program-output resolution. Changing it reallocates both masters — rare, operator-driven,
     /// and never in the steady-state frame.
     private var masterResolution: RenderSize = .default
-    /// What a deck renders at while it is NOT contributing to program.
+    /// What live decks AND the master composite rasterise at, as a fraction of the output
+    /// resolution. The instrument's one real GPU lever: the ISF render is where essentially all
+    /// the cost lives (monitors just sample a texture that already exists, which is nearly free).
+    private var renderScale: RenderScale = .defaultRender
+    /// What a deck rasterises at while it is NOT contributing to program.
     ///
-    /// A cued deck feeds only a small monitor, so rasterising it at full output resolution is
-    /// pure waste — and the ISF render is where essentially all the GPU cost lives (monitors just
-    /// sample a texture that already exists, which is nearly free). Set equal to the output
-    /// resolution to disable the saving.
-    private var cueQuality: CueQuality = .default
+    /// A cued deck feeds only a small monitor, so rasterising it at the live size is pure waste.
+    /// This can go much lower than the render scale for exactly that reason.
+    private var cueScale: RenderScale = .defaultCue
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
     /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
@@ -87,7 +97,8 @@ final class InstrumentRenderer: @unchecked Sendable {
         self.clock = RenderClock()
         // ISFMSLKit needs its global pool before any scene work; harmless if already set.
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: device) }
-        masters = (0..<2).compactMap { _ in Self.makeMaster(device: device) }
+        masters = Self.makeMasterPair(
+            device: device, resolution: RenderScale.defaultRender.applied(to: .default))
         // A nil compositor is a survivable state, not a crash: renderFrame falls back to a black
         // master and the instrument still starts (spec §8).
         self.compositor = compositorOverride == .failed ? nil : Compositor(device: device)
@@ -107,32 +118,53 @@ final class InstrumentRenderer: @unchecked Sendable {
         return device.makeTexture(descriptor: desc)
     }
 
-    /// The program-output resolution. Reallocates the master pair; a no-op if unchanged, so the
-    /// UI can bind to it freely.
+    private static func makeMasterPair(device: MTLDevice, resolution: RenderSize) -> [MTLTexture] {
+        (0..<2).compactMap { _ in makeMaster(device: device, resolution: resolution) }
+    }
+
+    /// The program-output resolution — what the projector shows and what the typed W×H means.
+    /// Reallocates the master pair; a no-op if unchanged, so the UI can bind to it freely.
     var outputResolution: RenderSize {
         get { lock.lock(); defer { lock.unlock() }; return masterResolution }
         set {
             lock.lock()
             guard newValue != masterResolution else { lock.unlock(); return }
             masterResolution = newValue
-            let fresh = (0..<2).compactMap { _ in
-                Self.makeMaster(device: device, resolution: newValue)
-            }
-            // Only swap if BOTH allocated: a half-resized pair would composite across mismatched
-            // targets, and the failure would look like a corrupted image rather than an error.
-            if fresh.count == 2 {
-                masters = fresh
-                masterIndex = 0
-            }
+            reallocateMastersLocked()
             lock.unlock()
         }
     }
 
-    /// How much of the output resolution a deck rasterises at while it is NOT on program.
-    /// `.full` turns the saving off.
-    var cueRenderQuality: CueQuality {
-        get { lock.lock(); defer { lock.unlock() }; return cueQuality }
-        set { lock.lock(); cueQuality = newValue; lock.unlock() }
+    /// What live decks and the master composite rasterise at. Reallocates the master pair (and, on
+    /// the next frame, each deck's owned texture) — rare and operator-driven, never in a frame.
+    var outputRenderScale: RenderScale {
+        get { lock.lock(); defer { lock.unlock() }; return renderScale }
+        set {
+            lock.lock()
+            guard newValue != renderScale else { lock.unlock(); return }
+            renderScale = newValue
+            reallocateMastersLocked()
+            lock.unlock()
+        }
+    }
+
+    /// What a deck rasterises at while it is NOT contributing. Allocates NOTHING: the deck draws
+    /// small and upscales into its existing owned texture, which is why it is safe to drop low.
+    var cueRenderScale: RenderScale {
+        get { lock.lock(); defer { lock.unlock() }; return cueScale }
+        set { lock.lock(); cueScale = newValue; lock.unlock() }
+    }
+
+    /// Requires `lock` held. Only swaps if BOTH allocated: a half-resized pair would composite
+    /// across mismatched targets, and the failure would look like a corrupted image rather than
+    /// an error.
+    private func reallocateMastersLocked() {
+        let fresh = Self.makeMasterPair(device: device,
+                                        resolution: renderScale.applied(to: masterResolution))
+        if fresh.count == 2 {
+            masters = fresh
+            masterIndex = 0
+        }
     }
 
     @MainActor
@@ -174,6 +206,13 @@ final class InstrumentRenderer: @unchecked Sendable {
         return deckOutputs[id]
     }
 
+    /// The pixel size this deck rasterised at on the last frame — the number the render and cue
+    /// scales actually control, and the one that predicts GPU cost.
+    func deckRasterSize(_ id: DeckID) -> MTLSize? {
+        lock.lock(); defer { lock.unlock() }
+        return deckRasterSizes[id]
+    }
+
     func monitorTexture(_ source: MonitorSource) -> MTLTexture? {
         switch source {
         case .deck(let id):
@@ -202,7 +241,8 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
         let deckList = decks
         let outRes = masterResolution
-        let cueRes = cueQuality.applied(to: outRes)
+        let liveRes = renderScale.applied(to: outRes)
+        let cueRes = cueScale.applied(to: outRes)
         lock.unlock()
 
         // 1. Decks render offscreen into their own textures. Deck.render is nonisolated and
@@ -213,12 +253,16 @@ final class InstrumentRenderer: @unchecked Sendable {
         //    the ISF render is where essentially all the GPU cost is. Its owned texture stays at
         //    the output size, so starting a fade costs no reallocation.
         var outputs: [DeckID: MTLTexture] = [:]
+        var rasterSizes: [DeckID: MTLSize] = [:]
         for layer in layers {
             guard let deck = deckList[layer.deck] else { continue }
             let isLive = layer.effectiveOpacity > 0
-            let renderSize = (isLive ? outRes : cueRes).size
-            if let tex = deck.render(in: cb, renderSize: renderSize, ownedSize: outRes.size) {
+            let renderSize = (isLive ? liveRes : cueRes).size
+            if let tex = deck.render(in: cb, renderSize: renderSize, ownedSize: liveRes.size) {
                 outputs[layer.deck] = tex
+                // Only on success: this reports what a deck ACTUALLY rasterised, not what it
+                // would have been asked for had it held a shader.
+                rasterSizes[layer.deck] = renderSize
             }
         }
 
@@ -248,6 +292,7 @@ final class InstrumentRenderer: @unchecked Sendable {
         // rather than assuming parity from the deck count.
         masterIndex = current
         deckOutputs = outputs
+        deckRasterSizes = rasterSizes
         committedBuffers += 1
         let views = monitors.allObjects
         lock.unlock()

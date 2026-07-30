@@ -49,35 +49,6 @@ struct RenderSize: Equatable, Hashable, Codable, Sendable {
     ]
 }
 
-/// How much of the output resolution a deck rasterises at while it is NOT on program.
-///
-/// A fraction rather than an independent size, deliberately: it follows whatever the operator
-/// types for output, so a cued deck can never have a different aspect from the program it is about
-/// to be faded into. That mismatch would show up as a stretch at the worst possible moment.
-enum CueQuality: String, CaseIterable, Identifiable, Codable, Sendable {
-    case full = "100%"
-    case threeQuarter = "75%"
-    case half = "50%"
-    case third = "33%"
-    case quarter = "25%"
-
-    var id: String { rawValue }
-
-    var factor: Double {
-        switch self {
-        case .full:         return 1.0
-        case .threeQuarter: return 0.75
-        case .half:         return 0.5
-        case .third:        return 1.0 / 3.0
-        case .quarter:      return 0.25
-        }
-    }
-
-    /// Half resolution is a QUARTER of the pixels — a real saving, with a cue image still easily
-    /// good enough to judge on a small monitor.
-    static let `default`: CueQuality = .half
-
-    func applied(to output: RenderSize) -> RenderSize {
-        self == .full ? output : output.scaled(by: factor)
-    }
-}
+// `CueQuality` lived here until 2026-07-30. Replaced by `RenderScale` (see RenderScale.swift):
+// a five-case enum applied only to non-contributing decks could not express the thing the
+// operator actually needed, which is a scale on the LIVE render.

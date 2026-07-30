@@ -198,6 +198,91 @@ final class FrameGraphTests: XCTestCase {
         }
     }
 
+    // MARK: render scale
+
+    func testRenderScaleResizesTheMaster() throws {
+        renderer.outputResolution = RenderSize(width: 1920, height: 1080)
+        renderer.outputRenderScale = RenderScale(percent: 50)
+        renderer.renderFrame()
+        let tex = try XCTUnwrap(renderer.rawMasterTexture())
+        XCTAssertEqual(tex.width, 960)
+        XCTAssertEqual(tex.height, 540)
+    }
+
+    func testRenderScaleAppliesToALiveDeckNotJustACuedOne() throws {
+        // The whole point of replacing CueQuality: it was applied ONLY when effectiveOpacity was
+        // zero, so it was inert on the live deck costing the frame.
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0             // deck 1 LIVE at full opacity
+        renderer.outputRenderScale = RenderScale(percent: 25)
+        renderer.renderFrame()
+        // Assert on the RASTER size, not the owned texture: the owned texture is the same size
+        // either way, so reading deckTexture alone would pass even if the scale never reached the
+        // rasteriser — which is the only place the GPU saving actually happens.
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 480,
+                       "a LIVE deck must rasterise at the render scale")
+        XCTAssertEqual(try XCTUnwrap(renderer.deckTexture(.one)).width, 480,
+                       "and its owned texture follows the live size")
+    }
+
+    func testALiveAndACuedDeckRasteriseAtDifferentScalesInTheSameFrame() throws {
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0          // deck 1 live, deck 2 cued
+        renderer.outputRenderScale = RenderScale(percent: 100)
+        renderer.cueRenderScale = RenderScale(percent: 25)
+        renderer.renderFrame()
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920,
+                       "the live deck pays full price")
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.two)).width, 480,
+                       "the cued deck does not")
+    }
+
+    func testCueScaleAllocatesNothing() throws {
+        // Cue changes only how many pixels are rasterised before upscaling into the EXISTING owned
+        // texture. That is exactly why it is safe to drop very low.
+        try load(.one, "solid_red")
+        renderer.renderFrame()
+        let before = try XCTUnwrap(renderer.deckTexture(.one))
+        renderer.cueRenderScale = RenderScale(percent: 10)
+        renderer.renderFrame()
+        XCTAssertTrue(try XCTUnwrap(renderer.deckTexture(.one)) === before)
+    }
+
+    func testACuedDeckKeepsAFullSizeOwnedTextureAndStaysVisible() throws {
+        // Rasterise small, upscale into a fixed owned texture — so starting a fade reallocates
+        // nothing and cannot hitch at the worst moment.
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0             // deck 2 cued
+        renderer.cueRenderScale = RenderScale(percent: 25)
+        renderer.renderFrame()
+        let tex = try XCTUnwrap(renderer.deckTexture(.two))
+        XCTAssertEqual(tex.width, renderer.outputResolution.width,
+                       "the owned texture stays at the live size")
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.two)).width, 480,
+                       "while only the rasterised pixel count drops")
+        let readback = try XCTUnwrap(
+            TextureReadback.managedCopy(of: tex, device: device, queue: queue))
+        let rgb = try XCTUnwrap(TestPixels.meanRGB(of: readback))
+        XCTAssertEqual(rgb.y, 1.0, accuracy: 0.02, "and still shows green on its monitor")
+    }
+
+    func testTheInstrumentStillRendersCorrectlyAtAReducedRenderScale() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0
+        renderer.outputRenderScale = RenderScale(percent: 50)
+        let rgb = try renderAndRead()
+        XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
+    }
+
+    func testSettingTheSameRenderScaleIsANoOp() throws {
+        renderer.renderFrame()
+        let before = try XCTUnwrap(renderer.rawMasterTexture())
+        renderer.outputRenderScale = renderer.outputRenderScale
+        XCTAssertTrue(try XCTUnwrap(renderer.rawMasterTexture()) === before,
+                      "A no-op set must not reallocate — the UI binds to this and writes freely")
+    }
+
     func testAFadedOutDeckDoesNotDarkenTheOtherOne() throws {
         // Regression guard for "skip the layer" vs "composite it at zero": a zero-opacity layer
         // must leave the backdrop bit-identical, not run a blend with alpha 0.
