@@ -67,10 +67,17 @@ Recorded because none of these would have been caught by a test — they were fo
 
 ## Known open
 
-1. **The 36.6 ms cue anomaly, still unexplained.** Carried from the previous session. The check:
-   both decks loaded, PREVIEW 100%, CUE 25% — if DECK B ≈ DECK A on the tiles, cue is not reducing
-   real cost (candidate: an ISF `PERSISTENT`/feedback buffer that does not shrink with the
-   requested size).
+1. **The cue anomaly: leading hypothesis DISPROVEN, 2026-07-30.** The check was run on the per-tile
+   meter — both decks loaded, PREVIEW 100%, CUE 25% — and the operator reports cue **is** reducing
+   real cost. So `CUE SCALE` works as designed, and the "an ISF `PERSISTENT`/feedback buffer does
+   not shrink with the requested size" candidate is dead.
+
+   What that leaves: the previous session measured Deck A alone at 100% costing 62.8 ms, and adding
+   a cued Deck B at 25% taking it to 99.4 ms where ~3.9 ms was predicted. Cue reduces cost, so the
+   36.6 ms increment was not "cue is inert" — the magnitude is simply unaccounted for, and the
+   likeliest reading now is that the original figure was confounded (it predates per-tile metering,
+   when the global GPU number was also known to be wrong — see the previous session's defect 2).
+   **Not worth chasing as an anomaly**; if it recurs it is now directly observable per tile.
 2. **Colour and alpha use different mix amounts.** `encodeLayer` mixes colour by `src.a * opacity`
    but alpha by `opacity` alone. They agree exactly when a stage outputs alpha 1 — the normal case,
    and the only case the fixtures produce. They diverge when a filter outputs PARTIAL alpha *and*
