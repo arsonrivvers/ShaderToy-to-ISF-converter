@@ -190,9 +190,12 @@ struct InstrumentView: View {
             Button {
                 mixer.toggleBlackoutLatch()
             } label: {
+                // Full width and bold, but a normal control height. The 56pt slab was sized as a
+                // stage-lighting hit target; in practice ⌘B and Escape are how it gets hit, and it
+                // was eating room the FX chains now need (operator, 2026-07-30).
                 Text(mixer.isBlackedOut ? "BLACKOUT ON" : "BLACKOUT")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .frame(maxWidth: .infinity, minHeight: 56)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: 26)
             }
             .buttonStyle(.borderedProminent)
             .tint(mixer.isBlackedOut ? .red : .gray)
