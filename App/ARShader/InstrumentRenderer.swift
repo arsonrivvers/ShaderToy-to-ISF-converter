@@ -3,6 +3,13 @@ import MetalKit
 import QuartzCore
 import VVMetalKit
 
+/// What a viewport is looking at.
+enum MonitorSource: Equatable, Sendable {
+    case deck(DeckID)
+    /// The program feed. Taps POST-blackout: when the room is dark, this monitor is dark.
+    case master
+}
+
 /// The instrument's single clock and frame graph.
 ///
 /// One `DisplayLinkDriver` drives ONE frame for everything — decks, compositor, monitors, program
@@ -29,9 +36,15 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// the 8-bit drawable avoids banding on repeated composites.
     static let masterFormat: MTLPixelFormat = .rgba16Float
 
+    /// Test seam: forces the "compositor could not be built" branch without a broken GPU.
+    enum CompositorOverride { case failed }
+
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     let clock: RenderClock
+    private let mixer: MixerState
+    private let compositor: Compositor?
+    private(set) var decks: [DeckID: Deck] = [:]
 
     private let lock = NSLock()
     // ── lock-guarded state ──
@@ -39,17 +52,33 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var masters: [MTLTexture] = []
     private var masterIndex = 0
     private var driver: DisplayLinkDriver?
+    private var deckOutputs: [DeckID: MTLTexture] = [:]
+    /// Test observability: how many command buffers this renderer has committed.
+    private var committedBuffers = 0
+    /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
+    /// strong list would hold a window's worth of Metal state alive forever.
+    private let monitors = NSHashTable<MTKView>.weakObjects()
 
     /// Called after each frame's command buffer is committed, on the render thread.
     var onFrameRendered: (@Sendable () -> Void)?
 
-    init(device: MTLDevice, queue: MTLCommandQueue) {
+    @MainActor
+    init(device: MTLDevice, queue: MTLCommandQueue, mixer: MixerState,
+         compositorOverride: CompositorOverride? = nil) {
         self.device = device
         self.queue = queue
+        self.mixer = mixer
         self.clock = RenderClock()
         // ISFMSLKit needs its global pool before any scene work; harmless if already set.
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: device) }
         masters = (0..<2).compactMap { _ in Self.makeMaster(device: device) }
+        // A nil compositor is a survivable state, not a crash: renderFrame falls back to a black
+        // master and the instrument still starts (spec §8).
+        self.compositor = compositorOverride == .failed ? nil : Compositor(device: device)
+        // Every deck shares the ONE clock, so a swap on deck A cannot restart deck B's animation.
+        for id in DeckID.allCases {
+            decks[id] = Deck(id: id, device: device, queue: queue, clock: clock)
+        }
     }
 
     private static func makeMaster(device: MTLDevice) -> MTLTexture? {
@@ -60,31 +89,120 @@ final class InstrumentRenderer: @unchecked Sendable {
         return device.makeTexture(descriptor: desc)
     }
 
-    /// The texture a consumer should display. Nil means "show opaque black" — consumers must honor
-    /// that rather than reusing their last frame. Safe from any thread.
-    func programTexture() -> MTLTexture? {
+    @MainActor
+    func deck(_ id: DeckID) -> Deck {
+        guard let d = decks[id] else {
+            preconditionFailure("Deck \(id.rawValue) is created in init and cannot be missing")
+        }
+        return d
+    }
+
+    var committedBufferCount: Int {
         lock.lock(); defer { lock.unlock() }
-        return currentMasterLocked()
+        return committedBuffers
     }
 
-    /// Requires `lock` held.
-    private func currentMasterLocked() -> MTLTexture? {
-        masters.indices.contains(masterIndex) ? masters[masterIndex] : nil
+    // MARK: textures
+
+    /// The program feed. **Nil while blacked out** — and consumers render opaque black on nil.
+    ///
+    /// Blackout is a final gate (spec §8), not a stage: there is no pipeline, no shader and no
+    /// extra state between the panic button and darkness. The same nil is what a failed compositor
+    /// yields, so the failure floor and the panic button share one code path.
+    func programTexture() -> MTLTexture? {
+        guard !mixer.isBlackedOutForRender() else { return nil }
+        return rawMasterTexture()
     }
 
-    /// Render exactly one frame. Called on the display-link thread. Task 2 renders an empty
-    /// instrument: clear the master to opaque black. Tasks 6-8 extend this into the full
-    /// deck → compositor → blackout graph.
+    /// The master texture regardless of the blackout gate. For tests and the failure floor only —
+    /// never call this from a display path.
+    func rawMasterTexture() -> MTLTexture? {
+        lock.lock(); defer { lock.unlock() }
+        return masters.indices.contains(masterIndex) ? masters[masterIndex] : nil
+    }
+
+    /// The deck's own output, pre-opacity and pre-blend — what a deck monitor shows. Nil when the
+    /// deck has no shader loaded.
+    func deckTexture(_ id: DeckID) -> MTLTexture? {
+        lock.lock(); defer { lock.unlock() }
+        return deckOutputs[id]
+    }
+
+    func monitorTexture(_ source: MonitorSource) -> MTLTexture? {
+        switch source {
+        case .deck(let id):
+            // Cue monitors: the operator lines up the next shader while the room is dark, so these
+            // deliberately do NOT tap post-blackout.
+            return deckTexture(id)
+        case .master:
+            return programTexture()
+        }
+    }
+
+    // MARK: the frame graph
+
+    /// Render exactly one frame of the whole instrument into ONE command buffer.
+    ///
+    /// 1. each deck renders offscreen into its own texture
+    /// 2. the master is cleared to OPAQUE BLACK — what a bottom-layer blend blends against
+    /// 3. each contributing layer composites, ping-ponging between the two masters
     func renderFrame() {
+        let layers = mixer.renderLayers()
+
         lock.lock()
-        guard let cb = queue.makeCommandBuffer(), let master = currentMasterLocked() else {
+        guard masters.count == 2, let cb = queue.makeCommandBuffer() else {
             lock.unlock()
             return
         }
-        clearToOpaqueBlack(master, in: cb)
-        cb.commit()
+        let deckList = decks
         lock.unlock()
+
+        // 1. Decks render offscreen into their own textures. Deck.render is nonisolated and
+        //    internally lock-guarded, so this is safe off the main actor.
+        var outputs: [DeckID: MTLTexture] = [:]
+        for layer in layers {
+            if let deck = deckList[layer.deck], let tex = deck.render(in: cb) {
+                outputs[layer.deck] = tex
+            }
+        }
+
+        lock.lock()
+        // 2. The master begins each frame as OPAQUE BLACK (spec §7). This is what a bottom-layer
+        //    blend mode blends against, and what an empty instrument shows.
+        var current = 0
+        clearToOpaqueBlack(masters[current], in: cb)
+
+        // 3. Composite each contributing layer, ping-ponging between the two masters.
+        if let compositor {
+            for layer in layers {
+                guard let source = outputs[layer.deck], layer.effectiveOpacity > 0 else {
+                    continue    // no shader, or faded out — the backdrop passes through untouched
+                }
+                let next = 1 - current
+                compositor.encodeLayer(source: source,
+                                       backdrop: masters[current],
+                                       destination: masters[next],
+                                       opacity: layer.effectiveOpacity,
+                                       mode: layer.blendMode,
+                                       in: cb)
+                current = next
+            }
+        }
+        // The result may be in either master depending on how many layers contributed — track it
+        // rather than assuming parity from the deck count.
+        masterIndex = current
+        deckOutputs = outputs
+        committedBuffers += 1
+        let views = monitors.allObjects
+        lock.unlock()
+
+        cb.commit()
         onFrameRendered?()
+
+        // Monitors present textures produced by the buffer just committed. Each MTKView.draw()
+        // manages its own drawable cycle and encodes its own (tiny) present buffer — the frame's
+        // RENDER work is still one buffer; these are presents.
+        for view in views { view.draw() }
     }
 
     /// The one operation that must never depend on a compiled pipeline: a render pass whose only
@@ -96,6 +214,18 @@ final class InstrumentRenderer: @unchecked Sendable {
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         rpd.colorAttachments[0].storeAction = .store
         cb.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
+    }
+
+    // MARK: monitors
+
+    func registerMonitor(_ view: MTKView) {
+        lock.lock(); defer { lock.unlock() }
+        monitors.add(view)
+    }
+
+    func unregisterMonitor(_ view: MTKView) {
+        lock.lock(); defer { lock.unlock() }
+        monitors.remove(view)
     }
 
     // MARK: clock control (main thread)

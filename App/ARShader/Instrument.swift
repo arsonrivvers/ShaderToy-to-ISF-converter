@@ -11,6 +11,8 @@ import VVMetalKit
 final class Instrument: ObservableObject {
     let device: MTLDevice
     let queue: MTLCommandQueue
+    let mixer = MixerState()
+    let library = LibraryModel()
     let renderer: InstrumentRenderer
 
     init() {
@@ -19,6 +21,9 @@ final class Instrument: ObservableObject {
         let props = RenderProperties.global()
         self.device = props.device
         self.queue = props.renderQueue
-        self.renderer = InstrumentRenderer(device: props.device, queue: props.renderQueue)
+        self.renderer = InstrumentRenderer(device: props.device, queue: props.renderQueue,
+                                           mixer: mixer)
     }
+
+    func deck(_ id: DeckID) -> Deck { renderer.deck(id) }
 }

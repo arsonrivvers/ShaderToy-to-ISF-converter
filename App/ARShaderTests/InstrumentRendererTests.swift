@@ -7,13 +7,14 @@ final class InstrumentRendererTests: XCTestCase {
     private func makeRenderer() throws -> (InstrumentRenderer, MTLDevice, MTLCommandQueue) {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
-        return (InstrumentRenderer(device: device, queue: queue), device, queue)
+        return (InstrumentRenderer(device: device, queue: queue, mixer: MixerState()), device, queue)
     }
 
     func testMasterIsFixedAt1920x1080() throws {
         let (renderer, _, _) = try makeRenderer()
         renderer.renderFrame()
-        let tex = try XCTUnwrap(renderer.programTexture())
+        // rawMasterTexture, not programTexture: this measures the texture, not the blackout gate.
+        let tex = try XCTUnwrap(renderer.rawMasterTexture())
         XCTAssertEqual(tex.width, 1920)
         XCTAssertEqual(tex.height, 1080)
     }
@@ -32,9 +33,9 @@ final class InstrumentRendererTests: XCTestCase {
     func testSteadyStateAllocatesNoNewTextures() throws {
         let (renderer, _, _) = try makeRenderer()
         renderer.renderFrame()
-        let first = try XCTUnwrap(renderer.programTexture())
+        let first = try XCTUnwrap(renderer.rawMasterTexture())
         for _ in 0..<30 { renderer.renderFrame() }
-        let last = try XCTUnwrap(renderer.programTexture())
+        let last = try XCTUnwrap(renderer.rawMasterTexture())
         XCTAssertTrue(first === last,
                       "Master textures are pooled and reused; a new object per frame means the "
                       + "steady-state frame is allocating")
