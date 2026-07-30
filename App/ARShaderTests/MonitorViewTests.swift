@@ -49,9 +49,27 @@ final class MonitorViewTests: XCTestCase {
     // MARK: freeze / off
 
     private func makeCoordinator() -> MonitorViewport.Coordinator {
-        let c = MonitorViewport.Coordinator()
+        let c = MonitorViewport.Coordinator(device: device, queue: queue)
         c.renderer = renderer
         return c
+    }
+
+    private func loadDeckOne(_ fixtureName: String) throws {
+        let deck = renderer.deck(.one)
+        let url = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: fixtureName, withExtension: "fs", subdirectory: "Fixtures"))
+        let done = expectation(description: "compile \(fixtureName)")
+        deck.onCompileFinished = { done.fulfill() }
+        deck.load(source: try String(contentsOf: url, encoding: .utf8), name: "\(fixtureName).fs")
+        wait(for: [done], timeout: 30)
+        deck.onCompileFinished = nil
+        XCTAssertNil(deck.compileError)
+    }
+
+    private func meanRGB(of texture: MTLTexture) throws -> SIMD3<Double> {
+        let readback = try XCTUnwrap(
+            TextureReadback.managedCopy(of: texture, device: device, queue: queue))
+        return try XCTUnwrap(TestPixels.meanRGB(of: readback))
     }
 
     func testALiveMonitorPullsAFreshTextureEveryDraw() throws {
@@ -63,27 +81,80 @@ final class MonitorViewTests: XCTestCase {
         XCTAssertEqual(pulls, 3)
     }
 
-    func testAFrozenMonitorStopsPullingAndKeepsItsLastFrame() throws {
-        let coordinator = makeCoordinator()
+    /// The bug the Milestone 1 smoke found: freeze held a REFERENCE to a texture that keeps being
+    /// overwritten, so the monitor carried on showing live video. A freeze must survive the source
+    /// contents changing underneath it.
+    func testAFrozenMonitorSurvivesTheSourceContentsChanging() throws {
+        try loadDeckOne("solid_red")
         renderer.renderFrame()
-        let live = renderer.rawMasterTexture()
 
-        // One live pull to seed the cache, then freeze.
-        _ = coordinator.currentTexture { live }
-        coordinator.isFrozen = true
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        coordinator.setFrozen(true) { renderer.monitorTexture(.deck(.one)) }
+
+        // Swap the deck to green and keep rendering — the SAME deck texture object is reused, so
+        // a reference-holding freeze would now be showing green.
+        try loadDeckOne("solid_green")
+        for _ in 0..<5 { renderer.renderFrame() }
+
+        let held = try XCTUnwrap(coordinator.currentTexture { nil })
+        let rgb = try meanRGB(of: held)
+        XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02, "still the RED frame the operator froze")
+        XCTAssertLessThan(rgb.y, 0.02, "if this is green, freeze is holding a reference again")
+    }
+
+    func testAFrozenMonitorStopsPullingFromTheRenderer() throws {
+        try loadDeckOne("solid_red")
+        renderer.renderFrame()
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        coordinator.setFrozen(true) { renderer.monitorTexture(.deck(.one)) }
 
         var pullsWhileFrozen = 0
-        let held = coordinator.currentTexture { pullsWhileFrozen += 1; return nil }
+        _ = coordinator.currentTexture { pullsWhileFrozen += 1; return nil }
         XCTAssertEqual(pullsWhileFrozen, 0, "A frozen monitor must not ask the renderer for more")
-        XCTAssertTrue(held === live, "It keeps showing the frame the operator froze")
+    }
+
+    func testUnfreezingResumesPulling() throws {
+        try loadDeckOne("solid_red")
+        renderer.renderFrame()
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        coordinator.setFrozen(true) { renderer.monitorTexture(.deck(.one)) }
+        coordinator.setFrozen(false) { nil }
+
+        var pulls = 0
+        _ = coordinator.currentTexture { pulls += 1; return nil }
+        XCTAssertEqual(pulls, 1)
+        XCTAssertFalse(coordinator.isFrozen)
+    }
+
+    func testRepeatedSetFrozenDoesNotRecapture() throws {
+        // SwiftUI calls updateNSView freely; only the rising EDGE may capture, or the "frozen"
+        // frame would silently advance every layout pass.
+        try loadDeckOne("solid_red")
+        renderer.renderFrame()
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        var captures = 0
+        for _ in 0..<4 {
+            coordinator.setFrozen(true) { captures += 1; return renderer.monitorTexture(.deck(.one)) }
+        }
+        XCTAssertEqual(captures, 1)
+    }
+
+    func testFreezingAnEmptyMonitorLeavesItBlackRatherThanStuck() throws {
+        // Deck 2 has no shader: there is nothing to capture, and the tile must not wedge.
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        coordinator.setFrozen(true) { renderer.monitorTexture(.deck(.two)) }
+        XCTAssertNil(coordinator.currentTexture { nil })
     }
 
     func testAnOffMonitorReportsNoTextureAtAll() throws {
         let coordinator = makeCoordinator()
         renderer.renderFrame()
-        _ = coordinator.currentTexture { self.renderer.rawMasterTexture() }
         coordinator.isOff = true
-
         var pulls = 0
         let tex = coordinator.currentTexture { pulls += 1; return nil }
         XCTAssertNil(tex, "Off must render black, not the last frame")
@@ -91,22 +162,13 @@ final class MonitorViewTests: XCTestCase {
     }
 
     func testOffWinsOverFreeze() throws {
-        let coordinator = makeCoordinator()
+        try loadDeckOne("solid_red")
         renderer.renderFrame()
-        _ = coordinator.currentTexture { self.renderer.rawMasterTexture() }
-        coordinator.isFrozen = true
+        let coordinator = makeCoordinator()
+        let renderer = self.renderer!
+        coordinator.setFrozen(true) { renderer.monitorTexture(.deck(.one)) }
         coordinator.isOff = true
         XCTAssertNil(coordinator.currentTexture { nil })
-    }
-
-    func testUnfreezingResumesPulling() throws {
-        let coordinator = makeCoordinator()
-        coordinator.isFrozen = true
-        _ = coordinator.currentTexture { XCTFail("should not pull while frozen"); return nil }
-        coordinator.isFrozen = false
-        var pulls = 0
-        _ = coordinator.currentTexture { pulls += 1; return nil }
-        XCTAssertEqual(pulls, 1)
     }
 }
 

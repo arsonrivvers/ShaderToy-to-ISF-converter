@@ -51,7 +51,12 @@ struct MonitorViewport: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: TexturePresentingView, context: Context) {
-        context.coordinator.isFrozen = isFrozen
+        let renderer = instrument.renderer
+        let src = source
+        // Freezing must CAPTURE pixels, not hold a reference. Done here on the main thread at the
+        // moment the flag flips: it is a rare operator action, so one synchronous copy is fine and
+        // keeps the per-frame path allocation-free.
+        context.coordinator.setFrozen(isFrozen) { renderer.monitorTexture(src) }
         context.coordinator.isOff = isOff
     }
 
@@ -61,7 +66,7 @@ struct MonitorViewport: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        let c = Coordinator()
+        let c = Coordinator(device: instrument.device, queue: instrument.queue)
         c.renderer = instrument.renderer
         return c
     }
@@ -74,31 +79,88 @@ struct MonitorViewport: NSViewRepresentable {
         /// True for the single clock-driving viewport, which is never registered as a monitor.
         var drivesClock = false
 
+        private let device: MTLDevice
+        private let queue: MTLCommandQueue
+        private let copyPass: TextureCopyPass?
+
         private let lock = NSLock()
         private var _isFrozen = false
         private var _isOff = false
-        /// The last texture pulled before freezing. Held so a frozen monitor keeps showing the
-        /// frame the operator froze rather than going black.
-        private var frozenTexture: MTLTexture?
+        /// An OWNED copy of the frame the operator froze.
+        ///
+        /// Must be a copy, not a reference. The master is a ping-pong pair and deck outputs are
+        /// reused every frame, so holding the texture object kept the pointer valid while its
+        /// CONTENTS were overwritten — freeze appeared to do nothing at all. (Reported on the
+        /// Milestone 1 smoke, 2026-07-30. Same aliasing class the decks already guard against.)
+        private var frozenCopy: MTLTexture?
 
-        var isFrozen: Bool {
-            get { lock.lock(); defer { lock.unlock() }; return _isFrozen }
-            set { lock.lock(); _isFrozen = newValue; lock.unlock() }
+        init(device: MTLDevice, queue: MTLCommandQueue) {
+            self.device = device
+            self.queue = queue
+            self.copyPass = TextureCopyPass(device: device,
+                                            destinationFormat: InstrumentRenderer.masterFormat)
         }
+
         var isOff: Bool {
             get { lock.lock(); defer { lock.unlock() }; return _isOff }
             set { lock.lock(); _isOff = newValue; lock.unlock() }
         }
 
+        var isFrozen: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return _isFrozen
+        }
+
+        /// Apply a freeze/unfreeze. On the rising edge it CAPTURES the current frame into an owned
+        /// texture; on the falling edge it drops back to live. Idempotent — repeated calls with
+        /// the same value do nothing, so SwiftUI's update churn cannot re-capture every pass.
+        func setFrozen(_ frozen: Bool, pull: () -> MTLTexture?) {
+            lock.lock()
+            let wasFrozen = _isFrozen
+            lock.unlock()
+            guard frozen != wasFrozen else { return }
+
+            if frozen, let source = pull(), let copyPass {
+                let owned = ensureCopyTarget(like: source)
+                if let owned, let cb = queue.makeCommandBuffer() {
+                    copyPass.encode(from: source, to: owned, in: cb)
+                    cb.commit()
+                    cb.waitUntilCompleted()
+                    lock.lock(); frozenCopy = owned; _isFrozen = true; lock.unlock()
+                    return
+                }
+            }
+            // Unfreezing, or nothing to capture (an empty deck) — go live / stay black.
+            lock.lock()
+            _isFrozen = frozen
+            if !frozen { frozenCopy = nil }
+            lock.unlock()
+        }
+
+        private func ensureCopyTarget(like source: MTLTexture) -> MTLTexture? {
+            lock.lock()
+            let existing = frozenCopy
+            lock.unlock()
+            if let existing, existing.width == source.width, existing.height == source.height {
+                return existing
+            }
+            let desc = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: InstrumentRenderer.masterFormat,
+                width: source.width, height: source.height, mipmapped: false)
+            desc.usage = [.renderTarget, .shaderRead]
+            desc.storageMode = .private
+            return device.makeTexture(descriptor: desc)
+        }
+
         /// The texture this monitor should present, applying off/freeze. `pull` is only called
         /// when a live texture is actually wanted.
         func currentTexture(_ pull: () -> MTLTexture?) -> MTLTexture? {
-            lock.lock(); defer { lock.unlock() }
-            if _isOff { return nil }
-            if _isFrozen { return frozenTexture }
-            let tex = pull()
-            frozenTexture = tex
-            return tex
+            lock.lock()
+            let off = _isOff, frozen = _isFrozen, held = frozenCopy
+            lock.unlock()
+            if off { return nil }
+            if frozen { return held }
+            return pull()
         }
     }
 }
