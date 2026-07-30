@@ -16,6 +16,8 @@ final class Instrument: ObservableObject {
     let renderer: InstrumentRenderer
     /// Live FPS / GPU-ms readout. Fed from the render thread, published on main.
     let renderStats = RenderStatsModel()
+    /// Per-monitor GPU cost, when metering is on. Fed from the render thread, published on main.
+    let elementStats = ElementStatsModel()
 
     init() {
         // The same shared device/queue the editor uses, so both apps cooperate with one GPU
@@ -29,6 +31,10 @@ final class Instrument: ObservableObject {
         let model = renderStats
         renderer.onStats = { snapshot in
             Task { @MainActor in model.stats = snapshot }
+        }
+        let elements = elementStats
+        renderer.onElementStats = { map in
+            Task { @MainActor in elements.gpuMs = map }
         }
     }
 

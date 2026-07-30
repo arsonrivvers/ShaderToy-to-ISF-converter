@@ -128,11 +128,78 @@ final class FrameGraphTests: XCTestCase {
     func testFrameUsesASingleCommandBuffer() throws {
         // The spec's central claim: no readback, no per-stage commit. If a stage started
         // committing its own buffer, this count would climb by more than one.
+        //
+        // This holds for the SHIPPING configuration. Metering deliberately breaks it — see
+        // testMeteringSplitsTheFrameIntoOneBufferPerElement — which is why metering is off by
+        // default and why turning it on is disclosed as changing what it measures.
         try load(.one, "solid_red")
         try load(.two, "solid_green")
+        XCTAssertFalse(renderer.isMeteringEnabled, "metering must ship OFF")
         let before = renderer.committedBufferCount
         renderer.renderFrame()
         XCTAssertEqual(renderer.committedBufferCount - before, 1)
+    }
+
+    // MARK: per-element metering
+
+    func testMeteringSplitsTheFrameIntoOneBufferPerElement() throws {
+        // One buffer per deck plus one for the master composite. That is what makes each element's
+        // gpuStartTime/gpuEndTime its own rather than the whole frame's.
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        renderer.isMeteringEnabled = true
+        let before = renderer.committedBufferCount
+        renderer.renderFrame()
+        XCTAssertEqual(renderer.committedBufferCount - before, 3)
+    }
+
+    func testTurningMeteringOffRestoresTheSingleBufferFrame() throws {
+        try load(.one, "solid_red")
+        renderer.isMeteringEnabled = true
+        renderer.renderFrame()
+        renderer.isMeteringEnabled = false
+        let before = renderer.committedBufferCount
+        renderer.renderFrame()
+        XCTAssertEqual(renderer.committedBufferCount - before, 1)
+    }
+
+    func testMeteringDoesNotChangeWhatIsRendered() throws {
+        // Splitting the buffers must not alter the image: the master still samples deck outputs
+        // written by buffers committed before it, because buffers on one queue execute in commit
+        // order. If that ordering were wrong this would read black or stale.
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0.5
+        mixer.setBlendMode(.normal, for: .two)
+        let unmetered = try renderAndRead()
+
+        renderer.isMeteringEnabled = true
+        let metered = try renderAndRead()
+        XCTAssertEqual(metered.x, unmetered.x, accuracy: 0.02)
+        XCTAssertEqual(metered.y, unmetered.y, accuracy: 0.02)
+        XCTAssertEqual(metered.z, unmetered.z, accuracy: 0.02)
+    }
+
+    func testNoElementFiguresArePublishedWhileMeteringIsOff() throws {
+        // "Not measured" and "measured as free" are different claims. With metering off the tiles
+        // must show nothing at all rather than a zero.
+        try load(.one, "solid_red")
+        var published: [[RenderElement: Double]] = []
+        renderer.onElementStats = { published.append($0) }
+        for _ in 0..<8 { renderer.renderFrame() }
+        renderer.onElementStats = nil
+        XCTAssertTrue(published.allSatisfy(\.isEmpty),
+                      "metering off must publish no per-element figures")
+    }
+
+    func testAnElementWithNoCompletedSampleIsAbsentRatherThanZero() {
+        var acc = ElementStatsAccumulator()
+        acc.add(.deck(.one), seconds: 0.004)
+        acc.add(.deck(.two), seconds: 0)      // a failure path reports 0 — not a measurement
+        let drained = acc.drain()
+        XCTAssertEqual(try XCTUnwrap(drained[.deck(.one)]), 4.0, accuracy: 0.001)
+        XCTAssertNil(drained[.deck(.two)], "a zero sample is not evidence the deck was free")
+        XCTAssertTrue(acc.drain().isEmpty, "draining clears the window")
     }
 
     // MARK: resolution

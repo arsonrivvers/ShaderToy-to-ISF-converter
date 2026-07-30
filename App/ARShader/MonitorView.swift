@@ -174,6 +174,20 @@ struct MonitorTile: View {
     var drivesClock: Bool = false
     @State private var isFrozen = false
     @State private var isOff = false
+    @ObservedObject private var elementStats: ElementStatsModel
+
+    init(instrument: Instrument, source: MonitorSource, label: String,
+         drivesClock: Bool = false) {
+        self.instrument = instrument
+        self.source = source
+        self.label = label
+        self.drivesClock = drivesClock
+        self.elementStats = instrument.elementStats
+    }
+
+    /// This tile's own GPU cost, or nil when metering is off. Absent, not zero — the tile shows
+    /// nothing rather than claiming an element measured as free.
+    private var gpuMs: Double? { elementStats.gpuMs[source.element] }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -187,6 +201,22 @@ struct MonitorTile: View {
                         .padding(.horizontal, 5).padding(.vertical, 2)
                         .background(.black.opacity(0.6), in: Capsule())
                         .padding(4)
+                }
+                .overlay(alignment: .topTrailing) {
+                    if let gpuMs {
+                        Text(String(format: "%.1f ms", gpuMs))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(gpuMs >= 8 ? .orange : .primary)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(.black.opacity(0.6), in: Capsule())
+                            .padding(4)
+                            .help(source == .master
+                                  ? "GPU time for the composite and master FX only — the decks "
+                                    + "are counted on their own tiles, so these add up to the "
+                                    + "frame without double-counting."
+                                  : "GPU time for this deck: its shader render, its copy, and its "
+                                    + "FX chain.")
+                    }
                 }
             HStack(spacing: 6) {
                 Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button).controlSize(.small)

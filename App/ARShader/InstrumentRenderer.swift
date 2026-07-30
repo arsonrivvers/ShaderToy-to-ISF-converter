@@ -8,6 +8,65 @@ enum MonitorSource: Equatable, Sendable {
     case deck(DeckID)
     /// The program feed. Taps POST-blackout: when the room is dark, this monitor is dark.
     case master
+
+    /// The frame element whose GPU cost this viewport is looking at.
+    var element: RenderElement {
+        switch self {
+        case .deck(let id): return .deck(id)
+        case .master:       return .master
+        }
+    }
+}
+
+/// Which part of the frame a GPU-time sample belongs to.
+enum RenderElement: Hashable, Sendable {
+    case deck(DeckID)
+    /// The composite and the master FX chain — NOT the decks feeding it, which are already counted
+    /// on their own tiles. Adding the tiles up therefore gives the frame, without double-counting.
+    case master
+}
+
+/// Observable slot for per-element GPU figures, mirroring `RenderStatsModel`. Separate from the
+/// renderer so a monitor tile can watch its own cost without observing the whole frame graph.
+@MainActor
+final class ElementStatsModel: ObservableObject {
+    /// Mean GPU ms per element over the last window. **Empty means "not measured"** — a tile shows
+    /// nothing rather than a zero, because "free" and "unmeasured" are different claims.
+    @Published var gpuMs: [RenderElement: Double] = [:]
+}
+
+/// Windowed per-element GPU time.
+///
+/// Lives here rather than beside `RenderStatsAccumulator` because the shared runtime's
+/// `RenderStats` cannot know what a deck is — `ISFRuntime` compiles into the editor too.
+struct ElementStatsAccumulator {
+    private var seconds: [RenderElement: Double] = [:]
+    private var samples: [RenderElement: Int] = [:]
+
+    /// Record one completed command buffer's GPU duration against the element it rendered.
+    mutating func add(_ element: RenderElement, seconds value: Double) {
+        guard value > 0 else { return }   // gpuStart/EndTime are 0 on some failure paths
+        seconds[element, default: 0] += value
+        samples[element, default: 0] += 1
+    }
+
+    /// Mean milliseconds per element over the window, clearing it. Elements with no completed
+    /// sample are absent rather than zero: "not measured" and "measured as free" are different
+    /// claims, and only one of them is honest to display.
+    mutating func drain() -> [RenderElement: Double] {
+        var out: [RenderElement: Double] = [:]
+        for (element, total) in seconds where (samples[element] ?? 0) > 0 {
+            out[element] = (total / Double(samples[element]!)) * 1000.0
+        }
+        seconds.removeAll()
+        samples.removeAll()
+        return out
+    }
+
+    mutating func reset() {
+        seconds.removeAll()
+        samples.removeAll()
+    }
 }
 
 /// The instrument's single clock and frame graph.
@@ -80,6 +139,19 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var cueScale: RenderScale = .defaultCue
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
+    /// Per-element GPU metering.
+    ///
+    /// OFF by default, and off is the shipping invariant: the whole frame is ONE command buffer.
+    /// ON splits the frame into one buffer per element so `gpuStartTime`/`gpuEndTime` — the same
+    /// measurement the global readout already trusts — attributes cleanly to each one.
+    ///
+    /// **Measuring perturbs the measurement, and the UI says so.** Separate buffers execute in
+    /// commit order and cannot overlap on the GPU, so the frame total while metering is slightly
+    /// higher than while not. That is the price of an unambiguous per-element number, and it is
+    /// the same price the counter-sampling alternative would have charged via `barrier: true` —
+    /// which this machine cannot do anyway (`atBlitBoundary` is false on Apple M5 Max).
+    private var meteringEnabled = false
+    private var elementStats = ElementStatsAccumulator()
     /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
     /// strong list would hold a window's worth of Metal state alive forever.
     private let monitors = NSHashTable<MTKView>.weakObjects()
@@ -89,6 +161,9 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// A fresh FPS / GPU-ms snapshot ~2x per second, or nil when the loop stops producing frames.
     /// Fires on the render thread; the UI hops to main.
     var onStats: (@Sendable (RenderStats?) -> Void)?
+    /// Per-element mean GPU ms, published on the same window as `onStats`. Empty while metering is
+    /// off. Fires on the render thread.
+    var onElementStats: (@Sendable ([RenderElement: Double]) -> Void)?
 
     @MainActor
     init(device: MTLDevice, queue: MTLCommandQueue, mixer: MixerState,
@@ -167,6 +242,19 @@ final class InstrumentRenderer: @unchecked Sendable {
     var cueRenderScale: RenderScale {
         get { lock.lock(); defer { lock.unlock() }; return cueScale }
         set { lock.lock(); cueScale = newValue; lock.unlock() }
+    }
+
+    /// Per-element GPU metering. See `meteringEnabled` for what turning it on costs.
+    var isMeteringEnabled: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return meteringEnabled }
+        set {
+            lock.lock()
+            guard newValue != meteringEnabled else { lock.unlock(); return }
+            meteringEnabled = newValue
+            elementStats.reset()    // never carry samples across a change of measurement regime
+            lock.unlock()
+            if !newValue { onElementStats?([:]) }
+        }
     }
 
     /// Requires `lock` held. Only swaps if BOTH allocated: a half-resized pair would composite
@@ -253,6 +341,7 @@ final class InstrumentRenderer: @unchecked Sendable {
             lock.unlock()
             return
         }
+        let metering = meteringEnabled
         let deckList = decks
         let outRes = masterResolution
         let liveRes = renderScale.applied(to: outRes)
@@ -271,13 +360,23 @@ final class InstrumentRenderer: @unchecked Sendable {
         //    crossfader) rasterises at the CUE resolution: it is only feeding a small monitor, and
         //    the ISF render is where essentially all the GPU cost is. Its owned texture stays at
         //    the output size, so starting a fade costs no reallocation.
+        // Extra buffers exist ONLY while metering. Off, everything shares `cb` and the frame is
+        // one buffer, exactly as before. On, each deck gets its own so its GPU time is its own;
+        // buffers on one queue execute in commit order, so ordering and cross-buffer texture
+        // dependencies are unaffected.
+        var meteredBuffers: [(RenderElement, MTLCommandBuffer)] = []
         var outputs: [DeckID: MTLTexture] = [:]
         var rasterSizes: [DeckID: MTLSize] = [:]
         for layer in layers {
             guard let deck = deckList[layer.deck] else { continue }
             let isLive = layer.effectiveOpacity > 0
             let renderSize = (isLive ? liveRes : cueRes).size
-            if let tex = deck.render(in: cb, renderSize: renderSize, ownedSize: liveRes.size) {
+            var target = cb
+            if metering, let own = queue.makeCommandBuffer() {
+                target = own
+                meteredBuffers.append((.deck(layer.deck), own))
+            }
+            if let tex = deck.render(in: target, renderSize: renderSize, ownedSize: liveRes.size) {
                 outputs[layer.deck] = tex
                 // Only on success: this reports what a deck ACTUALLY rasterised, not what it
                 // would have been asked for had it held a shader.
@@ -312,22 +411,43 @@ final class InstrumentRenderer: @unchecked Sendable {
         masterIndex = current
         deckOutputs = outputs
         deckRasterSizes = rasterSizes
-        committedBuffers += 1
+        committedBuffers += 1 + meteredBuffers.count
         let views = monitors.allObjects
         lock.unlock()
 
+        // Deck buffers commit BEFORE the master buffer. Buffers on one queue execute in commit
+        // order, so the master still samples deck outputs that have already been written — the
+        // dependency the single-buffer version got from encode order.
+        for (element, buffer) in meteredBuffers {
+            buffer.addCompletedHandler { [weak self] buf in
+                self?.addElementGPUTime(element, seconds: buf.gpuEndTime - buf.gpuStartTime)
+            }
+            buffer.commit()
+        }
+
         // GPU frame time arrives on a Metal completion thread; addGPUTime is lock-protected, so no
         // main hop is needed. Must be attached before commit.
+        //
+        // While metering, `cb` carries ONLY the clear and the composite — the decks went to their
+        // own buffers — so it is the master element's cost, not the frame's. The frame total then
+        // comes from summing the elements, which is why `.master` deliberately excludes the decks
+        // feeding it.
         cb.addCompletedHandler { [weak self] buf in
-            self?.addGPUTime(seconds: buf.gpuEndTime - buf.gpuStartTime)
+            let seconds = buf.gpuEndTime - buf.gpuStartTime
+            self?.addGPUTime(seconds: seconds)
+            if metering { self?.addElementGPUTime(.master, seconds: seconds) }
         }
         cb.commit()
 
         lock.lock()
         let snapshot = stats.frame(at: CACurrentMediaTime())
         if snapshot != nil { statsWereLive = true }
+        // Per-element figures ride the SAME window as the global snapshot, so a tile and the
+        // headline readout can never disagree about which half-second they describe.
+        let elements = snapshot != nil && metering ? elementStats.drain() : nil
         lock.unlock()
         if let snapshot { onStats?(snapshot) }
+        if let elements { onElementStats?(elements) }
 
         onFrameRendered?()
 
@@ -348,6 +468,11 @@ final class InstrumentRenderer: @unchecked Sendable {
         cb.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
     }
 
+    private func addElementGPUTime(_ element: RenderElement, seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        elementStats.add(element, seconds: seconds)
+    }
+
     private func addGPUTime(seconds: Double) {
         lock.lock(); defer { lock.unlock() }
         stats.addGPUTime(seconds: seconds)
@@ -357,10 +482,14 @@ final class InstrumentRenderer: @unchecked Sendable {
     func resetStats() {
         lock.lock()
         stats.reset()
+        elementStats.reset()
         let wasLive = statsWereLive
         statsWereLive = false
         lock.unlock()
-        if wasLive { onStats?(nil) }
+        if wasLive {
+            onStats?(nil)
+            onElementStats?([:])   // a paused loop must not leave stale per-tile figures up
+        }
     }
 
     // MARK: monitors

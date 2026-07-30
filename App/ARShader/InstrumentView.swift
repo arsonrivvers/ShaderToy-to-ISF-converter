@@ -337,16 +337,32 @@ struct InstrumentView: View {
     /// Real measured numbers or nothing. An FPS figure the engine did not produce would be the
     /// same class of lie as the fabricated recorder counter.
     private var statsReadout: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(stats.stats == nil ? Color.secondary : .green)
-                .frame(width: 5, height: 5)
-            Text(stats.stats?.readoutLabel ?? "no frames")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(stats.stats == nil ? .secondary : .primary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(stats.stats == nil ? Color.secondary : .green)
+                    .frame(width: 5, height: 5)
+                Text(stats.stats?.readoutLabel ?? "no frames")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(stats.stats == nil ? .secondary : .primary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help("Measured draw cadence and mean GPU time per frame, from the render loop.")
+
+            Toggle(isOn: Binding(
+                get: { instrument.renderer.isMeteringEnabled },
+                set: { instrument.renderer.isMeteringEnabled = $0 })) {
+                Text("PER-TILE GPU")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+            }
+            .toggleStyle(.checkbox)
+            .help("Show each monitor's own GPU time on its tile.\n\n"
+                  + "This changes what it measures, so it is off by default: the frame is split "
+                  + "into one command buffer per element so each can be timed on its own, and "
+                  + "separate buffers cannot overlap on the GPU. Expect the frame total to read "
+                  + "slightly higher while this is on. There is no FPS per tile — one clock drives "
+                  + "every pane, so they all run at the same rate by construction.")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .help("Measured draw cadence and mean GPU time per frame, from the render loop.")
     }
 
     /// Output ships CLOSED; this is the deliberate operator enable.
