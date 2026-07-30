@@ -189,6 +189,9 @@ targets:
     platform: macOS
     sources:
       - ARShaderTests
+      - path: ARShaderTests/Fixtures
+        buildPhase: resources
+        type: folder
       - path: ISFRuntime
       - path: ARShader
         excludes:

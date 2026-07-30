@@ -1,6 +1,7 @@
 import Foundation
 import Metal
 import ISFMSLKit
+import VVMetalKit
 
 /// Compiles ISF source text into an `ISFMSLScene` and describes its inputs. Shared by the editor's
 /// preview controller and the instrument's decks so both go through the SAME crash-safe path and
@@ -17,8 +18,24 @@ enum ISFSceneLoader {
         var isValid: Bool { scene != nil && errorMessage == nil }
     }
 
+    /// ISFMSLKit's global singletons. **`ISFMSLScene.loadURL:` fails SILENTLY without these** —
+    /// no scene, no error message — which is exactly what happens to any caller that compiles
+    /// before an `MetalPreviewController` or `ISFSceneSource` has been constructed. Both of those
+    /// did this inline; centralising it here is what makes `ISFSceneLoader` safe to call first.
+    private static func ensureGlobals(device: MTLDevice) {
+        if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: device) }
+        if ISFMSLCache.primary == nil {
+            let cacheDir = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                    in: .userDomainMask)[0]
+                .appendingPathComponent("TrueISFEditor/ISFMSLCache")
+            try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            ISFMSLCache.primary = ISFMSLCache(directoryURL: cacheDir)
+        }
+    }
+
     /// Write `source` to a temp `.fs` and compile it. The temp file is removed before returning.
     static func load(source: String, device: MTLDevice) -> Result {
+        ensureGlobals(device: device)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("isfruntime-\(UUID().uuidString).fs")
         defer { try? FileManager.default.removeItem(at: url) }

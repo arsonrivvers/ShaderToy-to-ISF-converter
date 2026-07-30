@@ -98,17 +98,43 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
         statsAccumulator.addGPUTime(seconds: seconds)
     }
 
-    /// Offscreen one-frame render at the current target size (test hook; no drawable involved).
+    /// Render the current scene into the CALLER's command buffer and return the engine's output
+    /// texture. Does NOT commit — the instrument encodes an entire frame (both decks, the
+    /// compositor, the blackout gate) into one buffer, so committing here would split it.
+    ///
+    /// Binds routed image-input sources first, inside the same buffer, so a source renders before
+    /// the filter that reads it (the ordering `draw(in:)` already relies on).
+    func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? {
+        lock.lock(); defer { lock.unlock() }
+        guard let scene else { return nil }
+        for name in imageInputNames {
+            if let src = imageRouter?.renderSource(for: name),
+               let tex = src.texture(size: size, in: cb),
+               let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {
+                scene.setValue(val, forInputNamed: name)
+            }
+        }
+        var err: NSString?
+        return ISFMSLSafeRenderAtTime(scene, NSSize(width: size.width, height: size.height),
+                                      clock.now, cb, &err)
+    }
+
+    /// Offscreen one-frame render at the current target size (editor test hook; commits its own
+    /// buffer and returns once encoded).
     @discardableResult
     func renderOnce(drawableSize: CGSize) -> MTLTexture? {
-        lock.lock(); defer { lock.unlock() }
-        guard let scene, let cb = renderQueue.makeCommandBuffer() else { return nil }
-        let size = targetSizeLocked(drawableSize: drawableSize)
-        var err: NSString?
-        let tex = ISFMSLSafeRenderAtTime(scene, NSSize(width: size.width, height: size.height),
-                                         clock.now, cb, &err)
+        guard let cb = renderQueue.makeCommandBuffer() else { return nil }
+        let size = withLock { targetSizeLocked(drawableSize: drawableSize) }
+        let tex = renderOffscreen(size: size, in: cb)
         cb.commit()
         return tex
+    }
+
+    /// Run `body` under the render lock. Mirrors `withScene` for callers that need other
+    /// lock-guarded state.
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body()
     }
 
     // MARK: render path (display-link thread; also main via drawOneFrame while paused)
