@@ -79,6 +79,8 @@ struct InstrumentView: View {
     @State private var keys: BlackoutKeyMonitor?
     @State private var widthField = ""
     @State private var heightField = ""
+    @State private var renderScaleField = ""
+    @State private var cueScaleField = ""
 
     init(instrument: Instrument) {
         self.instrument = instrument
@@ -213,22 +215,79 @@ struct InstrumentView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
 
-            // Temporary stand-in so the build passes between plan Task 2 and Task 3, which
-            // replaces this whole section with typed fields and resolved-size readouts.
-            HStack {
-                Text("Cue").font(.system(size: 11))
-                Picker("", selection: Binding(
-                    get: { instrument.renderer.cueRenderScale },
-                    set: { instrument.renderer.cueRenderScale = $0 })) {
-                    ForEach(RenderScale.presets, id: \.self) { Text($0.label).tag($0) }
-                }
-                .labelsHidden()
-            }
-            .help("How much of the output resolution a deck renders at while it is NOT on program. "
-                  + "It only feeds a small monitor there, and the shader render is where the GPU "
-                  + "actually goes. 100% turns the saving off.")
+            Divider()
+
+            scaleField(title: "RENDER SCALE",
+                       text: $renderScaleField,
+                       current: instrument.renderer.outputRenderScale,
+                       resolved: instrument.renderer.outputRenderScale
+                           .applied(to: instrument.renderer.outputResolution),
+                       caption: "rasterising",
+                       help: "What live decks AND the program composite actually rasterise at. "
+                           + "Output stays the size you typed — the projector upscales — so low "
+                           + "values trade sharpness for GPU.",
+                       apply: { instrument.renderer.outputRenderScale = $0 })
+
+            scaleField(title: "CUE SCALE",
+                       text: $cueScaleField,
+                       current: instrument.renderer.cueRenderScale,
+                       resolved: instrument.renderer.cueRenderScale
+                           .applied(to: instrument.renderer.outputResolution),
+                       caption: "cued decks",
+                       help: "What a deck rasterises at while it is NOT on program. It only feeds "
+                           + "a small monitor there, and this reallocates nothing — so it is safe "
+                           + "to drop very low.",
+                       apply: { instrument.renderer.cueRenderScale = $0 })
         }
         .onAppear { syncResolutionFields() }
+    }
+
+    /// A typed percentage with a presets menu and the pixel size it resolves to.
+    ///
+    /// The resolved size is shown because softness at a low scale should be a number the operator
+    /// set, not a surprise on a wall.
+    private func scaleField(title: String,
+                            text: Binding<String>,
+                            current: RenderScale,
+                            resolved: RenderSize,
+                            caption: String,
+                            help: String,
+                            apply: @escaping (RenderScale) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(title).font(.system(size: 11, weight: .bold, design: .monospaced))
+                Spacer()
+                Menu {
+                    ForEach(RenderScale.presets, id: \.self) { preset in
+                        Button(preset.label) { apply(preset); syncResolutionFields() }
+                    }
+                } label: {
+                    Image(systemName: "list.bullet")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 22)
+                .help("Common scales")
+            }
+            HStack(spacing: 4) {
+                TextField("%", text: text)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 52)
+                    .font(.system(size: 11, design: .monospaced))
+                    .onSubmit {
+                        // An empty or nonsense field keeps the current value rather than snapping
+                        // to a default: losing a deliberately-set scale to a stray keystroke
+                        // mid-set would be worse than ignoring the edit.
+                        let parsed = Int(text.wrappedValue.trimmingCharacters(in: .whitespaces))
+                        apply(RenderScale(percent: parsed ?? current.percent))
+                        syncResolutionFields()
+                    }
+                Text("%").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Text("→ \(caption) \(resolved.label)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .help(help)
     }
 
     private func applyOutput(_ size: RenderSize) {
@@ -250,6 +309,8 @@ struct InstrumentView: View {
         let r = instrument.renderer.outputResolution
         widthField = String(r.width)
         heightField = String(r.height)
+        renderScaleField = String(instrument.renderer.outputRenderScale.percent)
+        cueScaleField = String(instrument.renderer.cueRenderScale.percent)
     }
 
     /// Real measured numbers or nothing. An FPS figure the engine did not produce would be the
