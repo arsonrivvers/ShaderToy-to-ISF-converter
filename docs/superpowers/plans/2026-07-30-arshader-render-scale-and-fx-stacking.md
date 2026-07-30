@@ -49,7 +49,9 @@
 
 | File | Responsibility |
 |---|---|
-| `App/ISFRuntime/ShaderUnit.swift` **(create)** | One hosted ISF shader: scene, params, image routing, compile state, load/unload/pulse |
+| `App/ARShader/ShaderUnit.swift` **(create)** | One hosted ISF shader: scene, params, image routing, compile state, load/unload/pulse. **NOT in `ISFRuntime`:** `project.yml:81` excludes `ParamStore.swift` from the `TrueISFEditorTests` target, so a shared `ShaderUnit` referencing `ParamStore` would fail to compile there. Nothing outside ARShader uses it. |
+| `App/ISFRuntime/MetalRenderCore.swift` **(modify)** | `renderOffscreen(size:in:primaryInput:)` — an externally supplied texture for the first image input |
+| `App/ISFRuntime/SourceRouter.swift` **(modify)** | `updateInputs(_:reservePrimary:)` — leave the first image input unrouted when the chain drives it |
 | `App/ARShader/Deck.swift` **(modify)** | `ShaderUnit` + owned output + scratch + `FXChain` |
 | `App/ARShader/Compositor.swift` **(modify)** | `preserveAlpha` uniform — opaque for the master, preserving mid-chain |
 | `App/ARShader/FXStage.swift` **(create)** | One stage: unit + enabled + mix + blend |
@@ -612,7 +614,7 @@ git commit -m "docs(perf): render scale sweep — GPU ms against rasterised pixe
 This refactor has the exact shape of the Milestone 1 defect where `DeckStripView` stopped observing its model and froze at "—" while 104 tests stayed green. Its gate is a **live capture**, not a test pass.
 
 **Files:**
-- Create: `App/ISFRuntime/ShaderUnit.swift`
+- Create: `App/ARShader/ShaderUnit.swift` (**not** `ISFRuntime` — see File Structure)
 - Modify: `App/ARShader/Deck.swift`, `App/ARShader/InstrumentView.swift`, `App/ARShader/DeckControlsView.swift`
 - Test: `App/ARShaderTests/ShaderUnitTests.swift` (create), `App/ARShaderTests/DeckTests.swift` (update references)
 
@@ -813,7 +815,7 @@ Every `deck.shaderName` / `.compileError` / `.inputs` / `.isLoading` / `.onCompi
 
 Expected: PASS, 134 (130 + 4 new).
 
-- [ ] **Step 8: Run the TrueISFEditor suite — `ISFRuntime` is shared**
+- [ ] **Step 8: Run the TrueISFEditor suite (belt and braces — this task should not touch `ISFRuntime`)**
 
 ```bash
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme TrueISFEditor \
@@ -1027,7 +1029,7 @@ final class FXChainTests: XCTestCase {
     }
 
     private func makeStage() -> FXStage {
-        FXStage(unit: ShaderUnit(device: device, queue: queue, clock: RenderClock()))
+        FXStage(device: device, queue: queue, clock: RenderClock())
     }
 
     func testAnEmptyChainPublishesNoRenderStages() {
@@ -1114,17 +1116,23 @@ final class FXStage: ObservableObject, Identifiable {
     let id = UUID()
     let unit: ShaderUnit
 
+    /// Builds its own unit so a stage can never be constructed with a ROUTED primary input — the
+    /// chain drives that slot (Task 7.5).
+    init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock) {
+        self.unit = ShaderUnit(device: device, queue: queue, clock: clock,
+                               reservesPrimaryInput: true)
+    }
+
     @Published private(set) var isEnabled = true
     /// Dry (0) to wet (1). At 0 the stage is skipped entirely — see FXChain.publishToRenderThread.
     @Published private(set) var mix: Double = 1.0
     /// How the stage's output is combined with its input. The same 19 modes the mixer uses.
     @Published private(set) var blendMode: BlendMode = .normal
 
-    init(unit: ShaderUnit) { self.unit = unit }
-
-    /// True when the shader has no filter image input — a generator, which REPLACES the feed
-    /// rather than processing it. Marked in the UI so it is a usable move, not a mystery.
-    var isGenerator: Bool { unit.imageSources.imageInputNames.isEmpty }
+    /// True when the shader declares NO image input — a generator, which REPLACES the feed rather
+    /// than processing it. Marked in the UI so it is a usable move, not a mystery.
+    /// Asks the SHADER, not the router: a filter stage's primary input is deliberately unrouted.
+    var isGenerator: Bool { unit.inputs.allSatisfy { $0.type != "image" } }
 
     fileprivate func apply(isEnabled: Bool) { self.isEnabled = isEnabled }
     fileprivate func apply(mix: Double) { self.mix = min(max(mix, 0), 1) }
@@ -1238,6 +1246,157 @@ final class FXChain: ObservableObject {
 ```bash
 git add App/ARShader/FXStage.swift App/ARShader/FXChain.swift App/ARShaderTests/FXChainTests.swift
 git commit -m "feat(fx): the FX chain model and its render-thread mirror"
+```
+
+---
+
+### Task 7.5: Feed the chain into a stage's primary image input
+
+Without this, a stage's `inputImage` is bound by `SourceRouter` to the **camera** — not to the previous stage — and `updateInputs` opens a capture session per stage. Both changes are additive with defaults, so the deck path and the editor are untouched.
+
+**Files:**
+- Modify: `App/ISFRuntime/MetalRenderCore.swift` (`renderOffscreen`), `App/ISFRuntime/SourceRouter.swift` (`updateInputs`), `App/ARShader/ShaderUnit.swift`
+- Test: `App/ARShaderTests/FXChainTests.swift`
+
+**Interfaces:**
+- Produces: `MetalRenderCore.renderOffscreen(size:in:primaryInput:)` (`primaryInput` defaults to `nil`); `SourceRouter.updateInputs(_:reservePrimary:)` (defaults `false`); `ShaderUnit.init(device:queue:clock:reservesPrimaryInput:)` (defaults `false`); `ShaderUnit.renderOffscreen(size:in:primaryInput:)`
+
+- [ ] **Step 1: Write the failing test**
+
+```swift
+    func testAStageReadsTheChainFeedNotItsRoutedSources() throws {
+        // Without an explicit primary input, MetalRenderCore binds EVERY image input from the
+        // SourceRouter — so `inputImage` would be the camera and the chain feed would never
+        // reach the shader. Inverting a known red input is the cheapest proof it arrived.
+        chain.append(try loadedStage("invert_filter"))
+        let out = try runChain(input: SIMD3(1, 0, 0))
+        XCTAssertEqual(out.y, 1.0, accuracy: 0.03,
+                       "the stage must invert the CHAIN input, not a routed camera frame")
+    }
+
+    func testAFilterStageLeavesItsPrimaryInputUnrouted() throws {
+        // A stage must not open a camera session for an input the chain already drives.
+        let stage = try loadedStage("invert_filter")
+        XCTAssertEqual(stage.unit.imageSources.selection(for: "inputImage"), .none,
+                       "the chain feeds this input; the router must not claim it")
+    }
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Expected: the first FAILS (output is not the inverted chain feed); the second FAILS (selection is `.camera`).
+
+- [ ] **Step 3: Implement `primaryInput` in `MetalRenderCore`**
+
+Replace the input-binding loop in `renderOffscreen`:
+
+```swift
+    /// Render the current scene into the CALLER's command buffer and return the engine's output
+    /// texture. Does NOT commit — the instrument encodes an entire frame into one buffer.
+    ///
+    /// `primaryInput`, when given, is bound to the FIRST image input instead of consulting the
+    /// router: that is how an FX stage receives the previous stage's output. Every other image
+    /// input still routes normally, so a two-input filter keeps its secondary source.
+    func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer,
+                         primaryInput: MTLTexture? = nil) -> MTLTexture? {
+        lock.lock(); defer { lock.unlock() }
+        guard let scene else { return nil }
+        for (index, name) in imageInputNames.enumerated() {
+            if index == 0, let primaryInput,
+               let val = ISFMSLSceneVal.create(with: primaryInput) as? ISFMSLSceneVal {
+                scene.setValue(val, forInputNamed: name)
+                continue
+            }
+            if let src = imageRouter?.renderSource(for: name),
+               let tex = src.texture(size: size, in: cb),
+               let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {
+                scene.setValue(val, forInputNamed: name)
+            }
+        }
+        var err: NSString?
+        return ISFMSLSafeRenderAtTime(scene, NSSize(width: size.width, height: size.height),
+                                      clock.now, cb, &err)
+    }
+```
+
+- [ ] **Step 4: Implement `reservePrimary` in `SourceRouter`**
+
+```swift
+    /// Called by the engine on each successful compile. Adds defaults for new image inputs and
+    /// prunes routes for inputs that no longer exist.
+    ///
+    /// `reservePrimary` marks the FIRST image input as externally driven — an FX stage's chain
+    /// feed. That input gets no route and no default, so a stage never opens a camera session for
+    /// a slot the chain already fills.
+    func updateInputs(_ inputs: [ISFPreviewInput], reservePrimary: Bool = false) {
+        let names = inputs.filter { $0.type == "image" }.map { $0.name }
+        imageInputNames = names
+        let nameSet = Set(names)
+        selections = selections.filter { nameSet.contains($0.key) }
+        sources = sources.filter { nameSet.contains($0.key) }
+        for n in names where selections[n] == nil {
+            if reservePrimary && n == names.first {
+                selections[n] = .none        // the chain drives this one
+                continue
+            }
+            let sel: SourceSelection = (!reservePrimary && n == names.first)
+                ? .camera
+                : .testPattern(id: Self.secondaryDefaultPattern)
+            selections[n] = sel
+            sources[n] = makeSource(sel)
+        }
+    }
+```
+
+- [ ] **Step 5: Thread it through `ShaderUnit`**
+
+```swift
+    /// True when this unit's first image input is fed externally (an FX stage's chain feed) rather
+    /// than routed. Decks are false: their shader's inputs are the operator's to route.
+    private let reservesPrimaryInput: Bool
+
+    init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock,
+         reservesPrimaryInput: Bool = false) {
+        self.reservesPrimaryInput = reservesPrimaryInput
+        // ... rest unchanged
+    }
+
+    nonisolated func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer,
+                                     primaryInput: MTLTexture? = nil) -> MTLTexture? {
+        core.renderOffscreen(size: size, in: cb, primaryInput: primaryInput)
+    }
+```
+
+and in `apply(_:name:generation:)`:
+
+```swift
+        imageSources.updateInputs(result.inputs, reservePrimary: reservesPrimaryInput)
+```
+
+`FXStage`'s unit is built with `reservesPrimaryInput: true`; `Deck`'s stays default.
+
+- [ ] **Step 6: Correct `FXStage.isGenerator`**
+
+The router no longer reports a reserved primary, so ask the shader, not the router:
+
+```swift
+    /// True when the shader declares NO image input — a generator, which REPLACES the feed rather
+    /// than processing it.
+    var isGenerator: Bool { unit.inputs.allSatisfy { $0.type != "image" } }
+```
+
+- [ ] **Step 7: Run the ARShader suite** — Expected: PASS.
+
+- [ ] **Step 8: Run the TrueISFEditor suite — `MetalRenderCore` and `SourceRouter` are SHARED**
+
+Expected: 514 (3 skipped), identical to baseline. Both changes are additive with defaults, so any failure here means a default was not preserved.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add App/ISFRuntime/MetalRenderCore.swift App/ISFRuntime/SourceRouter.swift \
+        App/ARShader/ShaderUnit.swift App/ARShader/FXStage.swift App/ARShaderTests/FXChainTests.swift
+git commit -m "feat(fx): bind a stage's primary image input to the chain feed"
 ```
 
 ---
@@ -1445,8 +1604,11 @@ extension FXChain {
         var source = input
         var target = scratch
         for stage in renderStages() {
+            // `primaryInput: source` is what makes this a CHAIN: the stage's first image input is
+            // the previous stage's result, not whatever its router would otherwise supply.
             // A transient render failure passes this stage's input through — never black.
-            guard let produced = stage.core.renderOffscreen(size: renderSize, in: cb) else {
+            guard let produced = stage.core.renderOffscreen(size: renderSize, in: cb,
+                                                            primaryInput: source) else {
                 continue
             }
             compositor.encodeLayer(source: produced, backdrop: source, destination: target,
@@ -1538,7 +1700,7 @@ git commit -m "feat(fx): encode deck chains as a ping-pong; the mix pass IS the 
     // MARK: master FX
 
     private func loadedMasterStage(_ fixtureName: String) throws -> FXStage {
-        let stage = FXStage(unit: ShaderUnit(device: device, queue: queue, clock: RenderClock()))
+        let stage = FXStage(device: device, queue: queue, clock: RenderClock())
         let done = expectation(description: "compile \(fixtureName)")
         stage.unit.onCompileFinished = { done.fulfill() }
         stage.unit.load(source: try fixture(fixtureName), name: "\(fixtureName).fs")
@@ -1705,14 +1867,13 @@ and the row action:
     }
 
     private func append(_ url: URL, to chain: FXChain) {
-        let unit = ShaderUnit(device: instrument.device, queue: instrument.queue,
-                              clock: instrument.renderer.clock)
-        let stage = FXStage(unit: unit)
+        let stage = FXStage(device: instrument.device, queue: instrument.queue,
+                            clock: instrument.renderer.clock)
         // Republish once the scene lands, so a stage starts encoding as soon as it compiles rather
         // than waiting for an unrelated mutation.
-        unit.onCompileFinished = { [weak chain] in chain?.stageDidChangeScene() }
+        stage.unit.onCompileFinished = { [weak chain] in chain?.stageDidChangeScene() }
         chain.append(stage)
-        unit.load(url: url)
+        stage.unit.load(url: url)
     }
 ```
 
