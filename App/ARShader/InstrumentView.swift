@@ -234,8 +234,11 @@ struct InstrumentView: View {
             scaleField(title: "CUE SCALE",
                        text: $cueScaleField,
                        current: instrument.renderer.cueRenderScale,
+                       // Composed, not applied to the output: cue is a fraction of the LIVE
+                       // render, so the readout has to show the product of the two scales.
                        resolved: instrument.renderer.cueRenderScale
-                           .applied(to: instrument.renderer.outputResolution),
+                           .applied(to: instrument.renderer.previewScale
+                               .applied(to: instrument.renderer.outputResolution)),
                        caption: "cued decks",
                        help: "What a deck rasterises at while it is NOT on program — a loaded deck "
                            + "you have faded out. This reallocates nothing and never touches the "

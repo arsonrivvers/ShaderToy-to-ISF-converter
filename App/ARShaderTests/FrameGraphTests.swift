@@ -267,6 +267,23 @@ final class FrameGraphTests: XCTestCase {
         XCTAssertEqual(rgb.y, 1.0, accuracy: 0.02, "and still shows green on its monitor")
     }
 
+    func testCueScaleIsAFractionOfTheLiveRenderNotOfTheOutput() throws {
+        // A cued deck must never rasterise LARGER than a live one. Applying cue to the output
+        // resolution made that possible: preview 25% + cue 50% gave the faded-out deck 960px
+        // against the live deck's 480 — the deck nobody can see costing twice the one on program.
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0          // deck 1 live, deck 2 cued
+        renderer.previewScale = RenderScale(percent: 25)
+        renderer.cueRenderScale = RenderScale(percent: 50)
+        renderer.renderFrame()
+        let live = try XCTUnwrap(renderer.deckRasterSize(.one)).width
+        let cued = try XCTUnwrap(renderer.deckRasterSize(.two)).width
+        XCTAssertEqual(live, 480)
+        XCTAssertEqual(cued, 240, "cue is a fraction of the LIVE render, not of the output")
+        XCTAssertLessThanOrEqual(cued, live, "a cued deck can never cost more than a live one")
+    }
+
     func testTheInstrumentStillRendersCorrectlyAtAReducedRenderScale() throws {
         try load(.one, "solid_red")
         mixer.crossfadePosition = 0

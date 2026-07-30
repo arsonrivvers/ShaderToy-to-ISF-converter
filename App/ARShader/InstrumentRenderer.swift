@@ -71,10 +71,12 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// resolution. The instrument's one real GPU lever: the ISF render is where essentially all
     /// the cost lives (monitors just sample a texture that already exists, which is nearly free).
     private var renderScale: RenderScale = .defaultRender
-    /// What a deck rasterises at while it is NOT contributing to program.
+    /// What a deck rasterises at while it is NOT contributing to program, as a fraction of the
+    /// LIVE render size — the two scales compose.
     ///
     /// A cued deck feeds only a small monitor, so rasterising it at the live size is pure waste.
-    /// This can go much lower than the render scale for exactly that reason.
+    /// It is also the only saving still available while the projector is open, since the preview
+    /// scale cannot drop below full output resolution without softening the projection.
     private var cueScale: RenderScale = .defaultCue
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
@@ -254,7 +256,12 @@ final class InstrumentRenderer: @unchecked Sendable {
         let deckList = decks
         let outRes = masterResolution
         let liveRes = renderScale.applied(to: outRes)
-        let cueRes = cueScale.applied(to: outRes)
+        // Cue is a fraction of the LIVE render, not of the output. Applied to the output it could
+        // exceed the live size — preview 25% with cue 50% rasterised a faded-out deck at 960px
+        // against the live deck's 480, so the deck nobody can see cost four times the pixels of
+        // the one on program. Composing them means the two scales multiply, which is what an
+        // operator reading "25% preview, 50% cue" would expect.
+        let cueRes = cueScale.applied(to: liveRes)
         lock.unlock()
 
         // 1. Decks render offscreen into their own textures. Deck.render is nonisolated and
