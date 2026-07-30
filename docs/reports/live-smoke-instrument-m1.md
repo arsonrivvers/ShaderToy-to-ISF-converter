@@ -1,15 +1,37 @@
 # Live smoke — ARShader Milestone 1
 
-**Status: STAGED, not complete.** Milestone 1's entire premise is that the TouchDesigner build's
-failure mode was a great deal getting built before anything got played. A green suite is not a
-performance. This becomes CONFIRMED only when the operator has driven it by hand and signed off.
+**Status: SIGNED 2026-07-30 by Conner — CONFIRMED with findings.**
+
+Milestone 1's premise was that the TouchDesigner build's failure mode was a great deal getting
+built before anything got played. That is now discharged: the operator drove the instrument, and it
+produced feedback within minutes — including one real defect (Freeze) that 104 green tests did not
+catch, and a Milestone 2 feature list. That is exactly the outcome the small milestone was for.
 
 - **Build under test:** `~/Applications/ARShader.app` (install with `./scripts/run-instrument.sh`)
-- **Automated gates at time of writing:** ARShaderTests 104/104 · TrueISFEditor 514 (3 skipped) ·
-  ShadertoyISFKit 312 — all passing
+- **Automated gates:** ARShaderTests 107/107 · TrueISFEditor 514 (3 skipped) · ShadertoyISFKit 312
 - **Operator:** Conner
-- **Date:**
-- **Result:**
+- **Date:** 2026-07-30
+- **Result:** CONFIRMED for the core instrument. Projector legs NOT RUN (see below).
+
+## Findings from the session
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Freeze does nothing** | **FIXED** `ab9cfb0`. It held a reference to a texture reused every frame, so contents kept updating under it. Now copies pixels on the rising edge. Mutation-tested: reinstating the old behaviour fails the new test. |
+| 2 | Deck A / B / program output resolution are not adjustable | Milestone 2 |
+| 3 | No FPS readout | Milestone 2 (`RenderStats` already exists in ISFRuntime, unused by the instrument) |
+| 4 | Library cannot be collapsed; wants a button-driven slide-out panel system like TrueISFEditor | Milestone 2 |
+| 5 | Library needs to be genuinely useful for show prep (organisation, folders — operator said folders can come later) | Milestone 2 |
+| 6 | **Add** blend mode missing, plus others worth taking from TouchDesigner's Composite TOP | Milestone 2 |
+| 7 | Need multiple `.fs` per deck — stacked effect chains | Milestone 2 (architecture) |
+| 8 | Need a master effects chain on the program output | Milestone 2 (architecture) |
+
+## Legs not run
+
+Legs 15–18 (**external display / projector**) were not exercised — no external display was
+connected during the session. The placement logic is unit-tested against a `ScreenInfo` value model,
+but no output window has ever been on a real second screen. Still open under action item
+`arshader-m1-live-smoke-confirmed-gate-20260730`.
 
 ## Already verified by the agent (not operator-confirmed)
 
