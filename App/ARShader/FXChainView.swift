@@ -79,9 +79,13 @@ struct FXStageRow: View {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                 }
                 .buttonStyle(.plain)
+                // The whole name is the hit target, not just the chevron — a 12pt glyph is a poor
+                // thing to aim at mid-set.
                 Text(unit.shaderName ?? (unit.isLoading ? "loading…" : "—"))
                     .font(.system(size: 11, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
+                    .contentShape(Rectangle())
+                    .onTapGesture { expanded.toggle() }
                     .help(unit.shaderName ?? "No shader")
                 if stage.isGenerator {
                     Text("GEN").font(.system(size: 9, design: .monospaced))
@@ -124,7 +128,15 @@ struct FXStageRow: View {
                     .foregroundStyle(.red).textSelection(.enabled)
             }
             if expanded {
-                ShaderControlsView(unit: unit, library: library).frame(maxHeight: 220)
+                // minHeight is load-bearing. ShaderControlsView is itself a ScrollView, and a
+                // ScrollView nested in another scrolling container has NO intrinsic height — with
+                // only a maxHeight it collapses to nothing and the stage's sliders are invisible
+                // even though the disclosure "opened". Caught on the first live look, 2026-07-30.
+                // Its own SOURCES block: the primary shows as the chain feed, and a second input
+                // (a mask, a blend layer) is still the operator's to route.
+                SourceRoutingView(unit: unit, library: library)
+                ShaderControlsView(unit: unit)
+                    .frame(minHeight: 150, maxHeight: 260)
             }
             Divider()
         }

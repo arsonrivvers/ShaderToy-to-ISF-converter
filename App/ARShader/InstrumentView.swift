@@ -35,6 +35,10 @@ struct DeckStripView: View {
                 .lineLimit(1).truncationMode(.middle)
                 .help(unit.shaderName ?? "No shader loaded")
 
+            // Routing sits with the shader's identity, not among its knobs: it is the first thing
+            // you set on a filter, and it renders nothing at all for a generator.
+            SourceRoutingView(unit: unit, library: library)
+
             // Both values, always — the fader the operator set AND what it is contributing.
             HStack {
                 Text("Opacity").font(.system(size: 11))
@@ -69,7 +73,7 @@ struct DeckStripView: View {
             Divider()
             FXChainView(title: "FX", chain: fx, stats: stats, library: library)
             Divider()
-            ShaderControlsView(unit: unit, library: library)
+            ShaderControlsView(unit: unit)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
