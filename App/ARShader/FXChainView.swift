@@ -9,6 +9,7 @@ struct FXChainView: View {
     let title: String
     @ObservedObject var chain: FXChain
     @ObservedObject var stats: RenderStatsModel
+    @ObservedObject var library: LibraryModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -25,7 +26,7 @@ struct FXChainView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             ForEach(Array(chain.stages.enumerated()), id: \.element.id) { index, stage in
-                FXStageRow(chain: chain, stage: stage, index: index)
+                FXStageRow(chain: chain, stage: stage, index: index, library: library)
             }
         }
     }
@@ -51,6 +52,7 @@ struct FXStageRow: View {
     @ObservedObject var chain: FXChain
     @ObservedObject var stage: FXStage
     let index: Int
+    @ObservedObject var library: LibraryModel
     @State private var expanded = false
 
     /// The row observes the stage AND its unit. The unit is what publishes the shader name and
@@ -58,10 +60,11 @@ struct FXStageRow: View {
     /// `DeckStripView` did before it was retargeted (Milestone 1 defect, 2026-07-30).
     @ObservedObject private var unit: ShaderUnit
 
-    init(chain: FXChain, stage: FXStage, index: Int) {
+    init(chain: FXChain, stage: FXStage, index: Int, library: LibraryModel) {
         self.chain = chain
         self.stage = stage
         self.index = index
+        self.library = library
         self._unit = ObservedObject(wrappedValue: stage.unit)
     }
 
@@ -121,7 +124,7 @@ struct FXStageRow: View {
                     .foregroundStyle(.red).textSelection(.enabled)
             }
             if expanded {
-                ShaderControlsView(unit: unit).frame(maxHeight: 220)
+                ShaderControlsView(unit: unit, library: library).frame(maxHeight: 220)
             }
             Divider()
         }

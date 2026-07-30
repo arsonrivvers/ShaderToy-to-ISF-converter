@@ -23,6 +23,34 @@ final class DeckControlsTests: XCTestCase {
                        [.slider, .toggle, .point, .color, .menu, .pulse, .routed])
     }
 
+    // MARK: image-input routing
+
+    func testADecksImageInputsAreAllRoutable() {
+        // A deck's shader belongs to the operator: every image input is theirs to point at a
+        // camera, a pattern, or another shader.
+        let rows = DeckControlModel.rows(for: [
+            input("inputImage", "image"), input("mask", "image"),
+        ], reservesPrimaryInput: false)
+        XCTAssertEqual(rows.map(\.kind), [.routed, .routed])
+    }
+
+    func testAStagesPrimaryImageInputIsChainFedRatherThanRoutable() {
+        // An FX stage's first image input IS the chain feed. Offering a source picker for it would
+        // let the operator silently unplug the stage from the chain.
+        let rows = DeckControlModel.rows(for: [input("inputImage", "image")],
+                                         reservesPrimaryInput: true)
+        XCTAssertEqual(rows.map(\.kind), [.chainFed])
+    }
+
+    func testOnlyTheFirstImageInputIsChainFed() {
+        // A two-input filter used as a stage still needs its SECOND source routed — that is how a
+        // blend or mask stage gets its other layer.
+        let rows = DeckControlModel.rows(for: [
+            input("amount", "float"), input("inputImage", "image"), input("mask", "image"),
+        ], reservesPrimaryInput: true)
+        XCTAssertEqual(rows.map(\.kind), [.slider, .chainFed, .routed])
+    }
+
     func testUnknownTypesAreSurfacedRatherThanDropped() {
         // Silently dropping an input the engine reports is how an operator discovers mid-set that
         // a control they expected does not exist.

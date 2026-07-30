@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ShadertoyISFKit   // TestPatternCatalog, for the image-input source menu
 
 /// Pure mapping from ISF input descriptors to control rows. Split out from the view so control
 /// generation is testable without SwiftUI, and so an unknown type is a visible row rather than a
@@ -7,8 +8,12 @@ import AppKit
 enum DeckControlModel {
     enum Kind: Equatable {
         case slider, toggle, point, color, menu, pulse
-        /// Image inputs are routed through `SourceRouter`, not set as values.
+        /// Image inputs are routed through `SourceRouter`, not set as values. Gets a source picker.
         case routed
+        /// An FX stage's FIRST image input: driven by the chain, not the router. Shown as a label
+        /// rather than a picker — offering a source here would silently unplug the stage from the
+        /// chain, and hiding it entirely would leave the operator wondering where the input went.
+        case chainFed
         /// The engine reported a type this build cannot render a control for. Shown, never dropped.
         case unsupported
     }
@@ -20,8 +25,14 @@ enum DeckControlModel {
     }
 
     /// Rows in ISF header declaration order — the author's intent, never alphabetised.
-    static func rows(for inputs: [ISFPreviewInput]) -> [ControlRow] {
-        inputs.map { input in
+    ///
+    /// `reservesPrimaryInput` mirrors `ShaderUnit`: on an FX stage the FIRST image input is the
+    /// chain feed and is not the operator's to route. Every LATER image input still is — that is
+    /// how a blend or mask stage gets its second layer.
+    static func rows(for inputs: [ISFPreviewInput],
+                     reservesPrimaryInput: Bool = false) -> [ControlRow] {
+        let firstImageName = inputs.first { $0.type == "image" }?.name
+        return inputs.map { input in
             let kind: Kind
             switch input.type {
             case "float":   kind = .slider
@@ -30,7 +41,8 @@ enum DeckControlModel {
             case "color":   kind = .color
             case "long":    kind = .menu
             case "event":   kind = .pulse
-            case "image":   kind = .routed
+            case "image":
+                kind = (reservesPrimaryInput && input.name == firstImageName) ? .chainFed : .routed
             default:        kind = .unsupported
             }
             return ControlRow(input: input, kind: kind)
@@ -41,9 +53,20 @@ enum DeckControlModel {
 /// Auto-generated controls for one hosted shader — a deck's, or an FX stage's.
 struct ShaderControlsView: View {
     @ObservedObject var unit: ShaderUnit
+    /// The router publishes the selections, so the source pickers need it observed directly —
+    /// `unit` does not republish when a route changes.
+    @ObservedObject private var router: SourceRouter
+    @ObservedObject private var library: LibraryModel
+
+    init(unit: ShaderUnit, library: LibraryModel) {
+        self.unit = unit
+        self.router = unit.imageSources
+        self.library = library
+    }
 
     private var rows: [DeckControlModel.ControlRow] {
-        DeckControlModel.rows(for: unit.inputs)
+        DeckControlModel.rows(for: unit.inputs,
+                              reservesPrimaryInput: unit.reservesPrimaryInput)
     }
 
     var body: some View {
@@ -70,7 +93,8 @@ struct ShaderControlsView: View {
                     case .color:       colorRow(row.input)
                     case .menu:        menuRow(row.input)
                     case .pulse:       pulseRow(row.input)
-                    case .routed:      EmptyView()
+                    case .routed:      sourceRow(row.input)
+                    case .chainFed:    chainFedRow(row.input)
                     case .unsupported: unsupportedRow(row.input)
                     }
                 }
@@ -184,6 +208,53 @@ struct ShaderControlsView: View {
     @ViewBuilder private func pulseRow(_ input: ISFPreviewInput) -> some View {
         Button(input.name) { unit.pulseEvent(input.name) }
             .font(.system(size: 12))
+    }
+
+    /// Where this image input's pixels come from. A filter loaded on a DECK has no chain feeding
+    /// it, so without this its `inputImage` is whatever the router defaulted to — the camera — and
+    /// the operator has no way to say otherwise.
+    @ViewBuilder private func sourceRow(_ input: ISFPreviewInput) -> some View {
+        HStack(spacing: 5) {
+            Text(input.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Menu {
+                Button("None") { router.setSelection(.none, for: input.name) }
+                Menu("Test Pattern") {
+                    ForEach(TestPatternCatalog.all) { p in
+                        Button(p.name) { router.setSelection(.testPattern(id: p.id),
+                                                             for: input.name) }
+                    }
+                }
+                Menu("Shader") {
+                    ForEach(library.filtered(query: "")) { entry in
+                        Button(entry.name) { router.setSelection(.library(url: entry.url),
+                                                                 for: input.name) }
+                    }
+                }
+                Button("Camera") { router.setSelection(.camera, for: input.name) }
+            } label: {
+                Text(router.source(for: input.name).displayName)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            .frame(maxWidth: 150)
+        }
+        .help("Input source for “\(input.name)”")
+    }
+
+    /// An FX stage's primary input. Labelled, never a picker: the chain drives it, and a source
+    /// menu here would silently unplug the stage from what came before it.
+    @ViewBuilder private func chainFedRow(_ input: ISFPreviewInput) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.right.to.line")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(input.name).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+            Spacer()
+            Text("chain").font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .help("Fed by the previous stage in this chain — or by the deck itself for the first "
+              + "stage. Not routable, by design.")
     }
 
     @ViewBuilder private func unsupportedRow(_ input: ISFPreviewInput) -> some View {

@@ -16,6 +16,7 @@ struct DeckStripView: View {
     @ObservedObject var mixer: MixerState
     @ObservedObject var fx: FXChain
     @ObservedObject var stats: RenderStatsModel
+    @ObservedObject var library: LibraryModel
 
     private var layer: LayerParams? { mixer.layers().first { $0.deck == id } }
 
@@ -66,9 +67,9 @@ struct DeckStripView: View {
             }
 
             Divider()
-            FXChainView(title: "FX", chain: fx, stats: stats)
+            FXChainView(title: "FX", chain: fx, stats: stats, library: library)
             Divider()
-            ShaderControlsView(unit: unit)
+            ShaderControlsView(unit: unit, library: library)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,7 +137,8 @@ struct InstrumentView: View {
         HStack(spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
                 DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
-                              fx: instrument.deck(id).fx, stats: stats)
+                              fx: instrument.deck(id).fx, stats: stats,
+                              library: instrument.library)
                 Divider()
             }
             masterStrip
@@ -152,7 +154,8 @@ struct InstrumentView: View {
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             Divider()
             ScrollView {
-                FXChainView(title: "MASTER FX", chain: instrument.renderer.masterFX, stats: stats)
+                FXChainView(title: "MASTER FX", chain: instrument.renderer.masterFX, stats: stats,
+                            library: instrument.library)
             }
         }
         .padding(10)

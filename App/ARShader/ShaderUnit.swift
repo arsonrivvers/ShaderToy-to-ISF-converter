@@ -44,7 +44,8 @@ final class ShaderUnit: ObservableObject {
     private var loadGeneration = 0
     /// True when this unit's first image input is fed externally (an FX stage's chain feed) rather
     /// than routed. Decks are false: their shader's inputs are the operator's to route.
-    private let reservesPrimaryInput: Bool
+    /// Read by `ShaderControlsView` so that input is labelled rather than given a source picker.
+    let reservesPrimaryInput: Bool
 
     init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock,
          reservesPrimaryInput: Bool = false) {
