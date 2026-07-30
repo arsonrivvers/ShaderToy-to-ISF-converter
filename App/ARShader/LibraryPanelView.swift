@@ -60,9 +60,18 @@ struct LibraryPanelView: View {
             }
             .listStyle(.inset)
 
-            Text("\(entries.count) shaders")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Honest absence: while the scan is in flight the count is unknown, so say so rather
+            // than print "0 shaders" — which reads as an empty corpus, not a pending one.
+            HStack(spacing: 5) {
+                if library.isScanning {
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
+                    Text("Scanning library…")
+                } else {
+                    Text("\(entries.count) shaders")
+                }
+            }
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(8)
     }

@@ -117,21 +117,52 @@ final class LibraryModel: ObservableObject {
         }
     }
 
+    /// True while a background scan is in flight, so the UI can say "Scanning…" rather than
+    /// report a count it does not have yet.
+    @Published private(set) var isScanning = false
+
+    private let scanQueue = DispatchQueue(label: "isfruntime.library.scan", qos: .userInitiated)
+
     /// The instrument's libraries: the authoritative system corpus at `/Library/Graphics/ISF`
-    /// (947 `AR_` originals including the Genuary series) plus the user's own folder.
+    /// (the `AR_` originals including the Genuary series) plus the operator's own folder.
     ///
     /// Unlike the editor's `loadStandardLibraries`, no bundled samples: a performance instrument
     /// browses the operator's real corpus, not a demo gallery.
+    ///
+    /// **Enumeration runs OFF the main thread.** The corpus is ~1,500 files and the scan stats
+    /// each one for its dates; doing that inline inside a SwiftUI `.task` (which runs on the main
+    /// actor) froze the app at launch and showed "0 shaders" until it finished. Reported on the
+    /// Milestone 1 smoke, 2026-07-30 — it only looked instant in testing because the filesystem
+    /// cache was warm.
+    ///
+    /// Call on the main thread; results are applied on the main thread.
     func loadInstrumentLibraries() {
-        // Headless test mode: never scan the user's real folders from a test host — a persisted
-        // folder in a TCC-protected location blocks the harness behind a permission prompt.
+        // Headless test mode: never scan the operator's real folders from a test host — a
+        // persisted folder in a TCC-protected location blocks the harness behind a permission
+        // prompt.
         guard !TestHarness.isActive else { return }
         let fm = FileManager.default
-        if fm.fileExists(atPath: Self.systemISFDir.path) {
-            addFolder(Self.systemISFDir, title: "System")
-        }
-        if fm.fileExists(atPath: Self.userISFDir.path) {
-            addFolder(Self.userISFDir, title: "User")
+        let known = Set(sources.map(\.url))
+        let candidates: [(url: URL, title: String)] = [
+            (url: Self.systemISFDir, title: "System"),
+            (url: Self.userISFDir, title: "User"),
+        ].filter { fm.fileExists(atPath: $0.url.path) && !known.contains($0.url) }
+        guard !candidates.isEmpty else { return }
+
+        // Register the folders immediately so the sidebar shows WHAT is loading, then scan.
+        for c in candidates { sources.append(LibrarySource(title: c.title, url: c.url)) }
+        isScanning = true
+
+        let urls = candidates.map(\.url)
+        scanQueue.async { [weak self] in
+            // `scan` is a pure static over the filesystem — no model state is touched here.
+            let scanned = urls.map { ($0, Self.scan(folder: $0)) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for (url, entries) in scanned { self.entriesBySource[url] = entries }
+                self.isScanning = false
+                self.objectWillChange.send()
+            }
         }
     }
 

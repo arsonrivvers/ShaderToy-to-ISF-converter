@@ -77,6 +77,8 @@ struct InstrumentView: View {
     @ObservedObject private var stats: RenderStatsModel
     @State private var libraryTarget: DeckID = .one
     @State private var keys: BlackoutKeyMonitor?
+    @State private var widthField = ""
+    @State private var heightField = ""
 
     init(instrument: Instrument) {
         self.instrument = instrument
@@ -175,21 +177,77 @@ struct InstrumentView: View {
     /// there is real GPU to save, since monitors merely sample an existing texture.
     private var resolutionPickers: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("RESOLUTION").font(.system(size: 11, weight: .bold, design: .monospaced))
-            Picker("Output", selection: Binding(
-                get: { instrument.renderer.outputResolution },
-                set: { instrument.renderer.outputResolution = $0 })) {
-                ForEach(RenderResolution.allCases) { Text($0.displayName).tag($0) }
+            HStack(spacing: 4) {
+                Text("OUTPUT RES").font(.system(size: 11, weight: .bold, design: .monospaced))
+                Spacer()
+                // Presets are a convenience tucked into a menu, not the vocabulary — typing a size
+                // is the primary control.
+                Menu {
+                    ForEach(RenderSize.presets, id: \.self) { preset in
+                        Button(preset.label) { applyOutput(preset) }
+                    }
+                } label: {
+                    Image(systemName: "list.bullet")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 22)
+                .help("Common sizes")
             }
-            Picker("Cue", selection: Binding(
-                get: { instrument.renderer.cueRenderResolution },
-                set: { instrument.renderer.cueRenderResolution = $0 })) {
-                ForEach(RenderResolution.allCases) { Text($0.displayName).tag($0) }
+
+            HStack(spacing: 4) {
+                TextField("W", text: $widthField)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 62)
+                    .onSubmit { commitTypedResolution() }
+                Text("×").foregroundStyle(.secondary)
+                TextField("H", text: $heightField)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 62)
+                    .onSubmit { commitTypedResolution() }
+                Button("Set") { commitTypedResolution() }
+                    .controlSize(.small)
             }
-            .help("What a deck renders at while it is NOT on program. Set it equal to Output to "
-                  + "turn the saving off.")
+            .font(.system(size: 11, design: .monospaced))
+
+            Text(String(format: "%.1f MP", instrument.renderer.outputResolution.megapixels))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Cue").font(.system(size: 11))
+                Picker("", selection: Binding(
+                    get: { instrument.renderer.cueRenderQuality },
+                    set: { instrument.renderer.cueRenderQuality = $0 })) {
+                    ForEach(CueQuality.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden()
+            }
+            .help("How much of the output resolution a deck renders at while it is NOT on program. "
+                  + "It only feeds a small monitor there, and the shader render is where the GPU "
+                  + "actually goes. 100% turns the saving off.")
         }
-        .font(.system(size: 11))
+        .onAppear { syncResolutionFields() }
+    }
+
+    private func applyOutput(_ size: RenderSize) {
+        instrument.renderer.outputResolution = size
+        syncResolutionFields()
+    }
+
+    /// Parse what was typed. A field that is empty or nonsense keeps the current value rather than
+    /// snapping to a default — losing a deliberately-set output size to a stray keystroke mid-set
+    /// would be worse than ignoring the edit.
+    private func commitTypedResolution() {
+        let current = instrument.renderer.outputResolution
+        let w = Int(widthField.trimmingCharacters(in: .whitespaces)) ?? current.width
+        let h = Int(heightField.trimmingCharacters(in: .whitespaces)) ?? current.height
+        applyOutput(RenderSize(width: w, height: h))   // RenderSize clamps to safe bounds
+    }
+
+    private func syncResolutionFields() {
+        let r = instrument.renderer.outputResolution
+        widthField = String(r.width)
+        heightField = String(r.height)
     }
 
     /// Real measured numbers or nothing. An FPS figure the engine did not produce would be the

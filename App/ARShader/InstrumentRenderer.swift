@@ -31,8 +31,8 @@ enum MonitorSource: Equatable, Sendable {
 /// frame allocates nothing.
 final class InstrumentRenderer: @unchecked Sendable {
     /// The size textures are allocated at before the operator picks anything.
-    static let masterWidth = RenderResolution.default.width
-    static let masterHeight = RenderResolution.default.height
+    static let masterWidth = RenderSize.default.width
+    static let masterHeight = RenderSize.default.height
     /// 16-bit float: ISF scenes commonly output float formats, and blending in a wider space than
     /// the 8-bit drawable avoids banding on repeated composites.
     static let masterFormat: MTLPixelFormat = .rgba16Float
@@ -58,14 +58,14 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var committedBuffers = 0
     /// Program-output resolution. Changing it reallocates both masters — rare, operator-driven,
     /// and never in the steady-state frame.
-    private var masterResolution: RenderResolution = .default
+    private var masterResolution: RenderSize = .default
     /// What a deck renders at while it is NOT contributing to program.
     ///
     /// A cued deck feeds only a small monitor, so rasterising it at full output resolution is
     /// pure waste — and the ISF render is where essentially all the GPU cost lives (monitors just
     /// sample a texture that already exists, which is nearly free). Set equal to the output
     /// resolution to disable the saving.
-    private var cueResolution: RenderResolution = .r540
+    private var cueQuality: CueQuality = .default
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
     /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
@@ -98,7 +98,7 @@ final class InstrumentRenderer: @unchecked Sendable {
     }
 
     private static func makeMaster(device: MTLDevice,
-                                   resolution: RenderResolution = .default) -> MTLTexture? {
+                                   resolution: RenderSize = .default) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: masterFormat, width: resolution.width, height: resolution.height,
             mipmapped: false)
@@ -109,7 +109,7 @@ final class InstrumentRenderer: @unchecked Sendable {
 
     /// The program-output resolution. Reallocates the master pair; a no-op if unchanged, so the
     /// UI can bind to it freely.
-    var outputResolution: RenderResolution {
+    var outputResolution: RenderSize {
         get { lock.lock(); defer { lock.unlock() }; return masterResolution }
         set {
             lock.lock()
@@ -128,11 +128,11 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
     }
 
-    /// What a deck rasterises at while it is NOT on program. Set equal to `outputResolution` to
-    /// turn the saving off.
-    var cueRenderResolution: RenderResolution {
-        get { lock.lock(); defer { lock.unlock() }; return cueResolution }
-        set { lock.lock(); cueResolution = newValue; lock.unlock() }
+    /// How much of the output resolution a deck rasterises at while it is NOT on program.
+    /// `.full` turns the saving off.
+    var cueRenderQuality: CueQuality {
+        get { lock.lock(); defer { lock.unlock() }; return cueQuality }
+        set { lock.lock(); cueQuality = newValue; lock.unlock() }
     }
 
     @MainActor
@@ -202,7 +202,7 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
         let deckList = decks
         let outRes = masterResolution
-        let cueRes = cueResolution
+        let cueRes = cueQuality.applied(to: outRes)
         lock.unlock()
 
         // 1. Decks render offscreen into their own textures. Deck.render is nonisolated and

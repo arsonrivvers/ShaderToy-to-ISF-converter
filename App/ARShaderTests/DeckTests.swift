@@ -19,7 +19,7 @@ final class DeckTests: XCTestCase {
     }
 
     /// The output resolution a deck normally renders at.
-    private var full: MTLSize { RenderResolution.default.size }
+    private var full: MTLSize { RenderSize.default.size }
 
     private func makeDeck() -> Deck {
         Deck(id: .one, device: device, queue: queue, clock: RenderClock())
@@ -115,7 +115,7 @@ final class DeckTests: XCTestCase {
         // ownedSize, never renderSize.
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
-        let cue = RenderResolution.r540.size
+        let cue = RenderSize(width: 960, height: 540).size
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
         let tex = try XCTUnwrap(deck.render(in: cb, renderSize: cue, ownedSize: full))
         cb.commit(); cb.waitUntilCompleted()
@@ -127,7 +127,7 @@ final class DeckTests: XCTestCase {
         // The whole point of a fixed owned size: the fade must not allocate.
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
-        let cue = RenderResolution.r540.size
+        let cue = RenderSize(width: 960, height: 540).size
 
         let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
         let cued = try XCTUnwrap(deck.render(in: cb1, renderSize: cue, ownedSize: full))
@@ -147,7 +147,7 @@ final class DeckTests: XCTestCase {
         let at1080 = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full))
         cb1.commit(); cb1.waitUntilCompleted()
 
-        let smaller = RenderResolution.r720.size
+        let smaller = RenderSize(width: 1280, height: 720).size
         let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
         let at720 = try XCTUnwrap(deck.render(in: cb2, renderSize: smaller, ownedSize: smaller))
         cb2.commit(); cb2.waitUntilCompleted()
@@ -162,7 +162,7 @@ final class DeckTests: XCTestCase {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: RenderResolution.r360.size,
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: RenderSize(width: 640, height: 360).size,
                                             ownedSize: full))
         cb.commit(); cb.waitUntilCompleted()
         let rgb = try meanRGB(of: tex)
