@@ -160,6 +160,26 @@ void main() {
                     print("=== END ===")
                     exit(1)
                 }
+                // Optional input overrides. These shaders are performance instruments whose
+                // flash behaviour is operator-driven, so a capture at DEFAULT values reports on
+                // a configuration nobody performs in. An unknown name is a hard failure rather
+                // than a silent no-op, because a silent one produces a confident report about
+                // the wrong state.
+                if let inputsJSON = env["SHADERTOY_DEBUG_CAPTURE_INPUTS"], !inputsJSON.isEmpty {
+                    let known = Set(controller.inputs.map(\.name))
+                    switch CaptureInputPlan.parse(json: inputsJSON, known: known) {
+                    case .failure(let message):
+                        print("status=BAD-INPUTS error=\(message)")
+                        print("knownInputs=\(known.sorted().joined(separator: ","))")
+                        print("=== END ===")
+                        exit(2)
+                    case .success(let plan):
+                        for entry in plan { controller.setInput(entry.name, entry.jsonValue) }
+                        print("inputsApplied=\(plan.count) " +
+                              "[\(plan.map { "\($0.name)=\($0.jsonValue)" }.joined(separator: " "))]")
+                    }
+                }
+
                 let times = (0..<frameCount).map { Double($0) / fps }
                 let started = Date()
                 let outcome = controller.captureFrames(

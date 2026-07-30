@@ -85,6 +85,7 @@ targets:
       - TrueISFEditor/ISFMSLSafeBridge.mm
       - TrueISFEditor/FramePixelStats.swift
       - TrueISFEditor/FramePNGEncoder.swift
+      - TrueISFEditor/CaptureInputPlan.swift
       - TrueISFEditor/PixelGate.swift
       - TrueISFEditor/GateInputPattern.swift
       - TrueISFEditor/DiagnosticsModel.swift
