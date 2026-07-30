@@ -37,10 +37,10 @@ final class LibraryModel: ObservableObject {
     private var entriesBySource: [URL: [LibraryEntry]] = [:]
     private let defaultsKey = "TrueISFEditor.addedFolders"
 
-    private static var userISFDir: URL {
+    static var userISFDir: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Graphics/ISF")
     }
-    private static let systemISFDir = URL(fileURLWithPath: "/Library/Graphics/ISF")
+    static let systemISFDir = URL(fileURLWithPath: "/Library/Graphics/ISF")
 
     /// Enumerate `.fs` files in a folder, case-insensitive extension, sorted by name. Fetches file
     /// dates during enumeration (metadata only, still content-lazy) so sort orders have data.
@@ -114,6 +114,24 @@ final class LibraryModel: ObservableObject {
         for path in (UserDefaults.standard.array(forKey: defaultsKey) as? [String] ?? []) {
             let u = URL(fileURLWithPath: path)
             if fm.fileExists(atPath: u.path) { addFolder(u) }
+        }
+    }
+
+    /// The instrument's libraries: the authoritative system corpus at `/Library/Graphics/ISF`
+    /// (947 `AR_` originals including the Genuary series) plus the user's own folder.
+    ///
+    /// Unlike the editor's `loadStandardLibraries`, no bundled samples: a performance instrument
+    /// browses the operator's real corpus, not a demo gallery.
+    func loadInstrumentLibraries() {
+        // Headless test mode: never scan the user's real folders from a test host — a persisted
+        // folder in a TCC-protected location blocks the harness behind a permission prompt.
+        guard !TestHarness.isActive else { return }
+        let fm = FileManager.default
+        if fm.fileExists(atPath: Self.systemISFDir.path) {
+            addFolder(Self.systemISFDir, title: "System")
+        }
+        if fm.fileExists(atPath: Self.userISFDir.path) {
+            addFolder(Self.userISFDir, title: "User")
         }
     }
 
