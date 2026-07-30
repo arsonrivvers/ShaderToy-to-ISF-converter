@@ -11,6 +11,8 @@ targets:
     type: application
     platform: macOS
     sources:
+      # Shared ISF render runtime, compiled into every app target that renders ISF.
+      - path: ISFRuntime
       - path: TrueISFEditor
       - path: TrueISFEditor/Resources
         buildPhase: resources
@@ -51,6 +53,9 @@ targets:
         FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/../Frameworks
         SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
+        # The bridging header's quoted #imports resolve across both directories now that
+        # ISFMSLSafeBridge.h lives in ISFRuntime and CrashWriter.h stays with the editor.
+        USER_HEADER_SEARCH_PATHS: $(SRCROOT)/ISFRuntime $(SRCROOT)/TrueISFEditor
       configs:
         # Debug: hardened runtime OFF. With ad-hoc signing it was silently disabled anyway
         # (Xcode note: "Disabling hardened runtime with ad-hoc codesigning"); with the real
@@ -68,26 +73,22 @@ targets:
       - TrueISFEditor/TestHarness.swift
       - TrueISFEditor/FetchStrategy.swift
       - TrueISFEditor/WebKitShaderFetcher.swift
+      # The shared runtime, compiled into the test bundle exactly as its individual files were
+      # before the extraction. ParamStore is EXCLUDED deliberately: it was never in this list, and
+      # ParamStoreTests reaches it through `@testable import TrueISFEditor` (see the comment in
+      # that file). Sweeping it in here would mint a second, distinct ParamStore type.
+      - path: ISFRuntime
+        excludes:
+          - "ParamStore.swift"
       - TrueISFEditor/Models/ISFFile.swift
-      - TrueISFEditor/Models/LibraryModel.swift
       - TrueISFEditor/PreviewEngine.swift
       - TrueISFEditor/PreviewCoordinator.swift
-      - TrueISFEditor/RenderStats.swift
-      - TrueISFEditor/ISFPreviewInput.swift
       - TrueISFEditor/CrashEvent.swift
       - TrueISFEditor/BoundedArray.swift
       - TrueISFEditor/CrashLog.swift
       - TrueISFEditor/MetalPreviewController.swift
-      - TrueISFEditor/MetalRenderCore.swift
-      - TrueISFEditor/RenderClock.swift
-      - TrueISFEditor/DisplayLinkDriver.swift
       - TrueISFEditor/WebKitPreviewController.swift
-      - TrueISFEditor/ISFMSLSafeBridge.mm
-      - TrueISFEditor/FramePixelStats.swift
-      - TrueISFEditor/FramePNGEncoder.swift
       - TrueISFEditor/CaptureInputPlan.swift
-      - TrueISFEditor/PixelGate.swift
-      - TrueISFEditor/GateInputPattern.swift
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
       - TrueISFEditor/ShaderAssist/AssistProvider.swift
@@ -119,12 +120,7 @@ targets:
       - TrueISFEditor/Remix/RemixBreedingBayPresentation.swift
       - TrueISFEditor/Remix/RemixComparisonCoordinator.swift
       - TrueISFEditor/Remix/RemixLineagePresentation.swift
-      - TrueISFEditor/ImageSource.swift
       - TrueISFEditor/HeaderAuthoringModel.swift
-      - TrueISFEditor/ISFSceneSource.swift
-      - TrueISFEditor/CameraSource.swift
-      - TrueISFEditor/SourceRouter.swift
-      - TrueISFEditor/BlitFit.swift
     dependencies:
       - target: TrueISFEditor
       - package: ShadertoyISFKit
@@ -149,6 +145,7 @@ targets:
         FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
         SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
+        USER_HEADER_SEARCH_PATHS: $(SRCROOT)/ISFRuntime $(SRCROOT)/TrueISFEditor
 schemes:
   TrueISFEditor:
     build:

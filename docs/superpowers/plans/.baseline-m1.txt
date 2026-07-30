@@ -1,0 +1,6 @@
+# Milestone 1 pre-extraction baseline — captured 2026-07-30, HEAD c75e480
+# The spec's "302 kit + 227 app" figures were STALE. These are observed.
+kit  (swift test, ShadertoyISFKit): Executed 312 tests, with 0 failures
+app  (xcodebuild test, TrueISFEditor): Executed 514 tests, with 3 tests skipped and 0 failures
+# Note: 143 MDB_MAP_FULL log lines from the ISFMSL persistent cache are PRE-EXISTING
+# (action item trueisf-isfmsl-cache-map-full-20260718). Zero XCTest case failures.

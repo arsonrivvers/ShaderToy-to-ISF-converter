@@ -204,71 +204,15 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
         }
     }
 
+    /// Both of these now live in `ISFSceneLoader` (App/ISFRuntime) so the editor and the
+    /// performance instrument produce identical input descriptors from identical compiles.
+    /// Kept as forwarders so existing call sites and tests are untouched by the extraction.
     static func mapInputs(_ attribs: [any ISFMSLSceneAttrib]) -> [ISFPreviewInput] {
-        attribs.compactMap { attrib in
-            let typeStr: String
-            switch attrib.type {
-            case .event:   typeStr = "event"
-            case .bool:    typeStr = "bool"
-            case .long:    typeStr = "long"
-            case .float:   typeStr = "float"
-            case .point2D: typeStr = "point2D"
-            case .color:   typeStr = "color"
-            case .image:   typeStr = "image"
-            default:       return nil   // audio/cube: still unsupported
-            }
-
-            // Read default/min/max via doubleValue — works for all scalar types.
-            // For point2D and color, store as [Double] so controls can read them.
-            let defaultValue: Any?
-            let minVal: Any?
-            let maxVal: Any?
-
-            switch attrib.type {
-            case .color:
-                let d = attrib.defaultVal
-                defaultValue = [d.colorValue(by: 0), d.colorValue(by: 1),
-                                d.colorValue(by: 2), d.colorValue(by: 3)]
-                minVal = nil; maxVal = nil
-            case .point2D:
-                let d = attrib.defaultVal
-                defaultValue = [d.pointValue(by: 0), d.pointValue(by: 1)]
-                let mn = attrib.minVal
-                minVal = [mn.pointValue(by: 0), mn.pointValue(by: 1)]
-                let mx = attrib.maxVal
-                maxVal = [mx.pointValue(by: 0), mx.pointValue(by: 1)]
-            case .bool:
-                defaultValue = attrib.defaultVal.boolValue
-                minVal = nil; maxVal = nil
-            case .event:
-                defaultValue = nil; minVal = nil; maxVal = nil
-            case .image:
-                defaultValue = nil; minVal = nil; maxVal = nil
-            default:
-                defaultValue = attrib.defaultVal.doubleValue
-                minVal = attrib.minVal.doubleValue
-                maxVal = attrib.maxVal.doubleValue
-            }
-
-            let labels: [String]? = attrib.labelArray.isEmpty ? nil : attrib.labelArray
-            let values: [Double]? = attrib.valArray.isEmpty ? nil
-                : attrib.valArray.map { $0.doubleValue }
-
-            return ISFPreviewInput(name: attrib.name, type: typeStr,
-                                   defaultValue: defaultValue,
-                                   min: minVal, max: maxVal,
-                                   labels: labels, values: values)
-        }
+        ISFSceneLoader.mapInputs(attribs)
     }
 
     static func parseLine(from msg: String?) -> Int? {
-        guard let msg else { return nil }
-        // glslang format: "ERROR: 0:NN:"
-        if let r = msg.range(of: #"0:(\d+):"#, options: .regularExpression) {
-            let digits = msg[r].dropFirst(2).dropLast()
-            return Int(digits)
-        }
-        return nil
+        ISFSceneLoader.parseLine(from: msg)
     }
 
     /// Pull the ISF header's DESCRIPTION for crash-log context, if present.

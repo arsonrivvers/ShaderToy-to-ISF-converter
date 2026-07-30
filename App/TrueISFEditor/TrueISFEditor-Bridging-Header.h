@@ -1,5 +1,4 @@
 //  TrueISFEditor-Bridging-Header.h
-//  Exposes ISFMSLKit (Obj-C++) to Swift.
-#import <ISFMSLKit/ISFMSLKit.h>
-#import "ISFMSLSafeBridge.h"
+//  Editor-specific bridging: the shared ISF runtime plus the editor's crash writer.
+#import "ISFRuntime-Bridging-Header.h"
 #import "CrashWriter.h"
