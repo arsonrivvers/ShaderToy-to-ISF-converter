@@ -18,13 +18,21 @@ catch, and a Milestone 2 feature list. That is exactly the outcome the small mil
 | # | Finding | Disposition |
 |---|---|---|
 | 1 | **Freeze does nothing** | **FIXED** `ab9cfb0`. It held a reference to a texture reused every frame, so contents kept updating under it. Now copies pixels on the rising edge. Mutation-tested: reinstating the old behaviour fails the new test. |
-| 2 | Deck A / B / program output resolution are not adjustable | Milestone 2 |
-| 3 | No FPS readout | Milestone 2 (`RenderStats` already exists in ISFRuntime, unused by the instrument) |
-| 4 | Library cannot be collapsed; wants a button-driven slide-out panel system like TrueISFEditor | Milestone 2 |
+| 2 | Deck A / B / program output resolution are not adjustable | **DONE** `ec176bf` + `cbaf85b` — typed W×H output resolution (presets in a menu); decks follow output; cue = a % of output |
+| 3 | No FPS readout | **DONE** `ec176bf` — measured draw cadence + mean GPU ms, ~2×/sec, "no frames" when idle rather than a stale rate |
+| 4 | Library cannot be collapsed; wants a button-driven slide-out panel system like TrueISFEditor | Milestone 2 — **phase 3**, deliberately last so the panels are designed once, against the finished feature set |
 | 5 | Library needs to be genuinely useful for show prep (organisation, folders — operator said folders can come later) | Milestone 2 |
-| 6 | **Add** blend mode missing, plus others worth taking from TouchDesigner's Composite TOP | Milestone 2 |
-| 7 | Need multiple `.fs` per deck — stacked effect chains | Milestone 2 (architecture) |
+| 6 | **Add** blend mode missing, plus others worth taking from TouchDesigner's Composite TOP | **DONE** `c790b10` — Add, Subtract, Linear Burn, Vivid Light, Pin Light, Hard Mix, Divide; appended so the twelve W3C indices are unchanged |
+| 7 | Need multiple `.fs` per deck — stacked effect chains | Milestone 2 — **phase 2, NEXT**. Operator chose an UNBOUNDED chain over fixed slots |
 | 8 | Need a master effects chain on the program output | Milestone 2 (architecture) |
+
+### Found after signing, while the operator kept playing
+
+| Finding | Disposition |
+|---|---|
+| App froze at launch and showed "0 shaders" | **FIXED** `cbaf85b`. `loadInstrumentLibraries` ran inside a SwiftUI `.task` — main actor — and synchronously stat'd 1,477 files. Only looked instant in testing because the filesystem cache was warm. Now scans off-main and says "Scanning library…" rather than printing a count it does not have. |
+| (agent-side) The whole ARShaderTests suite hung indefinitely | **FIXED** `cbaf85b`. A test looped `renderFrame()` 200× synchronously; a Metal command queue permits ~64 buffers in flight, so `makeCommandBuffer()` blocked on its semaphore forever. Diagnosed from a `sample` of the wedged test host. |
+| (agent-side process error) The app was killed mid-play, repeatedly | `scripts/run-instrument.sh` quits any running instance before installing. Do not reinstall while the operator is playing without saying so first. |
 
 ## Legs not run
 
