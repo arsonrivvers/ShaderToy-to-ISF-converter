@@ -17,6 +17,31 @@ final class FXChainTests: XCTestCase {
         FXStage(device: device, queue: queue, clock: RenderClock())
     }
 
+    private func fixture(_ name: String) throws -> String {
+        let url = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: name, withExtension: "fs", subdirectory: "Fixtures"))
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// A stage whose shader is compiled and ready.
+    private func loadedStage(_ fixtureName: String) throws -> FXStage {
+        let stage = makeStage()
+        let done = expectation(description: "compile \(fixtureName)")
+        stage.unit.onCompileFinished = { done.fulfill() }
+        stage.unit.load(source: try fixture(fixtureName), name: "\(fixtureName).fs")
+        wait(for: [done], timeout: 30)
+        stage.unit.onCompileFinished = nil
+        XCTAssertNil(stage.unit.compileError, "fixture \(fixtureName) must compile")
+        return stage
+    }
+
+    func testAFilterStageLeavesItsPrimaryInputUnrouted() throws {
+        // A stage must not open a camera session for an input the chain already drives.
+        let stage = try loadedStage("invert_filter")
+        XCTAssertEqual(stage.unit.imageSources.selection(for: "inputImage"), .none,
+                       "the chain feeds this input; the router must not claim it")
+    }
+
     func testAnEmptyChainPublishesNoRenderStages() {
         XCTAssertTrue(chain.renderStages().isEmpty)
     }

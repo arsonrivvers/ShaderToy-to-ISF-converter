@@ -72,7 +72,10 @@ final class SourceRouter: ObservableObject {
 
     /// Called by the engine on each successful compile. Adds defaults for new image inputs and
     /// prunes routes for inputs that no longer exist.
-    func updateInputs(_ inputs: [ISFPreviewInput]) {
+    /// `reservePrimary` marks the FIRST image input as externally driven — an FX stage's chain
+    /// feed. That input gets no route and no default, so a stage never opens a camera session for
+    /// a slot the chain already fills.
+    func updateInputs(_ inputs: [ISFPreviewInput], reservePrimary: Bool = false) {
         let names = inputs.filter { $0.type == "image" }.map { $0.name }
         imageInputNames = names
         let nameSet = Set(names)
@@ -84,7 +87,11 @@ final class SourceRouter: ObservableObject {
         // Secondary inputs (blend layers, masks) get a moving pattern DISTINCT from the camera:
         // two identical feeds make a blend filter render as identity (Conner, 2026-07-18).
         for n in names where selections[n] == nil {
-            let sel: SourceSelection = n == names.first
+            if reservePrimary && n == names.first {
+                selections[n] = .none        // the chain drives this one
+                continue
+            }
+            let sel: SourceSelection = (!reservePrimary && n == names.first)
                 ? .camera
                 : .testPattern(id: Self.secondaryDefaultPattern)
             selections[n] = sel

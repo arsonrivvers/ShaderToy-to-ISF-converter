@@ -42,8 +42,13 @@ final class ShaderUnit: ObservableObject {
     private let compileQueue = DispatchQueue(label: "arshader.deck.compile", qos: .userInitiated)
     /// Monotonic: a compile finishing for anything but the current generation is superseded.
     private var loadGeneration = 0
+    /// True when this unit's first image input is fed externally (an FX stage's chain feed) rather
+    /// than routed. Decks are false: their shader's inputs are the operator's to route.
+    private let reservesPrimaryInput: Bool
 
-    init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock) {
+    init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock,
+         reservesPrimaryInput: Bool = false) {
+        self.reservesPrimaryInput = reservesPrimaryInput
         self.device = device
         self.queue = queue
         self.imageSources = SourceRouter(device: device, queue: queue)
@@ -89,7 +94,7 @@ final class ShaderUnit: ObservableObject {
         compileErrorLine = nil
         shaderName = name
         inputs = result.inputs
-        imageSources.updateInputs(result.inputs)
+        imageSources.updateInputs(result.inputs, reservePrimary: reservesPrimaryInput)
         params.syncInputs(result.inputs)
         core.setScene(scene, imageInputNames: result.inputs.filter { $0.type == "image" }.map(\.name))
         params.replayAll()
@@ -140,7 +145,11 @@ final class ShaderUnit: ObservableObject {
 
     /// Render this unit's scene into the caller's command buffer. Nil when nothing is loaded — the
     /// consumer treats that as "contributes nothing", never as black.
-    nonisolated func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? {
-        core.renderOffscreen(size: size, in: cb)
+    ///
+    /// `primaryInput` is an FX stage's chain feed: it overrides the router for the FIRST image
+    /// input, so a stage processes what came before it rather than a routed camera frame.
+    nonisolated func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer,
+                                     primaryInput: MTLTexture? = nil) -> MTLTexture? {
+        core.renderOffscreen(size: size, in: cb, primaryInput: primaryInput)
     }
 }

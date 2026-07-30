@@ -104,10 +104,19 @@ final class MetalRenderCore: NSObject, @unchecked Sendable {
     ///
     /// Binds routed image-input sources first, inside the same buffer, so a source renders before
     /// the filter that reads it (the ordering `draw(in:)` already relies on).
-    func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer) -> MTLTexture? {
+    /// `primaryInput`, when given, is bound to the FIRST image input instead of consulting the
+    /// router: that is how an FX stage receives the previous stage's output. Every other image
+    /// input still routes normally, so a two-input filter keeps its secondary source.
+    func renderOffscreen(size: MTLSize, in cb: MTLCommandBuffer,
+                         primaryInput: MTLTexture? = nil) -> MTLTexture? {
         lock.lock(); defer { lock.unlock() }
         guard let scene else { return nil }
-        for name in imageInputNames {
+        for (index, name) in imageInputNames.enumerated() {
+            if index == 0, let primaryInput,
+               let val = ISFMSLSceneVal.create(with: primaryInput) as? ISFMSLSceneVal {
+                scene.setValue(val, forInputNamed: name)
+                continue
+            }
             if let src = imageRouter?.renderSource(for: name),
                let tex = src.texture(size: size, in: cb),
                let val = ISFMSLSceneVal.create(with: tex) as? ISFMSLSceneVal {

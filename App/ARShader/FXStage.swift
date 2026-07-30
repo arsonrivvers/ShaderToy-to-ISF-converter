@@ -11,8 +11,11 @@ final class FXStage: ObservableObject, Identifiable {
     let id = UUID()
     let unit: ShaderUnit
 
+    /// Builds its own unit so a stage can never be constructed with a ROUTED primary input — the
+    /// chain drives that slot.
     init(device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock) {
-        self.unit = ShaderUnit(device: device, queue: queue, clock: clock)
+        self.unit = ShaderUnit(device: device, queue: queue, clock: clock,
+                               reservesPrimaryInput: true)
     }
 
     @Published private(set) var isEnabled = true
