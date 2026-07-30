@@ -474,6 +474,47 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
                     }
                 }
             }
+            // Prime-and-clear: a defined initial condition for PERSISTENT targets.
+            //
+            // Pass targets come from VVMTLPool, which recycles textures and does not clear
+            // them, so a PERSISTENT target's first-frame contents are whatever the pool last
+            // held. Zeroing is the initial condition ISF feedback shaders are actually written
+            // against — the house idiom seeds on `FRAMEINDEX < 2 || !(buf.a > 0.5)`, and a
+            // zeroed buffer makes that seed branch fire on its own terms rather than depending
+            // on stale alpha. Targets are allocated lazily during a render, so there is nothing
+            // to clear until one has happened: prime with a throwaway frame at the first
+            // requested time, zero the persistent targets, then capture for real.
+            //
+            // NECESSARY BUT NOT SUFFICIENT for byte-reproducible capture, and measured as such:
+            // with this in place two identical AR_Devolution_Kindling_v01 captures still differ
+            // in 120/120 frames, because TIMEDELTA is still measured off the wall clock (probe:
+            // a TIMEDELTA-only shader differs in 21/30 frames across runs, while a
+            // FRAMEINDEX-only control differs in 0/30). TIME *is* honored from `atTime:`;
+            // TIMEDELTA has no override in ISFMSLKit's public API. Until that is pinned, do not
+            // build reproducibility guarantees on this path.
+            if let primeCB = renderQueue.makeCommandBuffer() {
+                var primeErr: NSString?
+                _ = ISFMSLSafeRenderAtTime(
+                    scene, NSSize(width: size.width, height: size.height),
+                    times[0], primeCB, &primeErr)
+                primeCB.commit()
+                primeCB.waitUntilCompleted()
+            }
+            if let clearCB = renderQueue.makeCommandBuffer() {
+                for pass in scene.passes where pass.persistent {
+                    let maybeTex: MTLTexture? = pass.image.texture
+                    guard let tex = maybeTex else { continue }
+                    let rpd = MTLRenderPassDescriptor()
+                    rpd.colorAttachments[0].texture = tex
+                    rpd.colorAttachments[0].loadAction = .clear
+                    rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+                    rpd.colorAttachments[0].storeAction = .store
+                    clearCB.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
+                }
+                clearCB.commit()
+                clearCB.waitUntilCompleted()
+            }
+
             var written = 0
             for (i, t) in times.enumerated() {
                 guard let cb = renderQueue.makeCommandBuffer() else {
