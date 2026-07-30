@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Unsandboxed, same rationale as the editor: ARShader browses the operator's real shader
+       corpus at /Library/Graphics/ISF and ~/Library/Graphics/ISF. Sandboxing would require a
+       user-selected folder for every library source. -->
+  <key>com.apple.security.app-sandbox</key><false/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+</dict>
+</plist>

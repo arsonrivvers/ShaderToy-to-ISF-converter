@@ -70,7 +70,6 @@ targets:
       - TrueISFEditorTests
       - path: TrueISFEditor/Resources/symbols.json
         buildPhase: resources
-      - TrueISFEditor/TestHarness.swift
       - TrueISFEditor/FetchStrategy.swift
       - TrueISFEditor/WebKitShaderFetcher.swift
       # The shared runtime, compiled into the test bundle exactly as its individual files were
@@ -146,6 +145,79 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
         SWIFT_OBJC_BRIDGING_HEADER: TrueISFEditor/TrueISFEditor-Bridging-Header.h
         USER_HEADER_SEARCH_PATHS: $(SRCROOT)/ISFRuntime $(SRCROOT)/TrueISFEditor
+  ARShader:
+    type: application
+    platform: macOS
+    sources:
+      - path: ISFRuntime
+      - path: ARShader
+    dependencies:
+      - package: ShadertoyISFKit
+      - framework: ../vendor/prebuilt/ISFMSLKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/VVMetalKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINCache.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINOperation.framework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ARShader
+        INFOPLIST_FILE: ARShader/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ARShader/ARShader.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: Q9DY8S68BC
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "0.1.0"
+        GENERATE_INFOPLIST_FILE: NO
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/../Frameworks
+        SWIFT_OBJC_BRIDGING_HEADER: ARShader/ARShader-Bridging-Header.h
+        USER_HEADER_SEARCH_PATHS: $(SRCROOT)/ISFRuntime $(SRCROOT)/ARShader
+      configs:
+        # Same rationale as the editor: with the real signing identity, library validation would
+        # reject the ad-hoc-signed dylibs nested in the vendored ISFMSLKit and abort the test host.
+        Debug:
+          ENABLE_HARDENED_RUNTIME: NO
+  ARShaderTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - ARShaderTests
+      - path: ISFRuntime
+      - path: ARShader
+        excludes:
+          - "ARShaderApp.swift"   # a second @main in the test bundle is a duplicate entry point
+    dependencies:
+      - target: ARShader
+      - package: ShadertoyISFKit
+      - framework: ../vendor/prebuilt/ISFMSLKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/VVMetalKit.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINCache.framework
+        embed: true
+        codeSign: true
+      - framework: ../vendor/prebuilt/PINOperation.framework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.arsonrivvers.ARShaderTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ARShader.app/Contents/MacOS/ARShader"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        FRAMEWORK_SEARCH_PATHS: $(SRCROOT)/../vendor/prebuilt
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @loader_path/../Frameworks $(SRCROOT)/../vendor/prebuilt
+        SWIFT_OBJC_BRIDGING_HEADER: ARShader/ARShader-Bridging-Header.h
+        USER_HEADER_SEARCH_PATHS: $(SRCROOT)/ISFRuntime $(SRCROOT)/ARShader
 schemes:
   TrueISFEditor:
     build:
@@ -154,3 +226,10 @@ schemes:
         TrueISFEditorTests: [test]
     test:
       targets: [TrueISFEditorTests]
+  ARShader:
+    build:
+      targets:
+        ARShader: all
+        ARShaderTests: [test]
+    test:
+      targets: [ARShaderTests]
