@@ -21,8 +21,13 @@ enum MonitorSource: Equatable, Sendable {
 /// Which part of the frame a GPU-time sample belongs to.
 enum RenderElement: Hashable, Sendable {
     case deck(DeckID)
-    /// The composite and the master FX chain — NOT the decks feeding it, which are already counted
-    /// on their own tiles. Adding the tiles up therefore gives the frame, without double-counting.
+    /// The composite and the master FX chain — NOT the decks feeding it, which are timed on their
+    /// own buffers.
+    ///
+    /// The elements do NOT sum to the frame. Metal command buffers on one queue start in order but
+    /// may execute concurrently where nothing forces a dependency, so the two independent deck
+    /// buffers overlap on the GPU. Each figure is that element's own duration; the frame total is
+    /// measured separately and is smaller than the sum.
     case master
 }
 
@@ -139,19 +144,30 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var cueScale: RenderScale = .defaultCue
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
-    /// Per-element GPU metering.
+    /// Per-element GPU metering. **On by default** — the operator asked for a permanent per-tile
+    /// readout rather than a switch (2026-07-30).
     ///
-    /// OFF by default, and off is the shipping invariant: the whole frame is ONE command buffer.
-    /// ON splits the frame into one buffer per element so `gpuStartTime`/`gpuEndTime` — the same
-    /// measurement the global readout already trusts — attributes cleanly to each one.
+    /// The frame is split into one command buffer per element so `gpuStartTime`/`gpuEndTime` — the
+    /// same measurement the global readout already trusts — attributes to each one. This replaces
+    /// the earlier single-buffer frame; there was no way to time elements within one buffer on this
+    /// hardware (`supportsCounterSampling(.atBlitBoundary)` is false on Apple M5 Max, and
+    /// stage-boundary counters would need the ISF render's pass descriptors, which belong to
+    /// ISFMSLKit).
     ///
-    /// **Measuring perturbs the measurement, and the UI says so.** Separate buffers execute in
-    /// commit order and cannot overlap on the GPU, so the frame total while metering is slightly
-    /// higher than while not. That is the price of an unambiguous per-element number, and it is
-    /// the same price the counter-sampling alternative would have charged via `barrier: true` —
-    /// which this machine cannot do anyway (`atBlitBoundary` is false on Apple M5 Max).
-    private var meteringEnabled = false
+    /// Still settable so tests can A/B the split, and so a future performance question can be
+    /// answered by measurement rather than argument. There is no UI for it.
+    private var meteringEnabled = true
     private var elementStats = ElementStatsAccumulator()
+    /// The frame's GPU span so far: earliest `gpuStartTime` and latest `gpuEndTime` across its
+    /// buffers, closed out when the master buffer completes.
+    ///
+    /// A span, not a sum. Independent deck buffers overlap on the GPU, so adding their durations
+    /// overstates the frame badly (measured 2026-07-30: 30.5 + 35.5 + 15.9 = 81.9 ms against a
+    /// 16.1 ms frame period). And taking only the master's duration understates it just as badly —
+    /// that was the bug this replaces, where the global read 15.9 ms and was really reporting the
+    /// composite alone.
+    private var frameGPUStart = 0.0
+    private var frameGPUEnd = 0.0
     /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
     /// strong list would hold a window's worth of Metal state alive forever.
     private let monitors = NSHashTable<MTKView>.weakObjects()
@@ -421,6 +437,8 @@ final class InstrumentRenderer: @unchecked Sendable {
         for (element, buffer) in meteredBuffers {
             buffer.addCompletedHandler { [weak self] buf in
                 self?.addElementGPUTime(element, seconds: buf.gpuEndTime - buf.gpuStartTime)
+                self?.extendFrameGPUSpan(start: buf.gpuStartTime, end: buf.gpuEndTime,
+                                         completesFrame: false)
             }
             buffer.commit()
         }
@@ -432,10 +450,14 @@ final class InstrumentRenderer: @unchecked Sendable {
         // own buffers — so it is the master element's cost, not the frame's. The frame total then
         // comes from summing the elements, which is why `.master` deliberately excludes the decks
         // feeding it.
+        //
+        // The master buffer is committed LAST and depends on every deck's output, so its
+        // completion closes the frame's GPU span.
         cb.addCompletedHandler { [weak self] buf in
             let seconds = buf.gpuEndTime - buf.gpuStartTime
-            self?.addGPUTime(seconds: seconds)
             if metering { self?.addElementGPUTime(.master, seconds: seconds) }
+            self?.extendFrameGPUSpan(start: buf.gpuStartTime, end: buf.gpuEndTime,
+                                     completesFrame: true)
         }
         cb.commit()
 
@@ -473,9 +495,20 @@ final class InstrumentRenderer: @unchecked Sendable {
         elementStats.add(element, seconds: seconds)
     }
 
-    private func addGPUTime(seconds: Double) {
+    /// Widen this frame's GPU span with one completed buffer, and close it out on the last one.
+    ///
+    /// Span rather than sum, because independent buffers overlap on the GPU. With metering off
+    /// there is exactly one buffer and the span is simply its duration — identical to the original
+    /// behaviour.
+    private func extendFrameGPUSpan(start: Double, end: Double, completesFrame: Bool) {
         lock.lock(); defer { lock.unlock() }
-        stats.addGPUTime(seconds: seconds)
+        guard end > start else { return }   // gpuStart/EndTime are 0 on some failure paths
+        if frameGPUStart == 0 || start < frameGPUStart { frameGPUStart = start }
+        if end > frameGPUEnd { frameGPUEnd = end }
+        guard completesFrame else { return }
+        stats.addGPUTime(seconds: frameGPUEnd - frameGPUStart)
+        frameGPUStart = 0
+        frameGPUEnd = 0
     }
 
     /// Drop the stats window — a paused loop must not keep reporting the old rate.
@@ -483,6 +516,8 @@ final class InstrumentRenderer: @unchecked Sendable {
         lock.lock()
         stats.reset()
         elementStats.reset()
+        frameGPUStart = 0
+        frameGPUEnd = 0
         let wasLive = statsWereLive
         statsWereLive = false
         lock.unlock()

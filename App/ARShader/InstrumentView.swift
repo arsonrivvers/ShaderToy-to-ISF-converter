@@ -347,21 +347,9 @@ struct InstrumentView: View {
                     .foregroundStyle(stats.stats == nil ? .secondary : .primary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .help("Measured draw cadence and mean GPU time per frame, from the render loop.")
-
-            Toggle(isOn: Binding(
-                get: { instrument.renderer.isMeteringEnabled },
-                set: { instrument.renderer.isMeteringEnabled = $0 })) {
-                Text("PER-TILE GPU")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-            }
-            .toggleStyle(.checkbox)
-            .help("Show each monitor's own GPU time on its tile.\n\n"
-                  + "This changes what it measures, so it is off by default: the frame is split "
-                  + "into one command buffer per element so each can be timed on its own, and "
-                  + "separate buffers cannot overlap on the GPU. Expect the frame total to read "
-                  + "slightly higher while this is on. There is no FPS per tile — one clock drives "
-                  + "every pane, so they all run at the same rate by construction.")
+            .help("Measured draw cadence and the frame's GPU span — earliest start to latest end "
+                  + "across the frame's buffers, so overlapping work is counted once.\n\n"
+                  + "Per-element figures live on the monitor tiles themselves.")
         }
     }
 

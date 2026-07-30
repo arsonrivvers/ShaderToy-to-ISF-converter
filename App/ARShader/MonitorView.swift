@@ -175,6 +175,7 @@ struct MonitorTile: View {
     @State private var isFrozen = false
     @State private var isOff = false
     @ObservedObject private var elementStats: ElementStatsModel
+    @ObservedObject private var renderStats: RenderStatsModel
 
     init(instrument: Instrument, source: MonitorSource, label: String,
          drivesClock: Bool = false) {
@@ -183,11 +184,24 @@ struct MonitorTile: View {
         self.label = label
         self.drivesClock = drivesClock
         self.elementStats = instrument.elementStats
+        self.renderStats = instrument.renderStats
     }
 
-    /// This tile's own GPU cost, or nil when metering is off. Absent, not zero — the tile shows
-    /// nothing rather than claiming an element measured as free.
+    /// This tile's own GPU cost. Absent, not zero — a tile shows nothing rather than claiming an
+    /// element measured as free.
     private var gpuMs: Double? { elementStats.gpuMs[source.element] }
+
+    /// The readout for this tile: the instrument's frame rate and THIS element's GPU time.
+    ///
+    /// The FPS figure is deliberately the same on every tile, and that is not a fudge — one
+    /// display link drives one frame for the whole instrument, so every pane updates at exactly
+    /// this rate. Showing three different numbers would be inventing a distinction that does not
+    /// exist in the architecture. The GPU figure is what actually differs per tile.
+    private var readout: String? {
+        guard let gpuMs else { return nil }
+        guard let fps = renderStats.stats?.fps else { return String(format: "%.1f ms", gpuMs) }
+        return String(format: "%.0f FPS · %.1f ms", fps, gpuMs)
+    }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -203,19 +217,23 @@ struct MonitorTile: View {
                         .padding(4)
                 }
                 .overlay(alignment: .topTrailing) {
-                    if let gpuMs {
-                        Text(String(format: "%.1f ms", gpuMs))
+                    if let readout, let gpuMs {
+                        Text(readout)
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(gpuMs >= 8 ? .orange : .primary)
                             .padding(.horizontal, 5).padding(.vertical, 2)
                             .background(.black.opacity(0.6), in: Capsule())
                             .padding(4)
                             .help(source == .master
-                                  ? "GPU time for the composite and master FX only — the decks "
-                                    + "are counted on their own tiles, so these add up to the "
-                                    + "frame without double-counting."
-                                  : "GPU time for this deck: its shader render, its copy, and its "
-                                    + "FX chain.")
+                                  ? "The instrument's frame rate, and the GPU time for the "
+                                    + "composite and master FX alone — not the decks feeding it, "
+                                    + "which are timed on their own tiles.\n\nThe tiles do NOT "
+                                    + "sum to the frame: independent buffers overlap on the GPU, "
+                                    + "so the frame total is smaller than their sum."
+                                  : "The instrument's frame rate, and the GPU time for this deck: "
+                                    + "its shader render, its copy, and its FX chain.\n\nFPS is "
+                                    + "the same on every tile by construction — one clock drives "
+                                    + "one frame for the whole instrument.")
                     }
                 }
             HStack(spacing: 6) {

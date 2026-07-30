@@ -125,65 +125,60 @@ final class FrameGraphTests: XCTestCase {
         XCTAssertNil(renderer.deckTexture(.two), "An unloaded deck has no monitor image")
     }
 
-    func testFrameUsesASingleCommandBuffer() throws {
-        // The spec's central claim: no readback, no per-stage commit. If a stage started
-        // committing its own buffer, this count would climb by more than one.
-        //
-        // This holds for the SHIPPING configuration. Metering deliberately breaks it — see
-        // testMeteringSplitsTheFrameIntoOneBufferPerElement — which is why metering is off by
-        // default and why turning it on is disclosed as changing what it measures.
+    func testFrameStillEncodesNoReadbackAndCommitsPerElementOnly() throws {
+        // The original claim was "one command buffer per frame". Per-tile GPU metering replaced
+        // that with one buffer PER ELEMENT — there is no way to time elements inside a single
+        // buffer on this hardware (see GPUPassTimerTests). What survives, and matters, is that
+        // nothing does a readback or commits per STAGE: the count is bounded by the element count,
+        // not by the number of passes.
         try load(.one, "solid_red")
         try load(.two, "solid_green")
-        XCTAssertFalse(renderer.isMeteringEnabled, "metering must ship OFF")
         let before = renderer.committedBufferCount
         renderer.renderFrame()
-        XCTAssertEqual(renderer.committedBufferCount - before, 1)
+        XCTAssertEqual(renderer.committedBufferCount - before, 3,
+                       "two decks plus the master — not one per pass")
     }
 
     // MARK: per-element metering
 
-    func testMeteringSplitsTheFrameIntoOneBufferPerElement() throws {
-        // One buffer per deck plus one for the master composite. That is what makes each element's
-        // gpuStartTime/gpuEndTime its own rather than the whole frame's.
-        try load(.one, "solid_red")
-        try load(.two, "solid_green")
-        renderer.isMeteringEnabled = true
-        let before = renderer.committedBufferCount
-        renderer.renderFrame()
-        XCTAssertEqual(renderer.committedBufferCount - before, 3)
+    func testMeteringIsOnByDefault() {
+        // The operator asked for a permanent per-tile readout rather than a switch (2026-07-30).
+        XCTAssertTrue(renderer.isMeteringEnabled)
     }
 
-    func testTurningMeteringOffRestoresTheSingleBufferFrame() throws {
+    func testDisablingMeteringCollapsesTheFrameToOneBuffer() throws {
+        // No UI for this, but kept settable so a future performance question about the split can
+        // be answered by measurement rather than argument.
         try load(.one, "solid_red")
-        renderer.isMeteringEnabled = true
-        renderer.renderFrame()
+        try load(.two, "solid_green")
         renderer.isMeteringEnabled = false
         let before = renderer.committedBufferCount
         renderer.renderFrame()
         XCTAssertEqual(renderer.committedBufferCount - before, 1)
     }
 
-    func testMeteringDoesNotChangeWhatIsRendered() throws {
-        // Splitting the buffers must not alter the image: the master still samples deck outputs
-        // written by buffers committed before it, because buffers on one queue execute in commit
-        // order. If that ordering were wrong this would read black or stale.
+    func testSplittingTheBuffersDoesNotChangeWhatIsRendered() throws {
+        // The master samples deck outputs written by buffers committed before it. Metal orders
+        // buffers on one queue by commit order and tracks cross-buffer hazards, so the image must
+        // be identical either way. If that were wrong this would read black or stale.
         try load(.one, "solid_red")
         try load(.two, "solid_green")
         mixer.crossfadePosition = 0.5
         mixer.setBlendMode(.normal, for: .two)
-        let unmetered = try renderAndRead()
+        let split = try renderAndRead()
 
-        renderer.isMeteringEnabled = true
-        let metered = try renderAndRead()
-        XCTAssertEqual(metered.x, unmetered.x, accuracy: 0.02)
-        XCTAssertEqual(metered.y, unmetered.y, accuracy: 0.02)
-        XCTAssertEqual(metered.z, unmetered.z, accuracy: 0.02)
+        renderer.isMeteringEnabled = false
+        let single = try renderAndRead()
+        XCTAssertEqual(split.x, single.x, accuracy: 0.02)
+        XCTAssertEqual(split.y, single.y, accuracy: 0.02)
+        XCTAssertEqual(split.z, single.z, accuracy: 0.02)
     }
 
     func testNoElementFiguresArePublishedWhileMeteringIsOff() throws {
         // "Not measured" and "measured as free" are different claims. With metering off the tiles
         // must show nothing at all rather than a zero.
         try load(.one, "solid_red")
+        renderer.isMeteringEnabled = false
         var published: [[RenderElement: Double]] = []
         renderer.onElementStats = { published.append($0) }
         for _ in 0..<8 { renderer.renderFrame() }
