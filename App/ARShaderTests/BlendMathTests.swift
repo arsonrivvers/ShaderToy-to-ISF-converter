@@ -114,6 +114,70 @@ final class BlendMathTests: XCTestCase {
         XCTAssertEqual(BlendMode.allCases.map(\.shaderIndex),
                        Array(0..<Int32(BlendMode.allCases.count)))
         XCTAssertEqual(BlendMode.normal.shaderIndex, 0)
-        XCTAssertEqual(BlendMode.allCases.count, 12)
+        XCTAssertEqual(BlendMode.allCases.count, 19)
+    }
+
+    func testTheTwelveW3CModesKeepTheirOriginalIndices() {
+        // The extended set was APPENDED. If anyone ever interleaves a new mode, this pins the
+        // damage: every saved blend selection would silently point at a different mode.
+        let w3c: [BlendMode] = [.normal, .multiply, .screen, .overlay, .darken, .lighten,
+                                .colorDodge, .colorBurn, .hardLight, .softLight,
+                                .difference, .exclusion]
+        XCTAssertEqual(w3c.map(\.shaderIndex), Array(0..<12))
+        XCTAssertTrue(w3c.allSatisfy(\.isW3CSeparable))
+        XCTAssertEqual(BlendMode.allCases.filter(\.isW3CSeparable), w3c)
+    }
+
+    // MARK: extended set
+
+    func testAddIsClampedLinearDodge() {
+        XCTAssertEqual(BlendMath.blend(.add, backdrop: 0.3, source: 0.4), 0.7, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.add, backdrop: 0.8, source: 0.9), 1.0, accuracy: acc,
+                       "must clamp, not wrap")
+        XCTAssertEqual(BlendMath.blend(.add, backdrop: 0.0, source: 0.0), 0.0, accuracy: acc)
+    }
+
+    func testSubtractIsClampedAtZero() {
+        XCTAssertEqual(BlendMath.blend(.subtract, backdrop: 0.7, source: 0.2), 0.5, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.subtract, backdrop: 0.2, source: 0.7), 0.0, accuracy: acc)
+    }
+
+    func testLinearBurn() {
+        // cb + cs - 1
+        XCTAssertEqual(BlendMath.blend(.linearBurn, backdrop: 0.8, source: 0.7), 0.5, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.linearBurn, backdrop: 0.2, source: 0.3), 0.0, accuracy: acc)
+    }
+
+    func testVividLightSwitchesBetweenBurnAndDodge() {
+        // cs <= 0.5 -> ColorBurn(cb, 2cs). cs=0.25 -> burn(0.5, 0.5) = 0
+        XCTAssertEqual(BlendMath.blend(.vividLight, backdrop: 0.5, source: 0.25), 0.0, accuracy: acc)
+        // cs > 0.5 -> ColorDodge(cb, 2cs-1). cs=0.75 -> dodge(0.5, 0.5) = 1
+        XCTAssertEqual(BlendMath.blend(.vividLight, backdrop: 0.5, source: 0.75), 1.0, accuracy: acc)
+    }
+
+    func testPinLight() {
+        // cs <= 0.5 -> min(cb, 2cs);  cs > 0.5 -> max(cb, 2cs-1)
+        XCTAssertEqual(BlendMath.blend(.pinLight, backdrop: 0.8, source: 0.25), 0.5, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.pinLight, backdrop: 0.2, source: 0.9), 0.8, accuracy: acc)
+    }
+
+    func testHardMixIsBinary() {
+        XCTAssertEqual(BlendMath.blend(.hardMix, backdrop: 0.6, source: 0.6), 1.0, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.hardMix, backdrop: 0.2, source: 0.3), 0.0, accuracy: acc)
+        for cb in stride(from: 0.0, through: 1.0, by: 0.1) {
+            for cs in stride(from: 0.0, through: 1.0, by: 0.1) {
+                let v = BlendMath.blend(.hardMix, backdrop: cb, source: cs)
+                XCTAssertTrue(v == 0 || v == 1, "hard mix must land on 0 or 1, got \(v)")
+            }
+        }
+    }
+
+    func testDivideIncludingTheZeroSourceCase() {
+        XCTAssertEqual(BlendMath.blend(.divide, backdrop: 0.25, source: 0.5), 0.5, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.divide, backdrop: 0.8, source: 0.2), 1.0, accuracy: acc,
+                       "clamped at 1")
+        XCTAssertEqual(BlendMath.blend(.divide, backdrop: 0.5, source: 0.0), 1.0, accuracy: acc)
+        XCTAssertEqual(BlendMath.blend(.divide, backdrop: 0.0, source: 0.0), 0.0, accuracy: acc,
+                       "0/0 stays black rather than flashing white")
     }
 }

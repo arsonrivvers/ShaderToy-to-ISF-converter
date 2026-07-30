@@ -8,10 +8,31 @@ import Foundation
 /// `shaderIndex` is the wire value handed to MSL. It is derived from declaration order, and the
 /// test suite pins it — reordering these cases would silently remap the operator's blend selection.
 enum BlendMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    // ── W3C Compositing and Blending Level 1, separable ──
     case normal, multiply, screen, overlay, darken, lighten
     case colorDodge, colorBurn, hardLight, softLight, difference, exclusion
+    // ── Extended set (standard published compositing math; NOT in the W3C separable list) ──
+    // Added 2026-07-30: the operator flagged Add as missing, which it was. These are the
+    // arithmetic and light-family modes every VJ host carries, TouchDesigner's Composite TOP
+    // included. The formulas are standard and published; nothing here is extracted from any
+    // installed application.
+    //
+    // APPENDED, never interleaved: `shaderIndex` is declaration order and the MSL switch indexes
+    // on it, so inserting a case among the W3C ones would silently remap saved blend selections.
+    case add, subtract, linearBurn, vividLight, pinLight, hardMix, divide
 
     var id: String { rawValue }
+
+    /// True for the twelve W3C separable modes — lets the UI group them apart from the extras.
+    var isW3CSeparable: Bool {
+        switch self {
+        case .normal, .multiply, .screen, .overlay, .darken, .lighten,
+             .colorDodge, .colorBurn, .hardLight, .softLight, .difference, .exclusion:
+            return true
+        default:
+            return false
+        }
+    }
 
     var displayName: String {
         switch self {
@@ -27,6 +48,13 @@ enum BlendMode: String, CaseIterable, Identifiable, Codable, Sendable {
         case .softLight:  return "Soft Light"
         case .difference: return "Difference"
         case .exclusion:  return "Exclusion"
+        case .add:        return "Add"
+        case .subtract:   return "Subtract"
+        case .linearBurn: return "Linear Burn"
+        case .vividLight: return "Vivid Light"
+        case .pinLight:   return "Pin Light"
+        case .hardMix:    return "Hard Mix"
+        case .divide:     return "Divide"
         }
     }
 
@@ -75,6 +103,26 @@ enum BlendMath {
             return abs(cb - cs)
         case .exclusion:
             return cb + cs - 2 * cb * cs
+
+        // ── extended set ──
+        case .add:
+            return min(1, cb + cs)                      // linear dodge
+        case .subtract:
+            return max(0, cb - cs)
+        case .linearBurn:
+            return max(0, cb + cs - 1)
+        case .vividLight:
+            return cs <= 0.5
+                ? blend(.colorBurn, backdrop: cb, source: min(1, 2 * cs))
+                : blend(.colorDodge, backdrop: cb, source: min(1, 2 * cs - 1))
+        case .pinLight:
+            return cs <= 0.5 ? min(cb, 2 * cs) : max(cb, 2 * cs - 1)
+        case .hardMix:
+            // The threshold form: everything lands on 0 or 1, which is the point of the mode.
+            return (cb + cs) >= 1 ? 1 : 0
+        case .divide:
+            if cs == 0 { return cb == 0 ? 0 : 1 }
+            return min(1, cb / cs)
         }
     }
 

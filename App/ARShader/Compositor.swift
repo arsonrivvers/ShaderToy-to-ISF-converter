@@ -108,8 +108,22 @@ final class Compositor: @unchecked Sendable {
         return select(hi, lo, cs <= 0.5);
     }
 
+    inline float3 b_vividlight(float3 cb, float3 cs) {
+        float3 lo = b_colorburn(cb, min(float3(1.0), 2.0 * cs));
+        float3 hi = b_colordodge(cb, min(float3(1.0), 2.0 * cs - 1.0));
+        return select(hi, lo, cs <= 0.5);
+    }
+
+    inline float3 b_divide(float3 cb, float3 cs) {
+        float3 r = min(float3(1.0), cb / max(cs, 1e-7));
+        // cs == 0: white unless the backdrop is also 0.
+        float3 zeroCase = select(float3(1.0), float3(0.0), cb <= 0.0);
+        return select(r, zeroCase, cs <= 0.0);
+    }
+
     inline float3 apply_blend(int mode, float3 cb, float3 cs) {
         switch (mode) {
+            // W3C separable
             case 0:  return cs;                                  // normal
             case 1:  return b_multiply(cb, cs);                  // multiply
             case 2:  return b_screen(cb, cs);                    // screen
@@ -122,6 +136,14 @@ final class Compositor: @unchecked Sendable {
             case 9:  return b_softlight(cb, cs);                 // softLight
             case 10: return abs(cb - cs);                        // difference
             case 11: return cb + cs - 2.0 * cb * cs;             // exclusion
+            // extended set — must match BlendMode's appended declaration order
+            case 12: return min(float3(1.0), cb + cs);           // add (linear dodge)
+            case 13: return max(float3(0.0), cb - cs);           // subtract
+            case 14: return max(float3(0.0), cb + cs - 1.0);     // linearBurn
+            case 15: return b_vividlight(cb, cs);                // vividLight
+            case 16: return select(max(cb, 2.0 * cs - 1.0), min(cb, 2.0 * cs), cs <= 0.5); // pinLight
+            case 17: return select(float3(0.0), float3(1.0), (cb + cs) >= 1.0);            // hardMix
+            case 18: return b_divide(cb, cs);                    // divide
             default: return cs;
         }
     }
