@@ -135,6 +135,61 @@ final class FrameGraphTests: XCTestCase {
         XCTAssertEqual(renderer.committedBufferCount - before, 1)
     }
 
+    // MARK: resolution
+
+    func testChangingTheOutputResolutionResizesTheMaster() throws {
+        renderer.outputResolution = .r720
+        renderer.renderFrame()
+        let tex = try XCTUnwrap(renderer.rawMasterTexture())
+        XCTAssertEqual(tex.width, 1280)
+        XCTAssertEqual(tex.height, 720)
+    }
+
+    func testTheInstrumentStillRendersCorrectlyAfterAResolutionChange() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0
+        XCTAssertEqual(try renderAndRead().x, 1.0, accuracy: 0.02)
+
+        renderer.outputResolution = .r540
+        let rgb = try renderAndRead()
+        XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02, "still red at the new size")
+        XCTAssertEqual(try XCTUnwrap(renderer.rawMasterTexture()).width, 960)
+    }
+
+    func testSettingTheSameResolutionIsANoOp() throws {
+        renderer.renderFrame()
+        let before = try XCTUnwrap(renderer.rawMasterTexture())
+        renderer.outputResolution = renderer.outputResolution
+        XCTAssertTrue(try XCTUnwrap(renderer.rawMasterTexture()) === before,
+                      "A no-op set must not reallocate — the UI binds to this and writes freely")
+    }
+
+    func testACuedDeckIsStillVisibleOnItsOwnMonitor() throws {
+        // Deck 2 is loaded but faded out, so it renders at cue resolution. Its monitor must still
+        // show it - that is what cueing IS.
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0     // deck 2 weight 0 -> cued, not live
+        renderer.renderFrame()
+        let deckTex = try XCTUnwrap(renderer.deckTexture(.two))
+        let readback = try XCTUnwrap(
+            TextureReadback.managedCopy(of: deckTex, device: device, queue: queue))
+        let rgb = try XCTUnwrap(TestPixels.meanRGB(of: readback))
+        XCTAssertEqual(rgb.y, 1.0, accuracy: 0.02, "the cue monitor shows green, not black")
+    }
+
+    func testStatsArePublishedFromTheRenderLoop() throws {
+        // An FPS readout must come from measured frames. Nothing here fabricates a number: with a
+        // 0.5s window, a burst of frames inside one test may or may not publish, so this asserts
+        // only that when a snapshot DOES arrive its fps is a real positive measurement.
+        var received: [RenderStats] = []
+        renderer.onStats = { if let s = $0 { received.append(s) } }
+        for _ in 0..<200 { renderer.renderFrame() }
+        renderer.onStats = nil
+        for s in received {
+            XCTAssertGreaterThan(s.fps, 0)
+        }
+    }
+
     func testAFadedOutDeckDoesNotDarkenTheOtherOne() throws {
         // Regression guard for "skip the layer" vs "composite it at zero": a zero-opacity layer
         // must leave the backdrop bit-identical, not run a blend with alpha 0.

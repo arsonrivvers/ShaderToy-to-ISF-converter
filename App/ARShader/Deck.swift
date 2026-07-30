@@ -152,11 +152,24 @@ final class Deck: ObservableObject {
     /// Render this deck into the caller's command buffer and return the deck's OWNED output
     /// texture. Nil when no shader is loaded — the layer contributes nothing and the compositor
     /// skips it. Never returns a pool texture: monitors read this in a later buffer.
-    nonisolated func render(in cb: MTLCommandBuffer) -> MTLTexture? {
-        let size = MTLSize(width: InstrumentRenderer.masterWidth,
-                           height: InstrumentRenderer.masterHeight, depth: 1)
-        guard let engineTexture = core.renderOffscreen(size: size, in: cb) else { return nil }
-        if renderOwnedOutput == nil { renderOwnedOutput = Self.makeOutputTexture(device: device) }
+    /// Render this deck into the caller's command buffer and return its OWNED output texture.
+    ///
+    /// `renderSize` is what the ISF shader is actually asked to rasterise — the dominant GPU cost,
+    /// and the only real saving lever. `ownedSize` is the texture everything downstream reads, and
+    /// stays at the output resolution regardless.
+    ///
+    /// Keeping the owned texture at a FIXED size is deliberate: a deck being cued renders small
+    /// and is upscaled into it, so when the operator starts a fade there is no reallocation and no
+    /// hitch at exactly the wrong moment. Only the rasterised pixel count changes.
+    nonisolated func render(in cb: MTLCommandBuffer,
+                            renderSize: MTLSize,
+                            ownedSize: MTLSize) -> MTLTexture? {
+        guard let engineTexture = core.renderOffscreen(size: renderSize, in: cb) else { return nil }
+        // Reallocate only when the OUTPUT resolution changes — never per frame, never on a fade.
+        if renderOwnedOutput?.width != ownedSize.width
+            || renderOwnedOutput?.height != ownedSize.height {
+            renderOwnedOutput = Self.makeOutputTexture(device: device, size: ownedSize)
+        }
         guard let owned = renderOwnedOutput, let copyPass else { return nil }
         copyPass.encode(from: engineTexture, to: owned, in: cb)
         return owned
@@ -168,11 +181,12 @@ final class Deck: ObservableObject {
     // the render thread owns — a race with no symptom until it tears. (Removed during the Task 13
     // manual review, having been added and never called.)
 
-    nonisolated private static func makeOutputTexture(device: MTLDevice) -> MTLTexture? {
+    nonisolated private static func makeOutputTexture(device: MTLDevice,
+                                                      size: MTLSize) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: InstrumentRenderer.masterFormat,
-            width: InstrumentRenderer.masterWidth,
-            height: InstrumentRenderer.masterHeight, mipmapped: false)
+            width: size.width,
+            height: size.height, mipmapped: false)
         desc.usage = [.renderTarget, .shaderRead]
         desc.storageMode = .private
         return device.makeTexture(descriptor: desc)

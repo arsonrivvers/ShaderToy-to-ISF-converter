@@ -30,8 +30,9 @@ enum MonitorSource: Equatable, Sendable {
 /// backdrop the previous layer produced. Both are allocated once at 1920×1080; the steady-state
 /// frame allocates nothing.
 final class InstrumentRenderer: @unchecked Sendable {
-    static let masterWidth = 1920
-    static let masterHeight = 1080
+    /// The size textures are allocated at before the operator picks anything.
+    static let masterWidth = RenderResolution.default.width
+    static let masterHeight = RenderResolution.default.height
     /// 16-bit float: ISF scenes commonly output float formats, and blending in a wider space than
     /// the 8-bit drawable avoids banding on repeated composites.
     static let masterFormat: MTLPixelFormat = .rgba16Float
@@ -55,12 +56,27 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var deckOutputs: [DeckID: MTLTexture] = [:]
     /// Test observability: how many command buffers this renderer has committed.
     private var committedBuffers = 0
+    /// Program-output resolution. Changing it reallocates both masters — rare, operator-driven,
+    /// and never in the steady-state frame.
+    private var masterResolution: RenderResolution = .default
+    /// What a deck renders at while it is NOT contributing to program.
+    ///
+    /// A cued deck feeds only a small monitor, so rasterising it at full output resolution is
+    /// pure waste — and the ISF render is where essentially all the GPU cost lives (monitors just
+    /// sample a texture that already exists, which is nearly free). Set equal to the output
+    /// resolution to disable the saving.
+    private var cueResolution: RenderResolution = .r540
+    private var stats = RenderStatsAccumulator()
+    private var statsWereLive = false
     /// Views presenting instrument textures. Weak: a closed panel's view must deallocate, and a
     /// strong list would hold a window's worth of Metal state alive forever.
     private let monitors = NSHashTable<MTKView>.weakObjects()
 
     /// Called after each frame's command buffer is committed, on the render thread.
     var onFrameRendered: (@Sendable () -> Void)?
+    /// A fresh FPS / GPU-ms snapshot ~2x per second, or nil when the loop stops producing frames.
+    /// Fires on the render thread; the UI hops to main.
+    var onStats: (@Sendable (RenderStats?) -> Void)?
 
     @MainActor
     init(device: MTLDevice, queue: MTLCommandQueue, mixer: MixerState,
@@ -81,12 +97,42 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
     }
 
-    private static func makeMaster(device: MTLDevice) -> MTLTexture? {
+    private static func makeMaster(device: MTLDevice,
+                                   resolution: RenderResolution = .default) -> MTLTexture? {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: masterFormat, width: masterWidth, height: masterHeight, mipmapped: false)
+            pixelFormat: masterFormat, width: resolution.width, height: resolution.height,
+            mipmapped: false)
         desc.usage = [.renderTarget, .shaderRead]
         desc.storageMode = .private
         return device.makeTexture(descriptor: desc)
+    }
+
+    /// The program-output resolution. Reallocates the master pair; a no-op if unchanged, so the
+    /// UI can bind to it freely.
+    var outputResolution: RenderResolution {
+        get { lock.lock(); defer { lock.unlock() }; return masterResolution }
+        set {
+            lock.lock()
+            guard newValue != masterResolution else { lock.unlock(); return }
+            masterResolution = newValue
+            let fresh = (0..<2).compactMap { _ in
+                Self.makeMaster(device: device, resolution: newValue)
+            }
+            // Only swap if BOTH allocated: a half-resized pair would composite across mismatched
+            // targets, and the failure would look like a corrupted image rather than an error.
+            if fresh.count == 2 {
+                masters = fresh
+                masterIndex = 0
+            }
+            lock.unlock()
+        }
+    }
+
+    /// What a deck rasterises at while it is NOT on program. Set equal to `outputResolution` to
+    /// turn the saving off.
+    var cueRenderResolution: RenderResolution {
+        get { lock.lock(); defer { lock.unlock() }; return cueResolution }
+        set { lock.lock(); cueResolution = newValue; lock.unlock() }
     }
 
     @MainActor
@@ -155,13 +201,23 @@ final class InstrumentRenderer: @unchecked Sendable {
             return
         }
         let deckList = decks
+        let outRes = masterResolution
+        let cueRes = cueResolution
         lock.unlock()
 
         // 1. Decks render offscreen into their own textures. Deck.render is nonisolated and
         //    internally lock-guarded, so this is safe off the main actor.
+        //
+        //    A deck that is not contributing to program (faded out, or cued on the far side of the
+        //    crossfader) rasterises at the CUE resolution: it is only feeding a small monitor, and
+        //    the ISF render is where essentially all the GPU cost is. Its owned texture stays at
+        //    the output size, so starting a fade costs no reallocation.
         var outputs: [DeckID: MTLTexture] = [:]
         for layer in layers {
-            if let deck = deckList[layer.deck], let tex = deck.render(in: cb) {
+            guard let deck = deckList[layer.deck] else { continue }
+            let isLive = layer.effectiveOpacity > 0
+            let renderSize = (isLive ? outRes : cueRes).size
+            if let tex = deck.render(in: cb, renderSize: renderSize, ownedSize: outRes.size) {
                 outputs[layer.deck] = tex
             }
         }
@@ -196,7 +252,19 @@ final class InstrumentRenderer: @unchecked Sendable {
         let views = monitors.allObjects
         lock.unlock()
 
+        // GPU frame time arrives on a Metal completion thread; addGPUTime is lock-protected, so no
+        // main hop is needed. Must be attached before commit.
+        cb.addCompletedHandler { [weak self] buf in
+            self?.addGPUTime(seconds: buf.gpuEndTime - buf.gpuStartTime)
+        }
         cb.commit()
+
+        lock.lock()
+        let snapshot = stats.frame(at: CACurrentMediaTime())
+        if snapshot != nil { statsWereLive = true }
+        lock.unlock()
+        if let snapshot { onStats?(snapshot) }
+
         onFrameRendered?()
 
         // Monitors present textures produced by the buffer just committed. Each MTKView.draw()
@@ -214,6 +282,21 @@ final class InstrumentRenderer: @unchecked Sendable {
         rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         rpd.colorAttachments[0].storeAction = .store
         cb.makeRenderCommandEncoder(descriptor: rpd)?.endEncoding()
+    }
+
+    private func addGPUTime(seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        stats.addGPUTime(seconds: seconds)
+    }
+
+    /// Drop the stats window — a paused loop must not keep reporting the old rate.
+    func resetStats() {
+        lock.lock()
+        stats.reset()
+        let wasLive = statsWereLive
+        statsWereLive = false
+        lock.unlock()
+        if wasLive { onStats?(nil) }
     }
 
     // MARK: monitors

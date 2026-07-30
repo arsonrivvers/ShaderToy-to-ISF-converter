@@ -1,6 +1,5 @@
 import Metal
 import CoreGraphics
-
 /// Aspect-fit math for the preview display (blit) pass. Pure — unit-tested without Metal.
 enum BlitFit {
     /// NDC scale factors that letterbox/pillarbox a texture into a drawable without distortion.

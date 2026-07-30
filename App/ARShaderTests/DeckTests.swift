@@ -18,6 +18,9 @@ final class DeckTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
+    /// The output resolution a deck normally renders at.
+    private var full: MTLSize { RenderResolution.default.size }
+
     private func makeDeck() -> Deck {
         Deck(id: .one, device: device, queue: queue, clock: RenderClock())
     }
@@ -40,7 +43,7 @@ final class DeckTests: XCTestCase {
     func testEmptyDeckRendersNothing() throws {
         let deck = makeDeck()
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        XCTAssertNil(deck.render(in: cb), "A deck with no shader must return nil, not a stale texture")
+        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full), "A deck with no shader must return nil, not a stale texture")
         cb.commit()
     }
 
@@ -51,7 +54,7 @@ final class DeckTests: XCTestCase {
         XCTAssertEqual(deck.shaderName, "solid_red.fs")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb))
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full))
         cb.commit()
         cb.waitUntilCompleted()
 
@@ -71,7 +74,7 @@ final class DeckTests: XCTestCase {
                        "A failed compile must not claim to have loaded")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb), "The previous shader must still be rendering")
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full), "The previous shader must still be rendering")
         cb.commit()
         cb.waitUntilCompleted()
         let rgb = try meanRGB(of: tex)
@@ -82,10 +85,10 @@ final class DeckTests: XCTestCase {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
-        let first = try XCTUnwrap(deck.render(in: cb1))
+        let first = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full))
         cb1.commit(); cb1.waitUntilCompleted()
         let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
-        let second = try XCTUnwrap(deck.render(in: cb2))
+        let second = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full))
         cb2.commit(); cb2.waitUntilCompleted()
         XCTAssertTrue(first === second,
                       "The deck owns ONE output texture — a per-frame allocation would also mean "
@@ -104,13 +107,75 @@ final class DeckTests: XCTestCase {
         cb.commit()
     }
 
+    // MARK: resolution
+
+    func testTheOwnedTextureTracksTheOWNEDSizeNotTheRenderSize() throws {
+        // A cued deck rasterises small and is upscaled into a full-size owned texture, so starting
+        // a fade costs no reallocation and no hitch. The owned texture must therefore follow
+        // ownedSize, never renderSize.
+        let deck = makeDeck()
+        loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
+        let cue = RenderResolution.r540.size
+        let cb = try XCTUnwrap(queue.makeCommandBuffer())
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: cue, ownedSize: full))
+        cb.commit(); cb.waitUntilCompleted()
+        XCTAssertEqual(tex.width, full.width)
+        XCTAssertEqual(tex.height, full.height)
+    }
+
+    func testCueRenderingDoesNotReallocateWhenTheDeckGoesLive() throws {
+        // The whole point of a fixed owned size: the fade must not allocate.
+        let deck = makeDeck()
+        loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
+        let cue = RenderResolution.r540.size
+
+        let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
+        let cued = try XCTUnwrap(deck.render(in: cb1, renderSize: cue, ownedSize: full))
+        cb1.commit(); cb1.waitUntilCompleted()
+
+        let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
+        let live = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full))
+        cb2.commit(); cb2.waitUntilCompleted()
+
+        XCTAssertTrue(cued === live, "Going live must reuse the same texture, not allocate one")
+    }
+
+    func testChangingTheOutputResolutionDoesReallocate() throws {
+        let deck = makeDeck()
+        loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
+        let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
+        let at1080 = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full))
+        cb1.commit(); cb1.waitUntilCompleted()
+
+        let smaller = RenderResolution.r720.size
+        let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
+        let at720 = try XCTUnwrap(deck.render(in: cb2, renderSize: smaller, ownedSize: smaller))
+        cb2.commit(); cb2.waitUntilCompleted()
+
+        XCTAssertFalse(at1080 === at720)
+        XCTAssertEqual(at720.width, 1280)
+    }
+
+    func testACuedDeckStillProducesAWatchableImage() throws {
+        // Cueing saves GPU by rasterising small — it must NOT mean the cue monitor goes blank or
+        // black, which is the whole reason the operator is cueing.
+        let deck = makeDeck()
+        loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
+        let cb = try XCTUnwrap(queue.makeCommandBuffer())
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: RenderResolution.r360.size,
+                                            ownedSize: full))
+        cb.commit(); cb.waitUntilCompleted()
+        let rgb = try meanRGB(of: tex)
+        XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
+    }
+
     func testUnloadStopsTheDeckContributing() throws {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         deck.unload()
         XCTAssertNil(deck.shaderName)
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        XCTAssertNil(deck.render(in: cb))
+        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full))
         cb.commit()
     }
 }

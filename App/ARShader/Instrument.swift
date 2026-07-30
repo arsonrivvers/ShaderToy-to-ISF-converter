@@ -14,6 +14,8 @@ final class Instrument: ObservableObject {
     let mixer = MixerState()
     let library = LibraryModel()
     let renderer: InstrumentRenderer
+    /// Live FPS / GPU-ms readout. Fed from the render thread, published on main.
+    let renderStats = RenderStatsModel()
 
     init() {
         // The same shared device/queue the editor uses, so both apps cooperate with one GPU
@@ -23,6 +25,11 @@ final class Instrument: ObservableObject {
         self.queue = props.renderQueue
         self.renderer = InstrumentRenderer(device: props.device, queue: props.renderQueue,
                                            mixer: mixer)
+        // Stats arrive on the render thread ~2x/sec; hop to main to publish.
+        let model = renderStats
+        renderer.onStats = { snapshot in
+            Task { @MainActor in model.stats = snapshot }
+        }
     }
 
     /// The program-output window (projector mock). Lazy so nothing AppKit-shaped is built until

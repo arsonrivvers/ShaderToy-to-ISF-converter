@@ -47,7 +47,17 @@ struct DeckStripView: View {
             Picker("Blend", selection: Binding(
                 get: { mixer.blendMode[id] ?? .normal },
                 set: { mixer.setBlendMode($0, for: id) })) {
-                ForEach(BlendMode.allCases) { Text($0.displayName).tag($0) }
+                // Grouped: the W3C separable twelve, then the arithmetic / light extras.
+                Section("Standard") {
+                    ForEach(BlendMode.allCases.filter(\.isW3CSeparable)) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
+                Section("Extended") {
+                    ForEach(BlendMode.allCases.filter { !$0.isW3CSeparable }) {
+                        Text($0.displayName).tag($0)
+                    }
+                }
             }
 
             Divider()
@@ -64,6 +74,7 @@ struct InstrumentView: View {
     @ObservedObject var instrument: Instrument
     @ObservedObject private var mixer: MixerState
     @ObservedObject private var output: OutputWindowController
+    @ObservedObject private var stats: RenderStatsModel
     @State private var libraryTarget: DeckID = .one
     @State private var keys: BlackoutKeyMonitor?
 
@@ -71,6 +82,7 @@ struct InstrumentView: View {
         self.instrument = instrument
         self.mixer = instrument.mixer
         self.output = instrument.output
+        self.stats = instrument.renderStats
     }
 
     var body: some View {
@@ -133,9 +145,12 @@ struct InstrumentView: View {
             }
 
             Divider()
+            resolutionPickers
+            Divider()
             outputPicker
 
             Spacer()
+            statsReadout
 
             Button {
                 mixer.toggleBlackoutLatch()
@@ -153,6 +168,43 @@ struct InstrumentView: View {
                 .multilineTextAlignment(.center)
         }
         .padding(10)
+    }
+
+    /// Output resolution drives the master AND what the decks rasterise at while live.
+    /// Cue resolution is what a deck rasterises at while it is NOT on program — the only place
+    /// there is real GPU to save, since monitors merely sample an existing texture.
+    private var resolutionPickers: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("RESOLUTION").font(.system(size: 11, weight: .bold, design: .monospaced))
+            Picker("Output", selection: Binding(
+                get: { instrument.renderer.outputResolution },
+                set: { instrument.renderer.outputResolution = $0 })) {
+                ForEach(RenderResolution.allCases) { Text($0.displayName).tag($0) }
+            }
+            Picker("Cue", selection: Binding(
+                get: { instrument.renderer.cueRenderResolution },
+                set: { instrument.renderer.cueRenderResolution = $0 })) {
+                ForEach(RenderResolution.allCases) { Text($0.displayName).tag($0) }
+            }
+            .help("What a deck renders at while it is NOT on program. Set it equal to Output to "
+                  + "turn the saving off.")
+        }
+        .font(.system(size: 11))
+    }
+
+    /// Real measured numbers or nothing. An FPS figure the engine did not produce would be the
+    /// same class of lie as the fabricated recorder counter.
+    private var statsReadout: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(stats.stats == nil ? Color.secondary : .green)
+                .frame(width: 5, height: 5)
+            Text(stats.stats?.readoutLabel ?? "no frames")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(stats.stats == nil ? .secondary : .primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help("Measured draw cadence and mean GPU time per frame, from the render loop.")
     }
 
     /// Output ships CLOSED; this is the deliberate operator enable.
