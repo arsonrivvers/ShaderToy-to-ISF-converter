@@ -10,10 +10,32 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-30-arshader-render-scale-and-fx-stacking-design.md`
 
+> **STATUS: COMPLETE.** Tasks 1–12 all landed (`a10de95..63ed737`). Live smoke:
+> `docs/reports/live-smoke-instrument-m2-phase2.md`.
+>
+> **Where this document is stale, and it bit during execution:**
+> - Task 3 and Task 4 say **RENDER SCALE**; the shipped control is **PREVIEW SCALE**.
+> - Task 5 Step 3 says to create `App/ISFRuntime/ShaderUnit.swift`, contradicting its own Files
+>   header and the File Structure table. `App/ARShader/` is correct — `project.yml` excludes
+>   `ParamStore` from `TrueISFEditorTests`.
+> - Task 5 Step 7 expects 134 tests, Task 7 expects 146, and so on; every count downstream of the
+>   render-scale session is low. Final: **181**.
+> - Task 7's `FXStage` calls an initialiser Task 7.5 creates, and Task 7.5's first test calls
+>   `encode` from Task 8. Executed in the order model → binding → encode.
+> - Task 7's `FXStage.apply` is `fileprivate` while `FXChain` lives in another file — as written it
+>   cannot compile. Shipped `internal` with the invariant documented.
+> - Task 9's `masterFX` cannot be a property default (`FXChain.init` is `@MainActor`).
+> - Task 9's `testTheMasterChainStillUsesOneCommandBuffer` asserts the retired one-buffer
+>   invariant; shipped as `testAMasterChainOfManyStagesAddsNoCommandBuffers`.
+> - Task 10's `.onMove` is inert outside a `List`; dropped rather than shipped as a dead
+>   affordance. The ▲▼ buttons reorder.
+> - The operator's **input-source dropdown** is in the hand-off as "folded into Task 10" but appears
+>   nowhere in this plan or the spec. Built separately (`89ad29b`, reworked in `a98c44f`).
+
 ## Global Constraints
 
 - **Nothing on the render path is `@MainActor`.** `MainActor.assumeIsolated` must appear nowhere — it is a runtime assertion and traps (`dispatch_assert_queue_fail`) off-actor. Use `@unchecked Sendable` + one coarse `NSLock`, per `MetalRenderCore` and `InstrumentRenderer`.
-- **One command buffer per frame.** No stage commits its own buffer. `FrameGraphTests.testFrameUsesASingleCommandBuffer` pins this.
+- ~~**One command buffer per frame.** No stage commits its own buffer. `FrameGraphTests.testFrameUsesASingleCommandBuffer` pins this.~~ **RETIRED 2026-07-30.** Per-element GPU metering commits **one buffer per ELEMENT** (each deck, then the master) because `supportsCounterSampling(.atBlitBoundary)` is false on Apple M5 Max, and metering is ON by default. `testFrameUsesASingleCommandBuffer` was deleted. **What survives:** no stage commits its own buffer, and the count is bounded by the ELEMENT count — never by pass count or chain depth. Pinned by `testFrameStillEncodesNoReadbackAndCommitsPerElementOnly` and `testAMasterChainOfManyStagesAddsNoCommandBuffers`. This note exists because Task 9 Step 1 was written against the retired invariant and shipped a test asserting a delta of ONE buffer; it had to be rewritten on arrival.
 - **Never black.** Every failure path passes the previous image through or falls to the existing opaque-black master; no path introduces a new way to lose output.
 - **Blackout stays the final gate.** `programTexture()` returning nil is the panic path; nothing may sit between it and darkness.
 - **Never display a number the engine did not measure.** No per-chain milliseconds.

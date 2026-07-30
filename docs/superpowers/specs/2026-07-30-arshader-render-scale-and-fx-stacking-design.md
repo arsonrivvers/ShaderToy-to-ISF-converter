@@ -1,8 +1,19 @@
 # ARShader Milestone 2, phase 2 — Render Scale and stacked FX chains
 
 **Date:** 2026-07-30
-**Status:** design approved by the operator; implementation plan to follow
+**Status:** IMPLEMENTED — Part A and Part B both shipped on `m2-render-scale-and-fx`
+(`a10de95..63ed737`). Live smoke: `docs/reports/live-smoke-instrument-m2-phase2.md`.
 **Supersedes nothing.** Extends the Milestone 1 instrument (`c75e480..93385c0`).
+
+**Two in-flight corrections, applied to this document 2026-07-30:**
+
+1. **RENDER SCALE was renamed PREVIEW SCALE** in the shipped UI — with output closed, the only
+   consumers are three ~340px tiles, so the operator's framing is that dropping it is free GPU.
+   The names are updated below; the semantics are unchanged.
+2. **"One command buffer per frame" is retired.** Per-element GPU metering commits one buffer per
+   ELEMENT (each deck, then the master), because `supportsCounterSampling(.atBlitBoundary)` is
+   false on Apple M5 Max. What survives: no stage commits its own buffer, and chain DEPTH adds
+   none — the count is bounded by element count.
 
 Sources: the signed live smoke `docs/reports/live-smoke-instrument-m1.md` items 7 and 8, and an
 FPS observation the operator raised while playing (below).
@@ -62,7 +73,7 @@ typing the number is the primary control, the menu is a convenience.
 | Control | Drives | Default |
 |---|---|---|
 | **OUTPUT RES** | the nominal output: projector window size, typed W × H | 1920 × 1080 |
-| **RENDER SCALE** | what live decks **and the master/program composite** rasterise at | 100% |
+| **PREVIEW SCALE** | what live decks **and the master/program composite** rasterise at | 100% |
 | **CUE SCALE** | what decks that are not contributing rasterise at | 50% |
 
 ### Sizing rules
@@ -95,7 +106,7 @@ OUTPUT RES
  [1920] × [1080]  [Set]
  2.1 MP
 
-RENDER SCALE  [ 100 ]%
+PREVIEW SCALE [ 100 ]%
  → rasterising 1920×1080
 
 CUE SCALE     [  25 ]%
@@ -144,7 +155,9 @@ stage result carries `a = mix(backdrop.a, source.a, mix)`. Both behaviours get t
 
 ### 3.3 Frame graph
 
-One command buffer per frame, as today.
+~~One command buffer per frame, as today.~~ **SUPERSEDED 2026-07-30:** per-element GPU metering
+commits one buffer per ELEMENT (each deck, then the master), and metering is on by default. No
+stage commits its own buffer, and chain DEPTH adds none — the count is bounded by element count.
 
 ```
 1. per deck:  ISF render (live → output×renderScale, cued → output×cueScale)
@@ -219,7 +232,7 @@ than a mistake.
 Each chain shows its **stage count** and goes amber then red **in sync with the measured global
 frame time**.
 
-No per-chain millisecond figure is displayed. Cost inside a single command buffer cannot be
+No per-chain millisecond figure is displayed. Cost inside one element's command buffer cannot be
 honestly attributed to one chain, and displaying a number the engine did not measure is the same
 class of error as a fabricated counter. Real per-chain timing would need
 `MTLCounterSampleBuffer` timestamps at pass boundaries; that is out of scope (§8).
