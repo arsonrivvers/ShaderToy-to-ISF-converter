@@ -15,10 +15,15 @@ struct MonitorViewport: NSViewRepresentable {
     let source: MonitorSource
     var isFrozen: Bool = false
     var isOff: Bool = false
+    /// Exactly ONE viewport in the app drives the instrument clock — the PROGRAM tile.
+    ///
+    /// It renders the frame at the top of its own draw and is deliberately NOT registered as a
+    /// monitor: `renderFrame()` draws every registered monitor, so a driver in that list would
+    /// recurse (draw → renderFrame → draw → …). The other tiles are passive and registered.
+    var drivesClock: Bool = false
 
     func makeNSView(context: Context) -> TexturePresentingView {
         let view = TexturePresentingView(device: instrument.device, queue: instrument.queue)
-        view.isPaused = true            // the instrument's clock drives it, not its own
         view.enableSetNeedsDisplay = false
         view.preferredFramesPerSecond = 60
         context.coordinator.view = view
@@ -32,7 +37,16 @@ struct MonitorViewport: NSViewRepresentable {
             guard let coordinator else { return nil }
             return coordinator.currentTexture { renderer.monitorTexture(src) }
         }
-        renderer.registerMonitor(view)
+
+        if drivesClock {
+            // One tick = one instrument frame: produce it before this view samples anything.
+            view.onWillDraw = { renderer.renderFrame() }
+            context.coordinator.drivesClock = true
+            DispatchQueue.main.async { renderer.attachClock(to: view) }
+        } else {
+            view.isPaused = true        // the instrument's clock drives it, not its own
+            renderer.registerMonitor(view)
+        }
         return view
     }
 
@@ -42,7 +56,8 @@ struct MonitorViewport: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: TexturePresentingView, coordinator: Coordinator) {
-        coordinator.renderer?.unregisterMonitor(nsView)
+        // The clock driver was never registered, so there is nothing to remove for it.
+        if !coordinator.drivesClock { coordinator.renderer?.unregisterMonitor(nsView) }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -56,6 +71,8 @@ struct MonitorViewport: NSViewRepresentable {
     final class Coordinator: @unchecked Sendable {
         weak var view: TexturePresentingView?
         var renderer: InstrumentRenderer?
+        /// True for the single clock-driving viewport, which is never registered as a monitor.
+        var drivesClock = false
 
         private let lock = NSLock()
         private var _isFrozen = false
@@ -91,13 +108,15 @@ struct MonitorTile: View {
     let instrument: Instrument
     let source: MonitorSource
     let label: String
+    /// Set on exactly one tile (PROGRAM) — see `MonitorViewport.drivesClock`.
+    var drivesClock: Bool = false
     @State private var isFrozen = false
     @State private var isOff = false
 
     var body: some View {
         VStack(spacing: 4) {
             MonitorViewport(instrument: instrument, source: source,
-                            isFrozen: isFrozen, isOff: isOff)
+                            isFrozen: isFrozen, isOff: isOff, drivesClock: drivesClock)
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .background(.black)
                 .overlay(alignment: .topLeading) {

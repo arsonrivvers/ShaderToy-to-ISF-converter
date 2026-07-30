@@ -6,18 +6,10 @@ struct ARShaderApp: App {
 
     var body: some Scene {
         WindowGroup("ARShader") {
-            InstrumentRootView(instrument: instrument)
-                .frame(minWidth: 960, minHeight: 600)
+            InstrumentView(instrument: instrument)
+                .frame(minWidth: 1100, minHeight: 720)
                 .preferredColorScheme(.dark)
+                .task { instrument.library.loadInstrumentLibraries() }
         }
-        .windowStyle(.hiddenTitleBar)
-    }
-}
-
-/// Task 2 placeholder root: the program output filling the window. Task 12 replaces it.
-struct InstrumentRootView: View {
-    @ObservedObject var instrument: Instrument
-    var body: some View {
-        ProgramOutputView(instrument: instrument).background(.black)
     }
 }

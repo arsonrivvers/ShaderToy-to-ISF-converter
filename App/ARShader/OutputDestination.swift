@@ -30,7 +30,7 @@ struct ScreenInfo: Identifiable, Equatable, Sendable {
 }
 
 /// Where the operator has asked the program feed to go.
-enum OutputDestination: Equatable, Sendable {
+enum OutputDestination: Equatable, Hashable, Sendable {
     case off
     case floating
     case screen(id: String)
