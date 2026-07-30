@@ -25,5 +25,9 @@ final class Instrument: ObservableObject {
                                            mixer: mixer)
     }
 
+    /// The program-output window (projector mock). Lazy so nothing AppKit-shaped is built until
+    /// the operator first opens the Output menu; it ships closed either way.
+    private(set) lazy var output = OutputWindowController(instrument: self)
+
     func deck(_ id: DeckID) -> Deck { renderer.deck(id) }
 }
