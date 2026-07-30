@@ -111,6 +111,13 @@ final class InstrumentRenderer: @unchecked Sendable {
     private let compositor: Compositor?
     private(set) var decks: [DeckID: Deck] = [:]
 
+    /// The master FX chain: runs on the composited program feed, BEFORE the blackout gate. It
+    /// needs no gate of its own and no new textures — it ping-pongs the existing master pair.
+    ///
+    /// Built in `init` rather than as a default value: `FXChain.init` is `@MainActor` and a
+    /// property initialiser is evaluated in a nonisolated context, exactly as `decks` is.
+    let masterFX: FXChain
+
     private let lock = NSLock()
     // ── lock-guarded state ──
     /// Ping-pong pair. `masterIndex` names the texture holding the CURRENT composited result.
@@ -188,6 +195,7 @@ final class InstrumentRenderer: @unchecked Sendable {
         self.queue = queue
         self.mixer = mixer
         self.clock = RenderClock()
+        self.masterFX = FXChain()
         // ISFMSLKit needs its global pool before any scene work; harmless if already set.
         if VVMTLPool.global == nil { VVMTLPool.global = VVMTLPool(device: device) }
         masters = Self.makeMasterPair(
@@ -422,6 +430,16 @@ final class InstrumentRenderer: @unchecked Sendable {
                                        in: cb)
                 current = next
             }
+        }
+        // 4. Master FX — ping-pongs the SAME master pair, so an unbounded chain here costs no
+        //    additional memory. preserveAlpha is FALSE: the master is opaque by contract.
+        //    This runs BEFORE the blackout gate deliberately: nothing may sit between the panic
+        //    button and darkness, so a master chain can never keep the program alive.
+        if let compositor {
+            let result = masterFX.encode(input: masters[current], scratch: masters[1 - current],
+                                         renderSize: liveRes.size, compositor: compositor,
+                                         preserveAlpha: false, in: cb)
+            current = (result === masters[0]) ? 0 : 1
         }
         // The result may be in either master depending on how many layers contributed — track it
         // rather than assuming parity from the deck count.

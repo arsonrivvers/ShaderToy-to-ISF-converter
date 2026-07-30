@@ -139,6 +139,61 @@ final class FrameGraphTests: XCTestCase {
                        "two decks plus the master — not one per pass")
     }
 
+    // MARK: master FX
+
+    private func loadedMasterStage(_ fixtureName: String) throws -> FXStage {
+        let stage = FXStage(device: device, queue: queue, clock: RenderClock())
+        let done = expectation(description: "compile \(fixtureName)")
+        stage.unit.onCompileFinished = { done.fulfill() }
+        stage.unit.load(source: try fixture(fixtureName), name: "\(fixtureName).fs")
+        wait(for: [done], timeout: 30)
+        stage.unit.onCompileFinished = nil
+        XCTAssertNil(stage.unit.compileError, "fixture \(fixtureName) must compile")
+        return stage
+    }
+
+    func testAMasterFXStageProcessesTheProgramOutput() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0
+        renderer.masterFX.append(try loadedMasterStage("invert_filter"))
+        let rgb = try renderAndRead()
+        XCTAssertEqual(rgb.x, 0.0, accuracy: 0.03, "red inverted is cyan")
+        XCTAssertEqual(rgb.y, 1.0, accuracy: 0.03)
+    }
+
+    func testAnEmptyMasterChainLeavesTheProgramUnchanged() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0
+        let rgb = try renderAndRead()
+        XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
+    }
+
+    func testBlackoutStillWinsOverTheMasterChain() throws {
+        // The master chain runs at step 4, BEFORE the gate. Blackout withdraws the texture, so no
+        // pipeline stands between the panic button and darkness.
+        try load(.one, "solid_red")
+        renderer.masterFX.append(try loadedMasterStage("invert_filter"))
+        mixer.toggleBlackoutLatch()
+        renderer.renderFrame()
+        XCTAssertNil(renderer.programTexture(), "blackout withdraws the texture, chain or no chain")
+    }
+
+    func testAMasterChainOfManyStagesAddsNoCommandBuffers() throws {
+        // The plan wrote this as "still uses ONE command buffer", which was true only under the
+        // retired one-buffer-per-frame invariant; metering commits one buffer PER ELEMENT and is
+        // on by default. What must hold — and what this asserts — is that the count stays bounded
+        // by the ELEMENT count and is unmoved by chain DEPTH. Two master stages, same three
+        // buffers as testFrameStillEncodesNoReadbackAndCommitsPerElementOnly measures with none.
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        renderer.masterFX.append(try loadedMasterStage("invert_filter"))
+        renderer.masterFX.append(try loadedMasterStage("half_bright_filter"))
+        let before = renderer.committedBufferCount
+        renderer.renderFrame()
+        XCTAssertEqual(renderer.committedBufferCount - before, 3,
+                       "two decks plus the master — chain depth must not cost buffers")
+    }
+
     // MARK: per-element metering
 
     func testMeteringIsOnByDefault() {
