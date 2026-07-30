@@ -1,6 +1,6 @@
 # Live smoke — ARShader Milestone 2, phase 2 (stacked FX chains)
 
-**Status: PARTIALLY CONFIRMED 2026-07-30 by Conner — the FX surface is signed, four legs remain.**
+**Status: CONFIRMED 2026-07-30 by Conner — all ten legs passed on device.**
 
 Phase 2's premise was that a deck should host an unbounded stack of `.fs` effects, and the program
 output its own — findings 7 and 8 from the Milestone 1 smoke, where the operator chose an unbounded
@@ -13,7 +13,7 @@ produced and the reason this report exists.
 - **Operator:** Conner
 - **Date:** 2026-07-30
 - **Branch:** `m2-render-scale-and-fx`, commits `874aa03 … 63ed737` (10 this session)
-- **Result:** CONFIRMED for chains, master chain, and the blackout gate. Legs 3–6 NOT RUN.
+- **Result:** CONFIRMED. Every leg run and passed by the operator on device.
 
 ## Legs
 
@@ -23,10 +23,10 @@ State each hypothesis so it can fail. A leg is only CONFIRMED when the operator 
 |---|---|---|---|
 | 1 | A chain applies | A filter appended to `A FX` visibly changes Deck A's image, and its filename appears in the stage row | **PASS** — operator: "it does load the fx" |
 | 2 | Stage controls open | Expanding a stage reveals that shader's generated sliders | **FAIL, then FIXED** `a98c44f` — see Findings 1 |
-| 3 | Order matters | Two different filters produce a visibly different result after ▲▼ than before | **NOT RUN** |
-| 4 | Mix dries out | Dragging a stage's Mix 1 → 0 fades its effect out continuously, not in a jump | **NOT RUN** |
-| 5 | Blend per stage | Changing one stage's blend mode changes the composite without touching the others | **NOT RUN** |
-| 6 | Disable costs nothing | Unticking a stage removes its effect AND its per-tile GPU ms drops | **NOT RUN** — proven in code and by two tests, never watched on the meter |
+| 3 | Order matters | Two different filters produce a visibly different result after ▲▼ than before | **PASS** — operator confirmed |
+| 4 | Mix dries out | Dragging a stage's Mix 1 → 0 fades its effect out continuously, not in a jump | **PASS** — operator confirmed |
+| 5 | Blend per stage | Changing one stage's blend mode changes the composite without touching the others | **PASS** — operator confirmed |
+| 6 | Disable costs nothing | Unticking a stage removes its effect AND its per-tile GPU ms drops | **PASS** — operator confirmed |
 | 7 | Master chain reaches program | A filter on `MST FX` changes the PROGRAM monitor and NOT the deck tiles | **PASS** — operator confirmed |
 | 8 | Blackout still wins | ⌘B blacks the program with a master stage loaded — nothing outranks the panic button | **PASS** — operator confirmed |
 | 9 | Sources are routable | A deck filter's `inputImage` can be pointed at a pattern/shader/camera; a stage's primary reads `chain` | **PASS after rework** — see Findings 2 |
@@ -39,7 +39,7 @@ State each hypothesis so it can fail. A leg is only CONFIRMED when the operator 
 | 1 | **Expanding an FX stage revealed nothing** | **FIXED** `a98c44f`. `ShaderControlsView` is itself a `ScrollView`, and a `ScrollView` nested in another scrolling container has no intrinsic height — with only a `maxHeight` it collapsed to ~0, so the disclosure "opened" onto empty space. Now carries a `minHeight`; the stage NAME is also a hit target, since a 12pt chevron is a poor thing to aim at mid-set. |
 | 2 | **Source dropdowns were clutter in the parameter list** | **FIXED** `a98c44f`. Routing moved to its own `SOURCES` block under the shader name, above Opacity. Operator's call from a screenshot of `inputImage`/`depthSource` sitting among the float sliders. The block scales to N inputs — the shader that prompted it has two — which a menu on the monitor tile would not have. |
 | 3 | **Blackout button was a 56pt slab** | **FIXED** `63ed737`. 56 → 26pt. It was sized as a stage-lighting hit target, but it gets hit with the keyboard (⌘B latch, Escape momentary), and it was eating vertical room the FX chains need. The blackout PATH is unchanged. |
-| 4 | Does unticking a stage really stop costing GPU? | **ANSWERED, code + tests.** Better than a bypass check: `FXChain.publishToRenderThread` filters disabled and zero-mix stages out of the render mirror entirely, so the render thread never sees them — no `renderOffscreen`, no compositor pass. The compiled shader stays resident in VRAM; the per-frame cost is what goes to zero. **Not yet watched on the per-tile meter** (leg 6). |
+| 4 | Does unticking a stage really stop costing GPU? | **ANSWERED, code + tests.** Better than a bypass check: `FXChain.publishToRenderThread` filters disabled and zero-mix stages out of the render mirror entirely, so the render thread never sees them — no `renderOffscreen`, no compositor pass. The compiled shader stays resident in VRAM; the per-frame cost is what goes to zero. **Confirmed on device by the operator** (leg 6). |
 
 ## Defects caught by review before they shipped
 
@@ -67,24 +67,18 @@ Recorded because none of these would have been caught by a test — they were fo
 
 ## Known open
 
-1. **Legs 3–6 unrun.** Order, Mix, per-stage blend, and disable-drops-the-meter. Leg 6 is the one
-   worth doing on the meter rather than on faith — it is a 20-second check now that per-tile GPU ms
-   is always on.
-2. **The 36.6 ms cue anomaly, still unexplained.** Carried from the previous session. The check:
+1. **The 36.6 ms cue anomaly, still unexplained.** Carried from the previous session. The check:
    both decks loaded, PREVIEW 100%, CUE 25% — if DECK B ≈ DECK A on the tiles, cue is not reducing
    real cost (candidate: an ISF `PERSISTENT`/feedback buffer that does not shrink with the
    requested size).
-3. **Colour and alpha use different mix amounts.** `encodeLayer` mixes colour by `src.a * opacity`
+2. **Colour and alpha use different mix amounts.** `encodeLayer` mixes colour by `src.a * opacity`
    but alpha by `opacity` alone. They agree exactly when a stage outputs alpha 1 — the normal case,
    and the only case the fixtures produce. They diverge when a filter outputs PARTIAL alpha *and*
    Mix < 1: colour goes mostly dry while alpha reads fully wet. Implemented as specced rather than
    redesigned mid-task; the tests pin the specced behaviour. Worth a decision, not urgent.
-4. **The spec and plan still say RENDER SCALE and describe a one-buffer frame.** Both superseded in
-   the previous session. This cost real time today — the plan's master-chain buffer test asserted
-   the retired invariant and had to be rewritten.
-5. **Projector legs 15–18 remain unrun on hardware** (`arshader-m1-live-smoke-confirmed-gate-20260730`).
+3. **Projector legs 15–18 remain unrun on hardware** (`arshader-m1-live-smoke-confirmed-gate-20260730`).
    Unchanged this session, and they now matter more: the projector can be fed a master FX chain.
-6. **Layout judgments unmade.** Whether the SOURCES menus are readable at `maxWidth: 150` in that
+4. **Layout judgments unmade.** Whether the SOURCES menus are readable at `maxWidth: 150` in that
    column, and whether `minHeight: 150` for an expanded stage is the right amount of room. Both are
    numbers, trivially changed once seen.
 
