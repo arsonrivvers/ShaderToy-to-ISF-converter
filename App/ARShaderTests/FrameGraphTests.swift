@@ -202,7 +202,7 @@ final class FrameGraphTests: XCTestCase {
 
     func testRenderScaleResizesTheMaster() throws {
         renderer.outputResolution = RenderSize(width: 1920, height: 1080)
-        renderer.outputRenderScale = RenderScale(percent: 50)
+        renderer.previewScale = RenderScale(percent: 50)
         renderer.renderFrame()
         let tex = try XCTUnwrap(renderer.rawMasterTexture())
         XCTAssertEqual(tex.width, 960)
@@ -214,7 +214,7 @@ final class FrameGraphTests: XCTestCase {
         // zero, so it was inert on the live deck costing the frame.
         try load(.one, "solid_red")
         mixer.crossfadePosition = 0             // deck 1 LIVE at full opacity
-        renderer.outputRenderScale = RenderScale(percent: 25)
+        renderer.previewScale = RenderScale(percent: 25)
         renderer.renderFrame()
         // Assert on the RASTER size, not the owned texture: the owned texture is the same size
         // either way, so reading deckTexture alone would pass even if the scale never reached the
@@ -229,7 +229,7 @@ final class FrameGraphTests: XCTestCase {
         try load(.one, "solid_red")
         try load(.two, "solid_green")
         mixer.crossfadePosition = 0          // deck 1 live, deck 2 cued
-        renderer.outputRenderScale = RenderScale(percent: 100)
+        renderer.previewScale = RenderScale(percent: 100)
         renderer.cueRenderScale = RenderScale(percent: 25)
         renderer.renderFrame()
         XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920,
@@ -270,7 +270,7 @@ final class FrameGraphTests: XCTestCase {
     func testTheInstrumentStillRendersCorrectlyAtAReducedRenderScale() throws {
         try load(.one, "solid_red")
         mixer.crossfadePosition = 0
-        renderer.outputRenderScale = RenderScale(percent: 50)
+        renderer.previewScale = RenderScale(percent: 50)
         let rgb = try renderAndRead()
         XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
     }
@@ -278,7 +278,7 @@ final class FrameGraphTests: XCTestCase {
     func testSettingTheSameRenderScaleIsANoOp() throws {
         renderer.renderFrame()
         let before = try XCTUnwrap(renderer.rawMasterTexture())
-        renderer.outputRenderScale = renderer.outputRenderScale
+        renderer.previewScale = renderer.previewScale
         XCTAssertTrue(try XCTUnwrap(renderer.rawMasterTexture()) === before,
                       "A no-op set must not reallocate — the UI binds to this and writes freely")
     }

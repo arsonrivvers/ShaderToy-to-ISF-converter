@@ -217,19 +217,19 @@ struct InstrumentView: View {
 
             Divider()
 
-            scaleField(title: "RENDER SCALE",
+            scaleField(title: "PREVIEW SCALE",
                        text: $renderScaleField,
-                       current: instrument.renderer.outputRenderScale,
-                       resolved: instrument.renderer.outputRenderScale
+                       current: instrument.renderer.previewScale,
+                       resolved: instrument.renderer.previewScale
                            .applied(to: instrument.renderer.outputResolution),
                        caption: "rasterising",
                        help: "What live decks AND the program composite actually rasterise at. "
-                           + "While output is closed this is free money — nothing needs full "
-                           + "resolution when the only consumers are the monitor tiles. While "
+                           + "With output closed these panes are the only thing looking, and they "
+                           + "are tiny — so dropping this is free GPU at no visible cost. While "
                            + "projecting it also softens the projected image, which is what the "
                            + "warning is for.",
                        warning: projectingUpscaled ? "PROJECTING BELOW 100%" : nil,
-                       apply: { instrument.renderer.outputRenderScale = $0 })
+                       apply: { instrument.renderer.previewScale = $0 })
 
             scaleField(title: "CUE SCALE",
                        text: $cueScaleField,
@@ -305,7 +305,7 @@ struct InstrumentView: View {
     /// costing sharpness on a wall rather than only on a 340px tile.
     private var projectingUpscaled: Bool {
         OutputSharpness.isProjectingUpscaled(destination: output.destination,
-                                             scale: instrument.renderer.outputRenderScale)
+                                             scale: instrument.renderer.previewScale)
     }
 
     private func applyOutput(_ size: RenderSize) {
@@ -327,7 +327,7 @@ struct InstrumentView: View {
         let r = instrument.renderer.outputResolution
         widthField = String(r.width)
         heightField = String(r.height)
-        renderScaleField = String(instrument.renderer.outputRenderScale.percent)
+        renderScaleField = String(instrument.renderer.previewScale.percent)
         cueScaleField = String(instrument.renderer.cueRenderScale.percent)
     }
 

@@ -135,9 +135,21 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
     }
 
-    /// What live decks and the master composite rasterise at. Reallocates the master pair (and, on
-    /// the next frame, each deck's owned texture) — rare and operator-driven, never in a frame.
-    var outputRenderScale: RenderScale {
+    /// What live decks and the master composite rasterise at.
+    ///
+    /// Called **PREVIEW SCALE** on the surface, because that is what it governs in practice: with
+    /// the program output closed — most of the operator's working time — the only consumers are
+    /// three ~340px monitor tiles, so nothing needs full resolution and dropping this is free GPU
+    /// with no visible cost. Measured 2026-07-30: 99.4 ms at 100%, 5.8 ms at 25%.
+    ///
+    /// It is NOT preview-only, and the name would be a lie if that went unsaid: while the projector
+    /// is open this scales the projected image too. The scale is manual by the operator's choice
+    /// and never snaps back on its own, so `OutputSharpness.isProjectingUpscaled` drives a visible
+    /// warning for exactly that case.
+    ///
+    /// Reallocates the master pair (and, on the next frame, each deck's owned texture) — rare and
+    /// operator-driven, never in a frame.
+    var previewScale: RenderScale {
         get { lock.lock(); defer { lock.unlock() }; return renderScale }
         set {
             lock.lock()
