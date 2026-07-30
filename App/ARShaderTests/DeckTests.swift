@@ -43,7 +43,7 @@ final class DeckTests: XCTestCase {
     func testEmptyDeckRendersNothing() throws {
         let deck = makeDeck()
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full), "A deck with no shader must return nil, not a stale texture")
+        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full, compositor: nil), "A deck with no shader must return nil, not a stale texture")
         cb.commit()
     }
 
@@ -54,7 +54,7 @@ final class DeckTests: XCTestCase {
         XCTAssertEqual(deck.unit.shaderName, "solid_red.fs")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full))
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full, compositor: nil))
         cb.commit()
         cb.waitUntilCompleted()
 
@@ -74,7 +74,7 @@ final class DeckTests: XCTestCase {
                        "A failed compile must not claim to have loaded")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full), "The previous shader must still be rendering")
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full, compositor: nil), "The previous shader must still be rendering")
         cb.commit()
         cb.waitUntilCompleted()
         let rgb = try meanRGB(of: tex)
@@ -85,10 +85,10 @@ final class DeckTests: XCTestCase {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
-        let first = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full))
+        let first = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full, compositor: nil))
         cb1.commit(); cb1.waitUntilCompleted()
         let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
-        let second = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full))
+        let second = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full, compositor: nil))
         cb2.commit(); cb2.waitUntilCompleted()
         XCTAssertTrue(first === second,
                       "The deck owns ONE output texture — a per-frame allocation would also mean "
@@ -117,7 +117,7 @@ final class DeckTests: XCTestCase {
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cue = RenderSize(width: 960, height: 540).size
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: cue, ownedSize: full))
+        let tex = try XCTUnwrap(deck.render(in: cb, renderSize: cue, ownedSize: full, compositor: nil))
         cb.commit(); cb.waitUntilCompleted()
         XCTAssertEqual(tex.width, full.width)
         XCTAssertEqual(tex.height, full.height)
@@ -130,11 +130,11 @@ final class DeckTests: XCTestCase {
         let cue = RenderSize(width: 960, height: 540).size
 
         let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
-        let cued = try XCTUnwrap(deck.render(in: cb1, renderSize: cue, ownedSize: full))
+        let cued = try XCTUnwrap(deck.render(in: cb1, renderSize: cue, ownedSize: full, compositor: nil))
         cb1.commit(); cb1.waitUntilCompleted()
 
         let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
-        let live = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full))
+        let live = try XCTUnwrap(deck.render(in: cb2, renderSize: full, ownedSize: full, compositor: nil))
         cb2.commit(); cb2.waitUntilCompleted()
 
         XCTAssertTrue(cued === live, "Going live must reuse the same texture, not allocate one")
@@ -144,12 +144,12 @@ final class DeckTests: XCTestCase {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cb1 = try XCTUnwrap(queue.makeCommandBuffer())
-        let at1080 = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full))
+        let at1080 = try XCTUnwrap(deck.render(in: cb1, renderSize: full, ownedSize: full, compositor: nil))
         cb1.commit(); cb1.waitUntilCompleted()
 
         let smaller = RenderSize(width: 1280, height: 720).size
         let cb2 = try XCTUnwrap(queue.makeCommandBuffer())
-        let at720 = try XCTUnwrap(deck.render(in: cb2, renderSize: smaller, ownedSize: smaller))
+        let at720 = try XCTUnwrap(deck.render(in: cb2, renderSize: smaller, ownedSize: smaller, compositor: nil))
         cb2.commit(); cb2.waitUntilCompleted()
 
         XCTAssertFalse(at1080 === at720)
@@ -163,7 +163,7 @@ final class DeckTests: XCTestCase {
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
         let tex = try XCTUnwrap(deck.render(in: cb, renderSize: RenderSize(width: 640, height: 360).size,
-                                            ownedSize: full))
+                                            ownedSize: full, compositor: nil))
         cb.commit(); cb.waitUntilCompleted()
         let rgb = try meanRGB(of: tex)
         XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
@@ -175,7 +175,7 @@ final class DeckTests: XCTestCase {
         deck.unit.unload()
         XCTAssertNil(deck.unit.shaderName)
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
-        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full))
+        XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full, compositor: nil))
         cb.commit()
     }
 }

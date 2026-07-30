@@ -392,7 +392,8 @@ final class InstrumentRenderer: @unchecked Sendable {
                 target = own
                 meteredBuffers.append((.deck(layer.deck), own))
             }
-            if let tex = deck.render(in: target, renderSize: renderSize, ownedSize: liveRes.size) {
+            if let tex = deck.render(in: target, renderSize: renderSize, ownedSize: liveRes.size,
+                                     compositor: compositor) {
                 outputs[layer.deck] = tex
                 // Only on success: this reports what a deck ACTUALLY rasterised, not what it
                 // would have been asked for had it held a shader.

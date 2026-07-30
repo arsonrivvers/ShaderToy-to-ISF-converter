@@ -25,12 +25,19 @@ final class Deck {
     let id: DeckID
     let unit: ShaderUnit
 
+    /// This deck's FX chain. Its output is what the deck contributes AND what its monitor shows —
+    /// the operator cues the finished look.
+    let fx = FXChain()
+
     private let device: MTLDevice
     /// Built once in init, immutable after — a lazy var would not be safe to touch from the
     /// render thread.
     private let copyPass: TextureCopyPass?
     /// Touched ONLY by the render thread (see the class comment).
     nonisolated(unsafe) private var renderOwnedOutput: MTLTexture?
+    /// The chain's ping-pong partner. Allocated alongside the owned output, so a chain of any
+    /// depth costs exactly one extra texture per deck.
+    nonisolated(unsafe) private var fxScratch: MTLTexture?
 
     init(id: DeckID, device: MTLDevice, queue: MTLCommandQueue, clock: RenderClock) {
         self.id = id
@@ -55,16 +62,26 @@ final class Deck {
     /// hitch at exactly the wrong moment. Only the rasterised pixel count changes.
     nonisolated func render(in cb: MTLCommandBuffer,
                             renderSize: MTLSize,
-                            ownedSize: MTLSize) -> MTLTexture? {
+                            ownedSize: MTLSize,
+                            compositor: Compositor?) -> MTLTexture? {
         guard let engineTexture = unit.renderOffscreen(size: renderSize, in: cb) else { return nil }
         // Reallocate only when the OUTPUT resolution changes — never per frame, never on a fade.
         if renderOwnedOutput?.width != ownedSize.width
             || renderOwnedOutput?.height != ownedSize.height {
             renderOwnedOutput = Self.makeOutputTexture(device: device, size: ownedSize)
+            fxScratch = Self.makeOutputTexture(device: device, size: ownedSize)
         }
         guard let owned = renderOwnedOutput, let copyPass else { return nil }
         copyPass.encode(from: engineTexture, to: owned, in: cb)
-        return owned
+        // No compositor is the survivable failure state, not a crash: the deck still contributes
+        // its un-effected image rather than nothing.
+        guard let compositor, let scratch = fxScratch else { return owned }
+        // Stages rasterise at the deck's CURRENT size, so a cued deck's chain is cheap too. The
+        // mix pass writes into the owned-size targets and upscales by sampling.
+        // preserveAlpha: the deck's contribution is a LAYER — forcing it opaque here would change
+        // how it composites into the master.
+        return fx.encode(input: owned, scratch: scratch, renderSize: renderSize,
+                         compositor: compositor, preserveAlpha: true, in: cb)
     }
 
     // NOTE: deliberately NO public accessor for `renderOwnedOutput`. Monitors read deck textures

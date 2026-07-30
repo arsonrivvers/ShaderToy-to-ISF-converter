@@ -92,3 +92,40 @@ final class FXChain: ObservableObject {
         return renderCache
     }
 }
+
+extension FXChain {
+    /// Encode the whole chain into `cb`, ping-ponging between `input` and `scratch`.
+    ///
+    /// A chain only ever reads the IMMEDIATELY PREVIOUS stage, so a pair of textures covers any
+    /// depth — the same argument that justifies the master ping-pong. Metal's automatic hazard
+    /// tracking handles the write-after-read across passes within one command buffer.
+    ///
+    /// The mix pass is not an extra cost: every stage must copy its output out of the VVMTLPool
+    /// texture the engine returns (the aliasing hazard documented on `TextureCopyPass`), and
+    /// `encodeLayer` performs that copy while also applying the stage's mix and blend mode.
+    ///
+    /// Returns the texture holding the final result — `input` itself when nothing encoded.
+    nonisolated func encode(input: MTLTexture,
+                            scratch: MTLTexture,
+                            renderSize: MTLSize,
+                            compositor: Compositor,
+                            preserveAlpha: Bool,
+                            in cb: MTLCommandBuffer) -> MTLTexture {
+        var source = input
+        var target = scratch
+        for stage in renderStages() {
+            // `primaryInput: source` is what makes this a CHAIN: the stage's first image input is
+            // the previous stage's result, not whatever its router would otherwise supply.
+            // A transient render failure passes this stage's input through — never black.
+            guard let produced = stage.core.renderOffscreen(size: renderSize, in: cb,
+                                                            primaryInput: source) else {
+                continue
+            }
+            compositor.encodeLayer(source: produced, backdrop: source, destination: target,
+                                   opacity: stage.mix, mode: stage.blendMode,
+                                   preserveAlpha: preserveAlpha, in: cb)
+            swap(&source, &target)
+        }
+        return source
+    }
+}
