@@ -66,21 +66,21 @@ final class LibraryPanelTests: XCTestCase {
 
         let entry = try XCTUnwrap(model.filtered(query: "loadme").first)
         let done = expectation(description: "load")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(url: entry.url)
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(url: entry.url)
         wait(for: [done], timeout: 30)
 
-        XCTAssertNil(deck.compileError)
-        XCTAssertEqual(deck.shaderName, "loadme.fs")
+        XCTAssertNil(deck.unit.compileError)
+        XCTAssertEqual(deck.unit.shaderName, "loadme.fs")
     }
 
     func testAnUnreadableEntryReportsRatherThanCrashing() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
         let deck = Deck(id: .one, device: device, queue: queue, clock: RenderClock())
-        deck.load(url: URL(fileURLWithPath: "/nonexistent/nope.fs"))
-        XCTAssertNotNil(deck.compileError)
-        XCTAssertNil(deck.shaderName)
+        deck.unit.load(url: URL(fileURLWithPath: "/nonexistent/nope.fs"))
+        XCTAssertNotNil(deck.unit.compileError)
+        XCTAssertNil(deck.unit.shaderName)
     }
 
     func testTheInstrumentLibraryIsSkippedUnderTheTestHarness() {

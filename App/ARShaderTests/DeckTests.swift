@@ -28,10 +28,10 @@ final class DeckTests: XCTestCase {
     /// Load synchronously for tests: compile happens off-main, so wait for the callback.
     private func loadAndWait(_ deck: Deck, source: String, name: String) {
         let done = expectation(description: "compile \(name)")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(source: source, name: name)
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(source: source, name: name)
         wait(for: [done], timeout: 30)
-        deck.onCompileFinished = nil
+        deck.unit.onCompileFinished = nil
     }
 
     private func meanRGB(of texture: MTLTexture) throws -> SIMD3<Double> {
@@ -50,8 +50,8 @@ final class DeckTests: XCTestCase {
     func testLoadedDeckRendersItsShader() throws {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
-        XCTAssertNil(deck.compileError)
-        XCTAssertEqual(deck.shaderName, "solid_red.fs")
+        XCTAssertNil(deck.unit.compileError)
+        XCTAssertEqual(deck.unit.shaderName, "solid_red.fs")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
         let tex = try XCTUnwrap(deck.render(in: cb, renderSize: full, ownedSize: full))
@@ -69,8 +69,8 @@ final class DeckTests: XCTestCase {
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
         loadAndWait(deck, source: try fixture("broken"), name: "broken.fs")
 
-        XCTAssertNotNil(deck.compileError, "The failure must be reported")
-        XCTAssertEqual(deck.shaderName, "solid_red.fs",
+        XCTAssertNotNil(deck.unit.compileError, "The failure must be reported")
+        XCTAssertEqual(deck.unit.shaderName, "solid_red.fs",
                        "A failed compile must not claim to have loaded")
 
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
@@ -172,8 +172,8 @@ final class DeckTests: XCTestCase {
     func testUnloadStopsTheDeckContributing() throws {
         let deck = makeDeck()
         loadAndWait(deck, source: try fixture("solid_red"), name: "solid_red.fs")
-        deck.unload()
-        XCTAssertNil(deck.shaderName)
+        deck.unit.unload()
+        XCTAssertNil(deck.unit.shaderName)
         let cb = try XCTUnwrap(queue.makeCommandBuffer())
         XCTAssertNil(deck.render(in: cb, renderSize: full, ownedSize: full))
         cb.commit()

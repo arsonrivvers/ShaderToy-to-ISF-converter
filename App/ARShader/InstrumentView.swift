@@ -2,16 +2,19 @@ import SwiftUI
 
 /// One deck's strip: name, opacity (set AND effective), blend mode, and its generated controls.
 ///
-/// A separate `View` with its own `@ObservedObject var deck` on purpose. Built inline as a
+/// A separate `View` with its own `@ObservedObject` on purpose. Built inline as a
 /// `func deckStrip(_:) -> some View` capturing a plain `Deck` local, the strip never observed the
 /// deck at all: the loaded shader's name stayed frozen at its initial "—" while the controls right
 /// below it — which DID declare @ObservedObject — updated correctly. Caught on the first live
 /// capture, 2026-07-30.
+///
+/// It observes the `ShaderUnit`, not the `Deck`: the deck is a plain container now and publishes
+/// nothing. Observing the deck would reproduce that same frozen-"—" defect with a green suite.
 struct DeckStripView: View {
-    @ObservedObject var deck: Deck
+    let id: DeckID
+    @ObservedObject var unit: ShaderUnit
     @ObservedObject var mixer: MixerState
 
-    private var id: DeckID { deck.id }
     private var layer: LayerParams? { mixer.layers().first { $0.deck == id } }
 
     var body: some View {
@@ -20,14 +23,14 @@ struct DeckStripView: View {
                 Text("DECK \(id.displayName)")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                 Spacer()
-                if deck.isLoading { ProgressView().controlSize(.small) }
-                Button("Clear") { deck.unload() }.controlSize(.small)
+                if unit.isLoading { ProgressView().controlSize(.small) }
+                Button("Clear") { unit.unload() }.controlSize(.small)
             }
-            Text(deck.shaderName ?? "—")
+            Text(unit.shaderName ?? "—")
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(deck.shaderName == nil ? .secondary : .primary)
+                .foregroundStyle(unit.shaderName == nil ? .secondary : .primary)
                 .lineLimit(1).truncationMode(.middle)
-                .help(deck.shaderName ?? "No shader loaded")
+                .help(unit.shaderName ?? "No shader loaded")
 
             // Both values, always — the fader the operator set AND what it is contributing.
             HStack {
@@ -61,7 +64,7 @@ struct DeckStripView: View {
             }
 
             Divider()
-            DeckControlsView(deck: deck)
+            ShaderControlsView(unit: unit)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,7 +131,7 @@ struct InstrumentView: View {
     private var deckStrips: some View {
         HStack(spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
-                DeckStripView(deck: instrument.deck(id), mixer: mixer)
+                DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer)
                 if id != MixerState.layerOrder.last { Divider() }
             }
         }

@@ -17,10 +17,10 @@ final class BlackoutTests: XCTestCase {
         let url = try XCTUnwrap(Bundle(for: Self.self)
             .url(forResource: "solid_red", withExtension: "fs", subdirectory: "Fixtures"))
         let done = expectation(description: "compile")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(source: try String(contentsOf: url, encoding: .utf8), name: "solid_red.fs")
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(source: try String(contentsOf: url, encoding: .utf8), name: "solid_red.fs")
         wait(for: [done], timeout: 30)
-        deck.onCompileFinished = nil
+        deck.unit.onCompileFinished = nil
         mixer.crossfadePosition = 0
     }
 
@@ -91,8 +91,8 @@ final class BlackoutTests: XCTestCase {
         let url = try XCTUnwrap(Bundle(for: Self.self)
             .url(forResource: "solid_red", withExtension: "fs", subdirectory: "Fixtures"))
         let done = expectation(description: "compile on broken renderer")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(source: try String(contentsOf: url, encoding: .utf8), name: "solid_red.fs")
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(source: try String(contentsOf: url, encoding: .utf8), name: "solid_red.fs")
         wait(for: [done], timeout: 30)
 
         broken.renderFrame()

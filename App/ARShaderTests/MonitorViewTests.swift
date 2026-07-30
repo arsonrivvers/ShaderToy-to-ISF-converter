@@ -59,11 +59,11 @@ final class MonitorViewTests: XCTestCase {
         let url = try XCTUnwrap(Bundle(for: Self.self)
             .url(forResource: fixtureName, withExtension: "fs", subdirectory: "Fixtures"))
         let done = expectation(description: "compile \(fixtureName)")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(source: try String(contentsOf: url, encoding: .utf8), name: "\(fixtureName).fs")
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(source: try String(contentsOf: url, encoding: .utf8), name: "\(fixtureName).fs")
         wait(for: [done], timeout: 30)
-        deck.onCompileFinished = nil
-        XCTAssertNil(deck.compileError)
+        deck.unit.onCompileFinished = nil
+        XCTAssertNil(deck.unit.compileError)
     }
 
     private func meanRGB(of texture: MTLTexture) throws -> SIMD3<Double> {

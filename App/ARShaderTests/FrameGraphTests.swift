@@ -24,11 +24,11 @@ final class FrameGraphTests: XCTestCase {
     private func load(_ id: DeckID, _ fixtureName: String) throws {
         let deck = renderer.deck(id)
         let done = expectation(description: "compile \(fixtureName) on \(id.rawValue)")
-        deck.onCompileFinished = { done.fulfill() }
-        deck.load(source: try fixture(fixtureName), name: "\(fixtureName).fs")
+        deck.unit.onCompileFinished = { done.fulfill() }
+        deck.unit.load(source: try fixture(fixtureName), name: "\(fixtureName).fs")
         wait(for: [done], timeout: 30)
-        deck.onCompileFinished = nil
-        XCTAssertNil(deck.compileError)
+        deck.unit.onCompileFinished = nil
+        XCTAssertNil(deck.unit.compileError)
     }
 
     private func renderAndRead() throws -> SIMD3<Double> {

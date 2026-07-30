@@ -51,12 +51,12 @@ final class DeckControlsTests: XCTestCase {
         let deck = Deck(id: .one, device: device, queue: queue, clock: RenderClock())
 
         var seen: [(String, String)] = []
-        let original = deck.params.onSet
-        deck.params.onSet = { name, json in
+        let original = deck.unit.params.onSet
+        deck.unit.params.onSet = { name, json in
             seen.append((name, json))
             original?(name, json)
         }
-        deck.params.set("amount", .float(0.25))
+        deck.unit.params.set("amount", .float(0.25))
         XCTAssertEqual(seen.map(\.0), ["amount"])
         XCTAssertEqual(seen.map(\.1), ["0.25"])
     }
@@ -66,13 +66,13 @@ final class DeckControlsTests: XCTestCase {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         let queue = try XCTUnwrap(device.makeCommandQueue())
         let deck = Deck(id: .one, device: device, queue: queue, clock: RenderClock())
-        deck.params.syncInputs([input("amount", "float", defaultValue: 0.5, min: 0.0, max: 1.0)])
+        deck.unit.params.syncInputs([input("amount", "float", defaultValue: 0.5, min: 0.0, max: 1.0)])
 
-        deck.params.set("amount", .float(0.9))
-        XCTAssertTrue(deck.params.isModified("amount"))
-        deck.params.resetToDefault("amount")
-        XCTAssertFalse(deck.params.isModified("amount"))
-        guard case .float(let v)? = deck.params.value(for: "amount") else {
+        deck.unit.params.set("amount", .float(0.9))
+        XCTAssertTrue(deck.unit.params.isModified("amount"))
+        deck.unit.params.resetToDefault("amount")
+        XCTAssertFalse(deck.unit.params.isModified("amount"))
+        guard case .float(let v)? = deck.unit.params.value(for: "amount") else {
             return XCTFail("expected a float")
         }
         XCTAssertEqual(v, 0.5, accuracy: 1e-12)

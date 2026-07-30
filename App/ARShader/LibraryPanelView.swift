@@ -46,7 +46,7 @@ struct LibraryPanelView: View {
 
             List(entries) { entry in
                 Button {
-                    instrument.deck(targetDeck).load(url: entry.url)
+                    instrument.deck(targetDeck).unit.load(url: entry.url)
                 } label: {
                     Text(entry.name)
                         .font(.system(size: 12, design: .monospaced))
