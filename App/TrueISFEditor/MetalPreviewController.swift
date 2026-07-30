@@ -442,6 +442,80 @@ final class MetalPreviewController: NSObject, ObservableObject, PreviewEngine {
             return PixelGate.verdict(frames)
         }
     }
+
+    struct CaptureOutcome {
+        let framesWritten: Int
+        let error: String?
+    }
+
+    /// Offscreen frame capture: renders one PNG per entry in `times` into `directory`.
+    ///
+    /// Deliberately the same shape as `runPixelGate` — one scene, render lock held across the
+    /// whole run, frames rendered in list order — because that is what makes `PERSISTENT`
+    /// passes warm up honestly. Callers wanting a stateful shader at t=4.0 must therefore pass
+    /// every intermediate time (0, 1/fps, … 4.0), not just the endpoint: time is an input to
+    /// the render, never a clock, and a half-warmed feedback buffer is the state leak that
+    /// makes a capture unreproducible.
+    func captureFrames(size: CGSize, times: [Double], to directory: URL) -> CaptureOutcome {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            return CaptureOutcome(framesWritten: 0, error: "mkdir failed: \(error)")
+        }
+        return core.withScene { scene in
+            guard let scene else { return CaptureOutcome(framesWritten: 0, error: "no scene loaded") }
+            if inputs.contains(where: { $0.type == "image" }) {
+                guard let pattern = GateInputPattern.makeTexture(device: device) else {
+                    return CaptureOutcome(framesWritten: 0, error: "input pattern unavailable")
+                }
+                for input in inputs where input.type == "image" {
+                    if let val = ISFMSLSceneVal.create(with: pattern) as? ISFMSLSceneVal {
+                        scene.setValue(val, forInputNamed: input.name)
+                    }
+                }
+            }
+            var written = 0
+            for (i, t) in times.enumerated() {
+                guard let cb = renderQueue.makeCommandBuffer() else {
+                    return CaptureOutcome(framesWritten: written, error: "no command buffer at frame \(i)")
+                }
+                var err: NSString?
+                guard let tex = ISFMSLSafeRenderAtTime(
+                    scene, NSSize(width: size.width, height: size.height), t, cb, &err) else {
+                    return CaptureOutcome(framesWritten: written,
+                                          error: "render failed at t=\(t): \(err ?? "unknown")")
+                }
+                guard FramePNGEncoder.supports(tex.pixelFormat) else {
+                    cb.commit()
+                    return CaptureOutcome(framesWritten: written,
+                                          error: "unsupported pixel format \(tex.pixelFormat.rawValue)")
+                }
+                let desc = MTLTextureDescriptor.texture2DDescriptor(
+                    pixelFormat: tex.pixelFormat, width: tex.width, height: tex.height, mipmapped: false)
+                desc.storageMode = .managed
+                guard let readback = device.makeTexture(descriptor: desc),
+                      let blit = cb.makeBlitCommandEncoder() else {
+                    cb.commit()
+                    return CaptureOutcome(framesWritten: written, error: "readback alloc failed at frame \(i)")
+                }
+                blit.copy(from: tex, to: readback)
+                blit.synchronize(resource: readback)
+                blit.endEncoding()
+                cb.commit()
+                cb.waitUntilCompleted()
+
+                guard let png = FramePNGEncoder.encodePNG(texture: readback) else {
+                    return CaptureOutcome(framesWritten: written, error: "PNG encode failed at frame \(i)")
+                }
+                let url = directory.appendingPathComponent(String(format: "frame-%05d.png", i))
+                do { try png.write(to: url) } catch {
+                    return CaptureOutcome(framesWritten: written, error: "write failed at frame \(i): \(error)")
+                }
+                written += 1
+            }
+            return CaptureOutcome(framesWritten: written, error: nil)
+        }
+    }
 }
 
 extension MetalPreviewController: RemixPreviewInputApplying {

@@ -115,6 +115,70 @@ void main() {
             }
         }
 
+        // Headless frame capture: `SHADERTOY_DEBUG_CAPTURE=<path-to-.fs>` renders that ISF file
+        // through the real Metal/ISFMSLKit path and writes one PNG per frame — the capture
+        // adapter for the gauntlet harness. Frames render sequentially on one scene from t=0, so
+        // PERSISTENT/feedback passes warm up honestly rather than being sampled half-cooked.
+        //   SHADERTOY_DEBUG_CAPTURE_OUT=<dir>     default $TMPDIR/isf-capture
+        //   SHADERTOY_DEBUG_CAPTURE_FRAMES=<n>    default 120
+        //   SHADERTOY_DEBUG_CAPTURE_FPS=<n>       default 60   (frame i renders at t = i/fps)
+        //   SHADERTOY_DEBUG_CAPTURE_SIZE=<WxH>    default 640x360
+        if let capPath = ProcessInfo.processInfo.environment["SHADERTOY_DEBUG_CAPTURE"], !capPath.isEmpty {
+            let env = ProcessInfo.processInfo.environment
+            let outDir = env["SHADERTOY_DEBUG_CAPTURE_OUT"] ?? (NSTemporaryDirectory() + "isf-capture")
+            let frameCount = env["SHADERTOY_DEBUG_CAPTURE_FRAMES"].flatMap(Int.init) ?? 120
+            let fps = env["SHADERTOY_DEBUG_CAPTURE_FPS"].flatMap(Double.init) ?? 60
+            var width = 640, height = 360
+            if let raw = env["SHADERTOY_DEBUG_CAPTURE_SIZE"] {
+                let parts = raw.lowercased().split(separator: "x").compactMap { Int($0) }
+                if parts.count == 2, parts[0] > 0, parts[1] > 0 { width = parts[0]; height = parts[1] }
+            }
+            Task { @MainActor in
+                print("=== DEBUG CAPTURE ===")
+                print("path=\(capPath)")
+                guard frameCount > 0, fps > 0 else {
+                    print("status=BAD-ARGS frames=\(frameCount) fps=\(fps)")
+                    print("=== END ===")
+                    exit(2)
+                }
+                guard let src = try? String(contentsOfFile: capPath, encoding: .utf8) else {
+                    print("status=READ-FAIL")
+                    print("=== END ===")
+                    exit(2)
+                }
+                let controller = MetalPreviewController()
+                controller.load(isf: src)
+                var compiled = false
+                var compileErr: String? = nil
+                for _ in 0..<400 {
+                    if controller.compileValid { compiled = true; break }
+                    if let e = controller.compileError { compileErr = e; break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+                guard compiled else {
+                    print("status=COMPILE-FAIL error=\(compileErr ?? "timeout")")
+                    print("=== END ===")
+                    exit(1)
+                }
+                let times = (0..<frameCount).map { Double($0) / fps }
+                let started = Date()
+                let outcome = controller.captureFrames(
+                    size: CGSize(width: width, height: height),
+                    times: times,
+                    to: URL(fileURLWithPath: outDir))
+                let elapsed = Date().timeIntervalSince(started)
+                print("out=\(outDir)")
+                print("size=\(width)x\(height) fps=\(fps) requested=\(frameCount)")
+                print("framesWritten=\(outcome.framesWritten)")
+                print("elapsed=\(String(format: "%.2f", elapsed))s " +
+                      "rate=\(String(format: "%.1f", Double(outcome.framesWritten) / max(elapsed, 0.0001)))fps")
+                print("status=\(outcome.error == nil && outcome.framesWritten == frameCount ? "OK" : "FAIL")")
+                if let e = outcome.error { print("error=\(e)") }
+                print("=== END ===")
+                exit(outcome.error == nil && outcome.framesWritten == frameCount ? 0 : 1)
+            }
+        }
+
         // Headless conversion-conformance harness: `SHADERTOY_DEBUG_CORPUS=<ids-file>` reads one
         // Shadertoy ID per line, fetches+converts+transpiles each through the real ISFMSLKit path,
         // and prints a pass/fail report bucketed by error. With `SHADERTOY_DEBUG_CORPUS_OUT=<dir>`
