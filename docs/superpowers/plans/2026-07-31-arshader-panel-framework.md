@@ -26,7 +26,11 @@ XcodeGen (`App/project.yml`), macOS 13+.
   (Same rule that put `ShaderUnit` in `App/ARShader` in phase 2.)
 - **Nothing in this plan touches the render thread**, the compositor, the FX encode path, or any
   published render mirror. View layer and view state only.
-- **Build and test with an explicit non-Desktop derived-data path:** `/tmp/arshader-ddata`. The
+- **Execution happens in the worktree** `.worktrees/m2-panel-framework` on branch
+  `m2-panel-framework`, not in the main checkout. Another session has had this repo as its working
+  directory; the worktree makes collisions structurally impossible rather than merely unlikely.
+- **Build and test with an explicit non-Desktop derived-data path:** `/tmp/arshader-ddata-panel`
+  — its own path, so a build in the main checkout cannot collide with one here. The
   repo lives under `~/Desktop`, where Defender DLP has stalled test hosts pre-`main`.
 - **`xcodebuild test` launches a second ARShader window via `TEST_HOST`, and
   `scripts/run-instrument.sh` QUITS any running ARShader.** Tell the operator before running
@@ -141,11 +145,38 @@ final class SurfaceLayoutTests: XCTestCase {
         XCTAssertFalse(layout.isExpanded(.deck(.one, .parameters)))
     }
 
+    /// Invariant 2b — the same guarantee through the OTHER door.
+    ///
+    /// The rail stays live during a show on purpose, so opening Library mid-set is anticipated.
+    /// Without this, a later ⌘⇧P fires the restore branch and re-expands the whole patch
+    /// arrangement on stage. None of the other invariants name this transition, so its absence
+    /// was invisible to the coverage table until PM spec review caught it.
+    func testOpeningAPanelInShowModeExitsShowModeAndKeepsIt() {
+        let layout = SurfaceLayout()
+        layout.setExpanded(true, for: .deck(.one, .parameters))
+        layout.toggleShowMode()
+        XCTAssertNil(layout.openPanel)
+
+        layout.select(panel: .library)
+
+        XCTAssertFalse(layout.showMode, "Reaching for a tool leaves show mode")
+        XCTAssertEqual(layout.openPanel, .library)
+        XCTAssertFalse(layout.isExpanded(.deck(.one, .parameters)),
+                       "Sections show mode collapsed stay collapsed")
+
+        // The next ⌘⇧P must COLLAPSE-AND-CLOSE, not restore the pre-show arrangement.
+        layout.toggleShowMode()
+        XCTAssertTrue(layout.showMode)
+        XCTAssertNil(layout.openPanel)
+        XCTAssertFalse(layout.isExpanded(.deck(.one, .parameters)),
+                       "The discarded snapshot must not resurrect the patch arrangement mid-song")
+    }
+
     /// Invariant 3 — an arrangement survives a relaunch.
     func testArrangementEncodesAndDecodesUnchanged() throws {
         let layout = SurfaceLayout()
         layout.select(panel: .settings)
-        layout.panelWidth = 331
+        layout.setPanelWidth(331)
         layout.setExpanded(true, for: .deck(.two, .sources))
         layout.setExpanded(false, for: .masterFX)
 
@@ -197,6 +228,18 @@ final class SurfaceLayoutTests: XCTestCase {
                       "SurfaceLayout has no representation of blackout, so it cannot change it")
     }
 
+    /// The drag can never starve the panel. Clamped in the model, not the gesture handler.
+    func testPanelWidthClampsToItsFloor() {
+        let layout = SurfaceLayout()
+
+        layout.setPanelWidth(40)
+        XCTAssertEqual(layout.panelWidth, SurfaceLayout.minPanelWidth,
+                       "Dragging the divider past the floor pins it, it does not starve the panel")
+
+        layout.setPanelWidth(420)
+        XCTAssertEqual(layout.panelWidth, 420, "Above the floor the drag is honoured exactly")
+    }
+
     /// Every collapsible section the surface has, and nothing else.
     func testTheCollapsibleSetIsExactlyTheConfigurationSections() {
         XCTAssertEqual(Set(SectionKey.all), Set([
@@ -213,7 +256,7 @@ final class SurfaceLayoutTests: XCTestCase {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build-for-testing 2>&1 | tail -20
 ```
 
@@ -296,8 +339,11 @@ struct Arrangement: Codable, Equatable, Sendable {
 /// reach it structurally rather than by promise.
 @MainActor
 final class SurfaceLayout: ObservableObject {
+    /// The panel never narrows past this, however far the divider is dragged.
+    static let minPanelWidth: Double = 260
+
     @Published private(set) var openPanel: PanelID?
-    @Published var panelWidth: Double
+    @Published private(set) var panelWidth: Double
     @Published private(set) var showMode: Bool = false
 
     @Published private var expanded: [SectionKey: Bool]
@@ -317,15 +363,23 @@ final class SurfaceLayout: ObservableObject {
     /// Unknown keys read as expanded: a section added in a later build must appear, not hide.
     func isExpanded(_ key: SectionKey) -> Bool { expanded[key] ?? true }
 
-    /// Setting a section during a show ENDS the show rather than restoring over the edit later.
+    /// A deliberate layout action during a show ENDS the show rather than restoring over it later.
     /// An untouched round trip still restores exactly; a deliberate mid-set change is never
     /// silently thrown away.
+    ///
+    /// Both doors call this: section collapse AND panel selection. The rail stays live during a
+    /// show by design (`PanelRailView`), so opening Library mid-set is an ANTICIPATED action — and
+    /// if it did not end the show, a later ⌘⇧P would fire the restore branch and re-expand the
+    /// whole patch arrangement mid-song. That is the exact class this rule exists to prevent.
+    private func endShowModeOverride() {
+        guard showMode else { return }
+        showMode = false
+        snapshot = nil
+    }
+
     func setExpanded(_ value: Bool, for key: SectionKey) {
         expanded[key] = value
-        if showMode {
-            showMode = false
-            snapshot = nil
-        }
+        endShowModeOverride()
     }
 
     func toggle(_ key: SectionKey) { setExpanded(!isExpanded(key), for: key) }
@@ -333,8 +387,19 @@ final class SurfaceLayout: ObservableObject {
     // MARK: Panel
 
     /// Selecting the open panel closes it; selecting another swaps. The rail itself never hides.
+    /// Ends a show-mode override for the reason in `endShowModeOverride`.
     func select(panel: PanelID) {
         openPanel = (openPanel == panel) ? nil : panel
+        endShowModeOverride()
+    }
+
+    /// Clamped here rather than in the drag handler: the floor is a property of the layout, and a
+    /// view-local clamp would let a future second call site write a 40pt panel.
+    ///
+    /// Resizing is NOT a show-mode-ending action — it is a continuous adjustment of a panel that
+    /// show mode has already closed, so the case cannot arise.
+    func setPanelWidth(_ width: Double) {
+        panelWidth = max(Self.minPanelWidth, width)
     }
 
     // MARK: Show mode
@@ -371,12 +436,12 @@ final class SurfaceLayout: ObservableObject {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test \
   -only-testing:ARShaderTests/SurfaceLayoutTests 2>&1 | tail -25
 ```
 
-Expected: 7 tests, all PASS. **Warn the operator first — this launches a second ARShader window.**
+Expected: 9 tests, all PASS. **Warn the operator first — this launches a second ARShader window.**
 
 - [ ] **Step 6: Mutation-test invariant 2**
 
@@ -469,7 +534,7 @@ final class SurfaceLayoutStoreTests: XCTestCase {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build-for-testing 2>&1 | tail -20
 ```
 
@@ -513,7 +578,7 @@ struct SurfaceLayoutStore {
 
 ```bash
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test \
   -only-testing:ARShaderTests/SurfaceLayoutStoreTests 2>&1 | tail -20
 ```
@@ -597,7 +662,7 @@ struct PanelRailView: View {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build-for-testing 2>&1 | tail -10
 ```
 
@@ -656,7 +721,9 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
 
     /// The monitors never shrink below this, however much is expanded below them.
     static var minMonitorHeight: CGFloat { 160 }
-    static var minPanelWidth: CGFloat { 260 }
+    // The panel's floor lives on SurfaceLayout, not here — it is clamped where the width is
+    // written (`setPanelWidth`), so there is one source of truth rather than a view-local copy
+    // that a second call site could bypass.
 
     var body: some View {
         HStack(spacing: 0) {
@@ -781,11 +848,11 @@ struct SettingsPanelView: View {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
 ```
 
-Expected: **191 tests** (181 baseline + 7 from Task 1 + 3 from Task 2), all PASS.
+Expected: **193 tests** (181 baseline + 9 from Task 1 + 3 from Task 2), all PASS.
 **Warn the operator — second window.**
 
 - [ ] **Step 5: Commit**
@@ -803,6 +870,118 @@ nothing uses.
 Generic over its content so the real layout code can be rendered in a test with
 stubs. The live monitors are Metal-backed and cannot render in a unit test, and
 a layout gate that skips the layout is worthless.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 4b: The panel resize handle
+
+**Files:**
+- Modify: `App/ARShader/InstrumentSurface.swift`
+
+**Interfaces:**
+- Consumes: `SurfaceLayout.panelWidth`, `SurfaceLayout.setPanelWidth(_:)`,
+  `SurfaceLayout.minPanelWidth` (Task 1).
+- Produces: no new API.
+
+**Why this task exists.** Spec §2.2 says the panel width is draggable with a 260pt minimum and is
+remembered. Tasks 1, 2 and 4 model it, persist it, test its encoding, and *read* it into
+`.frame(width:)` — but nothing ever writes it. Caught by PM spec review before execution; without
+this task `panelWidth` is a value only a unit test can change, and live-smoke leg 4 fails on
+device.
+
+- [ ] **Step 1: Replace the panel's trailing `Divider()` with a draggable one**
+
+In `App/ARShader/InstrumentSurface.swift`, replace the panel block:
+
+```swift
+            if layout.openPanel != nil {
+                panel()
+                    .frame(width: CGFloat(layout.panelWidth))
+                    .frame(minWidth: CGFloat(SurfaceLayout.minPanelWidth))
+                    .accessibilityIdentifier("surface.panel")
+                panelResizeHandle
+            }
+```
+
+and add to `InstrumentSurface`:
+
+```swift
+    /// A 6pt grab strip standing in for the panel's trailing divider.
+    ///
+    /// Wider than the 1pt Divider it replaces because this is aimed at with a mouse mid-session; a
+    /// 1pt target is the same mistake as a 12pt chevron. It still READS as a divider — the visible
+    /// rule is 1pt, the hit area is 6.
+    private var panelResizeHandle: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.001))   // hit-testable, visually absent
+            .frame(width: 6)
+            .overlay(Divider(), alignment: .center)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("surface.panelResizeHandle")
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(coordinateSpace: .named(Self.coordinateSpace))
+                    .onChanged { value in
+                        // Absolute, not incremental: the handle sits at the panel's trailing edge,
+                        // so the drag's x IN THE SURFACE's space IS the intended width minus the
+                        // rail. Accumulating deltas drifts when a frame is dropped mid-drag.
+                        layout.setPanelWidth(Double(value.location.x) - Double(PanelRailView.width))
+                    }
+            )
+    }
+
+    static var coordinateSpace: String { "instrumentSurface" }
+```
+
+and tag the root `HStack` so the drag has a stable space to measure in:
+
+```swift
+        .coordinateSpace(name: Self.coordinateSpace)
+```
+
+(place it alongside the existing `.background(Color.black)`).
+
+`NSCursor` needs AppKit — add `import AppKit` at the top of the file.
+
+- [ ] **Step 2: Verify it compiles**
+
+```bash
+cd App && xcodegen generate && cd ..
+xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build-for-testing 2>&1 | tail -10
+```
+
+Expected: BUILD SUCCEEDED. No window.
+
+- [ ] **Step 3: Run the full suite**
+
+```bash
+xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
+```
+
+Expected: **193 tests** PASS. **Warn the operator — second window.**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add App/ARShader/InstrumentSurface.swift
+git commit -m "feat(m2): make the panel divider actually draggable
+
+panelWidth was modelled, persisted and read into a frame — and nothing ever
+wrote it. Spec §2.2 promised a draggable panel; live-smoke leg 4 would have
+failed on device. Caught by PM spec review before execution.
+
+The drag is absolute rather than incremental (accumulating deltas drifts if a
+frame drops mid-drag), and the 1pt divider gets a 6pt hit area — a 1pt target
+is the same mistake as a 12pt chevron.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
@@ -876,7 +1055,7 @@ struct CollapsibleSection<Content: View>: View {
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build-for-testing 2>&1 | tail -10
 ```
 
@@ -1083,11 +1262,11 @@ then use `masterFX.stages.count` and `chain: masterFX` in `masterStrip`.
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
 ```
 
-Expected: 191 PASS. **Warn the operator — second window.**
+Expected: 193 PASS. **Warn the operator — second window.**
 
 - [ ] **Step 6: Commit**
 
@@ -1300,11 +1479,11 @@ In `App/ARShader/InstrumentView.swift`:
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
 ```
 
-Expected: 191 PASS. If `OutputDestinationTests` or `RenderScaleTests` fail, the move broke a
+Expected: 193 PASS. If `OutputDestinationTests` or `RenderScaleTests` fail, the move broke a
 reference — fix rather than adjust the assertion.
 
 - [ ] **Step 5: Commit**
@@ -1409,11 +1588,11 @@ The arrangement must survive a relaunch. In `InstrumentView.body`, on the `Instr
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
 ```
 
-Expected: 191 PASS.
+Expected: 193 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1649,6 +1828,25 @@ final class SurfaceGeometryTests: XCTestCase {
         XCTAssertNil(collapsed["section.FX.content"])
     }
 
+    /// The resize handle exists, is hit-testable, and sits at the panel's trailing edge.
+    /// `panelWidth`'s clamp is unit-tested in Task 1; this gates that the affordance is REACHABLE
+    /// — the defect PM caught was a width nothing could write.
+    func testTheResizeHandleExistsAtThePanelEdgeAndIsBigEnoughToHit() {
+        let layout = SurfaceLayout()
+        layout.select(panel: .library)
+        let frames = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
+            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize))
+
+        let handle = try! XCTUnwrap(frames["surface.panelResizeHandle"],
+                                    "No resize handle — panelWidth would be unwritable again")
+        let panel = try! XCTUnwrap(frames["surface.panel"])
+
+        XCTAssertGreaterThanOrEqual(handle.width, 5,
+                                    "A 1pt drag target is the same mistake as a 12pt chevron")
+        XCTAssertEqual(handle.minX, panel.maxX, accuracy: 1,
+                       "The handle sits at the panel's trailing edge, where a divider would be")
+    }
+
     // MARK: PNG baselines (supplementary — regenerable with ARSHADER_RECORD_BASELINES=1)
 
     func testSurfaceBaselines() throws {
@@ -1672,7 +1870,7 @@ final class SurfaceGeometryTests: XCTestCase {
 
 ```bash
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test \
   -only-testing:ARShaderTests/SurfaceGeometryTests 2>&1 | tail -30
 ```
@@ -1682,7 +1880,7 @@ FAILS with "No baseline". Record them:
 
 ```bash
 ARSHADER_RECORD_BASELINES=1 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test \
   -only-testing:ARShaderTests/SurfaceGeometryTests 2>&1 | tail -10
 ```
@@ -1722,11 +1920,11 @@ In `App/project.yml`, under `ARShaderTests: sources:`, after the `Fixtures` entr
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -25
 ```
 
-Expected: **196 tests** (191 + 5), all PASS.
+Expected: **199 tests** (193 + 6), all PASS.
 
 - [ ] **Step 8: Commit**
 
@@ -1765,14 +1963,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```bash
 cd App && xcodegen generate && cd ..
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -12
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme TrueISFEditor \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/arshader-ddata-panel \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test 2>&1 | tail -12
 ```
 
-Expected: ARShaderTests **196**, TrueISFEditorTests **514 (3 skipped)**. Run ShadertoyISFKit's
+Expected: ARShaderTests **199**, TrueISFEditorTests **514 (3 skipped)**. Run ShadertoyISFKit's
 **312** per its usual command. Any reduction is a regression — fix it, do not adjust the count.
 
 - [ ] **Step 2: Install, having warned the operator**
@@ -1843,7 +2041,8 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 | Spec section | Task |
 |---|---|
 | §2.1 flexible monitor row | 4 (built), 9 (gated + mutation-proven) |
-| §2.2 rail, toggle semantics, shortcuts, width | 3, 8; semantics tested in 1 (#4), width in 9 |
+| §2.2 rail, toggle semantics, shortcuts | 3, 8; semantics tested in 1 (#4) |
+| §2.2 panel width draggable, 260pt floor, remembered | **4b** (the handle), 1 (the clamp), 2 (persistence), 9 (handle reachable) |
 | §2.3 what collapses + summary in header | 5, 6 |
 | §2.4 settings panel day one | 7 |
 | §2.5 show mode + edit-in-show-mode | 1 (logic + 2 tests), 8 (UI) |
@@ -1852,12 +2051,26 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 | §3.3 blackout structurally outside | 1 (test #6), 8 (shortcuts stay with `BlackoutKeyMonitor`) |
 | §3.4 custom rail, not `NavigationSplitView` | 3 |
 | §4 no visual treatment, library contents unchanged, render path untouched | Global Constraints; Task 6 leaves `FXChainView`/`ShaderControlsView` internals alone |
-| §5.1 six invariants | 1 (7 tests — the six plus the collapsible-set pin) |
+| §5.1 invariants (six, plus 2b added at PM review) | 1 (9 tests — the seven invariants, the panel-width clamp, and the collapsible-set pin) |
 | §5.2 baselines, mutation-tested | 9, with a stated deviation |
 | §5.3 live smoke | 10 |
 | §6 failure modes | Each mitigated by the task above; "new deck inherits state" by `SectionKey` (test #5) |
 
 No spec requirement is without a task.
+
+**Correction, PM spec review 2026-07-31.** The first version of this line was false. §2.2's
+draggable panel width had no implementing task: `panelWidth` was modelled (Task 1), persisted
+(Task 2) and read into a frame (Task 4), and nothing anywhere wrote it — a grep of the whole plan
+for `DragGesture`/`resiz` returned only the field name and the smoke leg that would have failed.
+**Task 4b** now implements it. The lesson generalises past this plan: a self-review that asks "can
+I point at a task?" passes on any requirement whose *nouns* appear somewhere, because state,
+persistence and a read all mention `panelWidth`. The question that catches it is "what WRITES this,
+and can the operator reach that thing?"
+
+The same review found that `select(panel:)` never ended a show-mode override, while §2.2 argues
+the rail must stay live during a show precisely so a tool is reachable mid-set — so the one door
+§2.2 opens was the one door §2.5's guarantee did not cover. Spec §2.5 and §5.1 and Task 1 now
+carry the rule and invariant 2b.
 
 **Placeholder scan:** No "TBD", "TODO", "add error handling", "similar to Task N", or code step
 without a code block. The Task 4 `SettingsPanelView` stub is an explicit, named, deleted-in-Task-7
@@ -1867,7 +2080,7 @@ placeholder, not an unfinished instruction.
 `showMode`, `isExpanded(_:)`, `setExpanded(_:for:)`, `toggle(_:)`, `select(panel:)`,
 `toggleShowMode()`, `arrangement`, `apply(_:)`) all exist as written in Task 1.
 `SurfaceLayoutStore.load()/save(_:)/key` match Task 2. `InstrumentSurface.minMonitorHeight` and
-`minPanelWidth` are used in Task 9 with the generic parameters spelled out. `SectionKey.all` is
+`SurfaceLayout.minPanelWidth` are used in Tasks 4b and 9 with the generic parameters spelled out. `SectionKey.all` is
 defined in Task 1 and used in Tasks 1 and 9. `PanelRailView.width` defined in Task 3, unused
 elsewhere by design.
 

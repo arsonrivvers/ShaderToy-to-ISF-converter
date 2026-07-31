@@ -126,10 +126,18 @@ panel. The freed height goes to the monitors by §2.1.
 
 `⌘⇧P` again restores the snapshot exactly.
 
-**If a section is collapsed or expanded while in show mode** — the operator needs DECK A's FX
-mid-song — **show mode switches off immediately and the current arrangement stands**, discarding
-the snapshot. So an untouched round trip restores, and a deliberate edit is never silently thrown
-away. These are two separate testable invariants rather than one ambiguous one (§5).
+**Any deliberate layout action while in show mode switches show mode off immediately and the
+current arrangement stands**, discarding the snapshot. That means *both* collapsing or expanding a
+section — the operator needs DECK A's FX mid-song — *and* opening, closing or swapping a panel from
+the rail. So an untouched round trip restores, and a deliberate action is never silently thrown
+away. These are separate testable invariants rather than one ambiguous one (§5).
+
+**The rule has to cover panel selection because §2.2 deliberately keeps the rail live during a
+show** so a tool stays reachable mid-set. Without it there is a stage-grade trap: enter show mode,
+open Library from the rail to swap a shader, then press `⌘⇧P` expecting it to tidy up — and instead
+of closing the panel it fires the *restore* branch and re-expands the entire patch arrangement
+mid-song. The one entry point §2.2 argues for would be the one entry point the §2.5 guarantee did
+not cover. One rule, both doors: **a deliberate layout action ends the show-mode override.**
 
 ## 3. Architecture
 
@@ -223,6 +231,11 @@ HUD-style tools to it.
 2. **Edit in show mode exits and preserves.** Enter show mode, toggle one section; `showMode` is
    false, that section holds its new value, every other section stays collapsed, and a subsequent
    exit does not resurrect the snapshot.
+2b. **Opening a panel in show mode exits and preserves.** Enter show mode, `select(panel:)` from
+   the rail; `showMode` is false, the panel is open, every section stays collapsed, and a later
+   `⌘⇧P` collapses-and-closes rather than restoring the pre-show arrangement. Without this
+   invariant the trap in §2.5 is invisible to the suite — none of the other invariants name the
+   `select(panel:)`-during-show transition.
 3. **Persistence.** Encode, decode, compare — an arrangement survives a relaunch.
 4. **Panel toggle semantics.** Selecting the open panel closes it; selecting a different one swaps
    without closing.
