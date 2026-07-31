@@ -22,8 +22,10 @@ struct FXStageSnapshot: @unchecked Sendable {
 final class FXChain: ObservableObject {
     @Published private(set) var stages: [FXStage] = []
 
-    /// Test seam: lets a test observe that a stage change was republished. Nil in the app.
-    var onStagesChangedForTesting: (() -> Void)?
+    /// Test seam: fires ONLY from `stageDidChangeScene()`'s republish, not from append / remove /
+    /// move / setEnabled / setMix / setBlendMode, which also republish but through their own
+    /// direct calls. Nil in the app.
+    var onSceneRepublishedForTesting: (() -> Void)?
 
     private let renderLock = NSLock()
     nonisolated(unsafe) private var renderCache: [FXStageSnapshot] = []
@@ -77,7 +79,7 @@ final class FXChain: ObservableObject {
     /// encoding without waiting for an unrelated mutation.
     func stageDidChangeScene() {
         publishToRenderThread()
-        onStagesChangedForTesting?()
+        onSceneRepublishedForTesting?()
     }
 
     private func publishToRenderThread() {

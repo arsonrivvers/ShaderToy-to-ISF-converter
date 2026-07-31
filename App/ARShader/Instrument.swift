@@ -29,7 +29,23 @@ final class Instrument: ObservableObject {
 
     init() {
         self.surfaceLayout = SurfaceLayout(SurfaceLayoutStore().load())
-        let bankStore = SlotBankStore()
+        // Under XCTest, `Instrument()` is built many times across the suite — every ARShader test
+        // that touches a deck or the library builds one — and would otherwise read AND overwrite
+        // the operator's REAL slot bank in `UserDefaults.standard` on every run. Task 3 already
+        // established the doctrine for this (`SlotBankStoreTests` uses a private suite so tests
+        // never clobber the real bank); this applies the same isolation one level up, to every
+        // `Instrument()` built under the harness, not just this file's own tests. Chose a fresh
+        // volatile suite per instance (isolates BOTH load and save) over merely skipping the
+        // `onChange` hook below: skipping only the write would still `bankStore.load()` the real
+        // bank into a test instrument's initial state, which is exactly the nondeterminism this is
+        // meant to remove.
+        let bankStore: SlotBankStore
+        if TestHarness.isActive {
+            let suiteName = "ARShader.Instrument.testHarness.\(UUID().uuidString)"
+            bankStore = SlotBankStore(defaults: UserDefaults(suiteName: suiteName) ?? .standard)
+        } else {
+            bankStore = SlotBankStore()
+        }
         self.slotBank = SlotBank(slots: bankStore.load())
         // The same shared device/queue the editor uses, so both apps cooperate with one GPU
         // context rather than each minting their own.
@@ -90,14 +106,27 @@ final class Instrument: ObservableObject {
         stage.unit.load(url: url)
     }
 
-    /// Installs a compile handler that runs the chain's ongoing concern AND the one-shot snapshot,
-    /// then CLEARS the one-shot. Without the clear, a later unrelated load onto the same unit would
-    /// re-fire it and replay an old preset's values onto a shader they were never captured from.
+    /// Installs a compile handler that applies the one-shot snapshot (success only — see below),
+    /// then runs the chain's ongoing concern, then CLEARS the one-shot. If it were never cleared,
+    /// a later load that bypassed `Instrument.load` entirely (calling `ShaderUnit.load` directly —
+    /// a future MIDI reload, an edit-and-recompile path) would re-fire this closure and replay a
+    /// retired preset's values onto a shader they were never captured from; no current production
+    /// path can actually reach that, since `load` always calls `attach` fresh before every compile
+    /// and every FX load mints a brand-new unit, but the clear makes it true unconditionally rather
+    /// than by accident of today's call graph.
     private func attach(_ snapshot: ParamSnapshot?, to unit: ShaderUnit,
                         alsoRunning ongoing: (() -> Void)?) {
         unit.onCompileFinished = { [weak self, weak unit] in
+            // `onCompileFinished` fires on ALL THREE outcomes (unreadable file, compile failure,
+            // success) but `compileError` is nil'd ONLY on success (ShaderUnit.swift). On a
+            // failure the previous shader is deliberately left playing — compile-first-swap-on-
+            // success — so applying a snapshot here would mutate the shader that is still up:
+            // `applySnapshot` REPLACES `values` wholesale, destroying its live dialled values.
+            if let snapshot, let unit, unit.compileError == nil { unit.params.applySnapshot(snapshot) }
+            // Apply the snapshot before the ongoing concern (not after): otherwise a fresh FX stage
+            // would enter the render mirror at header defaults for one turn, then jump to the
+            // preset's values a moment later.
             ongoing?()
-            if let snapshot, let unit { unit.params.applySnapshot(snapshot) }
             // One-shot: reinstall the ongoing concern alone, or nothing.
             unit?.onCompileFinished = ongoing.map { fn in { fn() } }
             self?.onLoadSettledForTesting?()

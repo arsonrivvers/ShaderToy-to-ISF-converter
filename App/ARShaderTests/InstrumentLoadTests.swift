@@ -19,6 +19,20 @@ final class InstrumentLoadTests: XCTestCase {
         return url
     }
 
+    /// An `.fs` file that reads fine but fails to compile — same uncompilable body already proven
+    /// to fail in ShaderUnitTests (Fixtures/broken.fs: an undefined GLSL symbol). Non-private:
+    /// the coordinator's fix-round-1 test reuses this too.
+    func makeUncompilableShaderFile() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bad-\(UUID().uuidString).fs")
+        try """
+        /*{ "ISFVSN": "2.0", "DESCRIPTION": "Deliberately uncompilable.", "INPUTS": [] }*/
+        void main() { gl_FragColor = this_symbol_does_not_exist(1.0); }
+        """.write(to: url, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
     /// `sourceURL` is now stamped in `apply`'s success path, after the background compile —
     /// so tests must await `onCompileFinished` rather than asserting right after `load(url:)`.
     /// Same shape as Task 5's brief helper.
@@ -86,15 +100,7 @@ final class InstrumentLoadTests: XCTestCase {
         let good = try makeShaderFile("good")
         await loadAndWait(instrument.deck(.one).unit, good)
 
-        // A file that reads fine but cannot compile — same uncompilable body already proven to
-        // fail in ShaderUnitTests (Fixtures/broken.fs: an undefined GLSL symbol).
-        let bad = FileManager.default.temporaryDirectory
-            .appendingPathComponent("bad-\(UUID().uuidString).fs")
-        try """
-        /*{ "ISFVSN": "2.0", "DESCRIPTION": "Deliberately uncompilable.", "INPUTS": [] }*/
-        void main() { gl_FragColor = this_symbol_does_not_exist(1.0); }
-        """.write(to: bad, atomically: true, encoding: .utf8)
-        addTeardownBlock { try? FileManager.default.removeItem(at: bad) }
+        let bad = try makeUncompilableShaderFile()
         await loadAndWait(instrument.deck(.one).unit, bad)
 
         XCTAssertNotNil(instrument.deck(.one).unit.compileError, "the failure must be reported")
@@ -157,26 +163,33 @@ final class InstrumentLoadTests: XCTestCase {
                        "An FX target APPENDS a stage; it does not replace the chain")
     }
 
+    /// Coordinator fix round 1, MINOR 2: this test cannot actually distinguish "applied after the
+    /// compile lands" from "applied at any other time" — `ParamStore.applySnapshot` keeps
+    /// unknown-to-the-shader names regardless of when it runs, and `syncInputs` then keeps
+    /// same-typed survivors, so this assertion would pass even if the snapshot were (wrongly)
+    /// applied synchronously before the compile started. The message below states only what this
+    /// actually proves, not the stronger ordering claim the original message made.
     func testASnapshotIsAppliedAfterTheCompileLands() async throws {
         let instrument = Instrument()
         await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one),
                           thenApply: ParamSnapshot(params: ["speed": .float(0.25)]))
         XCTAssertEqual(instrument.deck(.one).unit.params.exportSnapshot().params["speed"],
                        .float(0.25),
-                       "Applied before the compile lands, the parameters would not exist to receive it")
+                       "Once Instrument.load's compile has settled, the deck's exported snapshot "
+                       + "must reflect the values passed to thenApply")
     }
 
     /// The collision the PM review caught. Assign only the snapshot handler and this goes red.
     func testAnFXLoadWithASnapshotStillRepublishesTheChain() async throws {
         let instrument = Instrument()
         var republishes = 0
-        instrument.renderer.masterFX.onStagesChangedForTesting = { republishes += 1 }
+        instrument.renderer.masterFX.onSceneRepublishedForTesting = { republishes += 1 }
         await loadTargetAndWait(instrument, try makeShaderFile(), onto: .masterFX,
                           thenApply: ParamSnapshot(params: ["speed": .float(0.3)]))
         XCTAssertGreaterThan(republishes, 0,
                              "onCompileFinished is single-owner: a snapshot handler that replaces "
                              + "the chain republish silently stops the FX stage updating")
-        instrument.renderer.masterFX.onStagesChangedForTesting = nil
+        instrument.renderer.masterFX.onSceneRepublishedForTesting = nil
     }
 
     /// The stale one-shot. Without the clear, `onCompileFinished` keeps pointing at the closure
@@ -226,5 +239,69 @@ final class InstrumentLoadTests: XCTestCase {
         let preset = try XCTUnwrap(instrument.currentPreset(of: .one))
         XCTAssertEqual(preset.snapshot.params["speed"], .float(0.8),
                        "Capture takes what is dialled NOW, not the header defaults")
+    }
+
+    // MARK: coordinator fix round 1
+
+    /// IMPORTANT 1: `onCompileFinished` fires on ALL THREE outcomes — unreadable file, compile
+    /// failure, success — but a failed compile deliberately leaves the previous shader playing
+    /// (compile-first-swap-on-success). Applying `thenApply`'s snapshot unconditionally would
+    /// mutate that still-playing shader: `applySnapshot` REPLACES `values` wholesale, so the
+    /// operator's dialled value would be destroyed by a load that never even took effect.
+    func testAFailedLoadWithASnapshotLeavesTheDialledValueOfTheStillPlayingShaderUntouched() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one))
+        instrument.deck(.one).unit.params.set("speed", .float(0.77))
+
+        await loadTargetAndWait(instrument, try makeUncompilableShaderFile(), onto: .deck(.one),
+                          thenApply: ParamSnapshot(params: ["speed": .float(0.1)]))
+
+        XCTAssertNotNil(instrument.deck(.one).unit.compileError, "sanity: the load did fail")
+        XCTAssertEqual(instrument.deck(.one).unit.params.exportSnapshot().params["speed"],
+                       .float(0.77),
+                       "A failed compile must not let the snapshot mutate the shader that is "
+                       + "still playing")
+    }
+
+    /// IMPORTANT 2: every `Instrument()` in this suite would otherwise read and overwrite the
+    /// operator's REAL slot bank in `UserDefaults.standard`. Confirms the harness gate in
+    /// `Instrument.init()` routes to a volatile suite instead — a capture on a fresh test
+    /// instrument must not move the real key at all.
+    func testAFreshInstrumentUnderTheHarnessDoesNotWriteTheRealSlotBank() {
+        let before = UserDefaults.standard.data(forKey: SlotBankStore.key)
+        let instrument = Instrument()
+        instrument.slotBank.capture(
+            Preset.capturing(url: URL(fileURLWithPath: "/tmp/coordinator-fix-round-1.fs"),
+                             snapshot: ParamSnapshot(params: [:])),
+            into: 0)
+        let after = UserDefaults.standard.data(forKey: SlotBankStore.key)
+        XCTAssertEqual(before, after,
+                       "Instrument() under the test harness must not read or write the operator's "
+                       + "real slot bank")
+    }
+
+    /// MINOR 1: the FX half of the one-shot invariant. On `.deck` targets `ongoing` is nil, so
+    /// `testTheOneShotIsClearedSoALaterLoadDoesNotReplayOldValues` above (asserting
+    /// `onCompileFinished == nil`) can't see this path — on `.masterFX`, `ongoing` is NON-nil, so
+    /// after the one-shot fires, `onCompileFinished` is reinstalled to `{ fn() }`, not nil. This
+    /// drives a SECOND compile directly through that reinstalled closure (bypassing
+    /// `Instrument.load`, which would just call `attach` fresh again) and asserts it republishes
+    /// the chain but does NOT re-apply the retired snapshot over a value dialled afterward.
+    func testTheFXOneShotReinstallsRepublishOnlyNotTheRetiredSnapshot() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .masterFX,
+                          thenApply: ParamSnapshot(params: ["speed": .float(0.25)]))
+        let stage = try XCTUnwrap(instrument.renderer.masterFX.stages.last)
+        stage.unit.params.set("speed", .float(0.6))
+
+        let republished = expectation(description: "reinstalled closure republishes the chain")
+        instrument.renderer.masterFX.onSceneRepublishedForTesting = { republished.fulfill() }
+        stage.unit.load(url: try makeShaderFile("refresh"))
+        await fulfillment(of: [republished], timeout: 30)
+        instrument.renderer.masterFX.onSceneRepublishedForTesting = nil
+
+        XCTAssertEqual(stage.unit.params.exportSnapshot().params["speed"], .float(0.6),
+                       "The reinstalled closure must republish the chain but not re-apply the "
+                       + "retired snapshot over a value dialled after the load settled")
     }
 }
