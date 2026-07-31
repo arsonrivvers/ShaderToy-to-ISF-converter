@@ -1624,7 +1624,9 @@ and add to `InstrumentView`:
 The arrangement must survive a relaunch. In `InstrumentView.body`, on the `InstrumentSurface`:
 
 ```swift
-        .onChange(of: layout.arrangement) { _, new in
+        // Single-parameter form: the project's deployment target is macOS 13, and the
+        // two-parameter `onChange(of:initial:_:)` needs macOS 14.
+        .onChange(of: layout.arrangement) { new in
             SurfaceLayoutStore().save(new)
         }
 ```
@@ -2063,6 +2065,11 @@ Create `docs/reports/live-smoke-instrument-m2-phase3a.md` with status `PENDING` 
 13. OUTPUT RES is in Settings and still works. PREVIEW SCALE, CUE SCALE **and the OUTPUT
     destination picker** are all still on the mixer strip and still work.
 14. Quit and relaunch: the arrangement is exactly as left.
+14b. **⌘⇧P and ⌘⌥1 fire while a text field has focus.** Click into the library search field, then
+    the OUTPUT RES width field, and press each shortcut. Blackout uses an app-wide NSEvent monitor
+    precisely because SwiftUI shortcuts are focus-dependent; these new ones do NOT, so this is
+    reasoned-but-unverified until run. If either fails to fire with focus in a field, that is a
+    real defect on stage, not a nicety.
 15. A generator on a deck shows no SOURCES section at all (not an empty one).
 
 - [ ] **Step 5: Operator runs the legs and signs them**
