@@ -53,6 +53,20 @@ State each hypothesis so it can fail. A leg is only CONFIRMED when the operator 
   output recorded. The install and the binary-freshness check were performed separately, before the
   legs: the installed `ARShader.debug.dylib` is byte-identical to the build product.
 - **17 of 17 legs pass. No defect was found.** Phase 3a is CONFIRMED.
+- **Three fixes landed AFTER these legs ran and are not covered by them** (`47e9091`, from the final
+  branch review). The legs were run against `f966779`. Two of the three change behaviour the legs
+  touched, so the honest status is: the phase is CONFIRMED, these three fixes are STAGED.
+  - The panel now has a width CEILING as well as a floor, clamped against the window. Leg 4 checked
+    only the floor. The defect: dragging the handle right past the window edge made the panel wider
+    than the window, putting the mixer strip — and BLACKOUT, SHOW MODE and the OUTPUT picker with
+    it — off-screen, unrecoverable by mouse and persisted across relaunch.
+  - The window's minimum width went 1100 → 1180. At 1100 with a panel open the mixer strip was
+    drawn 52pt outside the window. No leg resized the window, which is why 17/17 missed it.
+  - `⌘⌥N` bindings and rail tooltips now share one source. No behaviour change at two panels.
+  - **Re-smoke needed, three legs:** drag the panel handle far right past the window edge and
+    release (the mixer strip must stay fully visible and the handle must stay grabbable); resize the
+    window down to its minimum with a panel open (nothing clipped on the right); and confirm the
+    panel width you chose survives shrinking and re-growing the window.
 - **Leg 7 was corrected before the run, not during it.** The report was written at `310d397`, one
   commit before `e208776` reversed §2.1, so leg 7 still read *"the monitors visibly grow as sections
   collapse. (The whole point.)"* — the behaviour the reversal deliberately removed. Running it as
