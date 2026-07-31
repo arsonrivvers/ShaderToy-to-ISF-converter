@@ -900,8 +900,9 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ## Task 6: Collapse the deck strips and the master strip
 
 **Files:**
-- Modify: `App/ARShader/InstrumentView.swift` (`DeckStripView.body` lines 23-80; `masterStrip`
-  lines 154-167)
+- Modify: `App/ARShader/InstrumentView.swift` — the DeckStripView body block at lines 23-80, and
+  the masterStrip block at lines 154-167. (Both live in that one file; there is no separate
+  DeckStripView source file.)
 
 **Interfaces:**
 - Consumes: `CollapsibleSection`, `SectionKey`, `SurfaceLayout`, and the existing
