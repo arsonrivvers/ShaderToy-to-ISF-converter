@@ -11,21 +11,36 @@ final class SurfaceGeometryTests: XCTestCase {
 
     /// Stand-ins for the Metal monitor row and the deck strips: same layout participation, no GPU,
     /// each reporting its own frame.
-    /// The monitor stub carries an intrinsic height, because the real one does: a `MonitorTile`
-    /// derives its height from its 16:9 ratio against the offered width. A bare `Color` has no
-    /// intrinsic height and would collapse to nothing under `fixedSize`, testing a shape the app
-    /// never has.
-    private static let stubMonitorHeight: CGFloat = 300
+    ///
+    /// The monitor stub is height-FLEXIBLE (an ideal height it will exceed if offered more), and
+    /// that is load-bearing rather than incidental. It used to be a rigid `.frame(height: 300)`,
+    /// which reports its own height to the `GeometryReader` no matter what the parent proposes —
+    /// so both assertions in `testTheMonitorStripDoesNotResizeWhenTheStripsBelowItChange` were true
+    /// by construction of the STUB, and the test stayed green even when the production code was
+    /// restored to the flexible row the operator rejected. Verified by the phase 3a branch review,
+    /// which measured the reverted production code passing the test unchanged.
+    ///
+    /// A rigid stub can only ever prove the stub is rigid. To detect a flexible monitor row, the
+    /// stub has to be something a flexible row would visibly stretch.
+    private static let stubMonitorIdealHeight: CGFloat = 160
 
     private func stubSurface(layout: SurfaceLayout, stripHeight: CGFloat) -> some View {
         InstrumentSurface(layout: layout) {
             Color.gray.measured("panel", in: Self.space)
         } monitors: {
-            Color.blue.frame(height: Self.stubMonitorHeight).measured("monitors", in: Self.space)
+            Color.blue
+                .frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
+                .measured("monitors", in: Self.space)
         } strips: {
-            Color.green.frame(height: stripHeight).measured("strips", in: Self.space)
+            // The 620pt minimum is production's (`deckStrips`), and the stub must carry it: without
+            // it the strips compress instead of pushing, the surface never overflows, and
+            // testTheMixerStripFitsAtTheWindowsDeclaredMinimum passes for the wrong reason —
+            // caught by mutating the window minimum back to 1100 and seeing it stay green.
+            Color.green
+                .frame(minWidth: SurfaceMetrics.stripsMinWidth, minHeight: stripHeight)
+                .measured("strips", in: Self.space)
         } mixer: {
-            Color.red.frame(width: 200).measured("mixer", in: Self.space)
+            Color.red.frame(width: SurfaceMetrics.mixerWidth).measured("mixer", in: Self.space)
         }
     }
 
@@ -49,8 +64,10 @@ final class SurfaceGeometryTests: XCTestCase {
 
         XCTAssertEqual(shortMonitors, tallMonitors, accuracy: 0.5,
                        "A 480pt change below the monitor strip must not move it by even a point")
-        XCTAssertEqual(tallMonitors, Self.stubMonitorHeight, accuracy: 0.5,
-                       "The strip takes its height from its content, not from what is left over")
+        XCTAssertEqual(tallMonitors, Self.stubMonitorIdealHeight, accuracy: 0.5,
+                       "The strip takes its height from its content, not from what is left over. "
+                       + "The stub is height-flexible on purpose, so a flexible monitor row would "
+                       + "stretch it past its ideal and fail here.")
     }
 
     /// The other half of "doesn't jump": the strip must not MOVE either.
@@ -136,10 +153,59 @@ final class SurfaceGeometryTests: XCTestCase {
 
         let panel = try XCTUnwrap(frames["panel"], "harness reported no frames")
         let monitors = try XCTUnwrap(frames["monitors"])
-        XCTAssertGreaterThanOrEqual(monitors.minX - panel.maxX, 5,
-                                    "A gap of at least the 6pt handle must sit between the panel's "
-                                    + "trailing edge and the content column. A 1pt drag target is "
-                                    + "the same mistake as a 12pt chevron.")
+        XCTAssertGreaterThanOrEqual(monitors.minX - panel.maxX, SurfaceMetrics.resizeHandleWidth,
+                                    "A gap of at least the full handle width must sit between the "
+                                    + "panel's trailing edge and the content column. A 1pt drag "
+                                    + "target is the same mistake as a 12pt chevron. Asserted "
+                                    + "against the production constant, not a hand-copied number "
+                                    + "one point below it.")
+    }
+
+    /// The window's declared minimum must actually fit the surface it declares a minimum for.
+    ///
+    /// `minWidth` was 1100 from master and was never raised when this phase added a 44pt rail and
+    /// a 6pt resize handle. With a panel open at its 280pt default the surface needs 1152, so at
+    /// the app's OWN stated minimum the mixer strip — BLACKOUT, SHOW MODE, the OUTPUT destination
+    /// picker — was drawn 52pt outside the window, with no scroll and no clip indicator. The smoke
+    /// legs all passed because they ran on a laptop plus an external display at generous sizes.
+    ///
+    /// This is the assertion the deferred `measured("mixer")` should always have carried: it was
+    /// reported by the stub and never asserted, so it could not catch anything.
+    func testTheMixerStripFitsAtTheWindowsDeclaredMinimum() throws {
+        let layout = SurfaceLayout()
+        layout.select(panel: .library)          // the panel open is the widest legal case
+
+        let minimum = CGSize(width: SurfaceMetrics.minWindowWidth,
+                             height: SurfaceMetrics.minWindowHeight)
+        let frames = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300), size: minimum)
+
+        let mixer = try XCTUnwrap(frames["mixer"], "harness reported no frames")
+        XCTAssertLessThanOrEqual(
+            mixer.maxX, SurfaceMetrics.minWindowWidth + 0.5,
+            "At the app's own minimum window width, with a panel open, the mixer strip is drawn "
+            + "off-window. That strip holds the panic controls, so this is not a cosmetic clip.")
+    }
+
+    /// `SurfaceLayout.reservedSurfaceWidth` is a hardcoded number standing in for a sum of regions.
+    /// If a region changes width and the number does not, the panel ceiling silently stops
+    /// protecting the mixer strip — the exact defect this pair was written to close.
+    func testTheReservedWidthMatchesTheRegionsItClaimsToCover() {
+        XCTAssertEqual(Double(SurfaceMetrics.reservedWidth),
+                       SurfaceLayout.reservedSurfaceWidth, accuracy: 0.001,
+                       "SurfaceLayout.reservedSurfaceWidth must equal the sum of the regions in "
+                       + "SurfaceMetrics. One of them changed without the other.")
+    }
+
+    /// The ceiling has to leave the default panel intact at the minimum window, or the app ships a
+    /// window size at which opening a panel instantly narrows it.
+    func testTheDefaultPanelStillFitsAtTheMinimumWindowWidth() {
+        let ceiling = SurfaceLayout.panelWidthCeiling(
+            inSurfaceOfWidth: Double(SurfaceMetrics.minWindowWidth))
+        XCTAssertGreaterThanOrEqual(ceiling, Arrangement.default.panelWidth,
+                                    "At the minimum window size the ceiling must still allow the "
+                                    + "default panel width, or a fresh launch resized to minimum "
+                                    + "would shrink the panel the operator never touched.")
     }
 
     // MARK: PNG baselines
@@ -160,13 +226,16 @@ final class SurfaceGeometryTests: XCTestCase {
         InstrumentSurface(layout: layout) {
             Color.gray
         } monitors: {
-            Color.blue.frame(height: Self.stubMonitorHeight)
+            // Rigid on purpose, unlike the geometry stub: a baseline wants a stable image, and
+            // this stub's job is to make show mode VISIBLE (via the section below), not to detect
+            // a flexible monitor row — that is the geometry gate's job.
+            Color.blue.frame(height: 300)
         } strips: {
             CollapsibleSection(title: "FX", summary: "3", key: .masterFX, layout: layout) {
                 VStack { ForEach(0..<5, id: \.self) { _ in Slider(value: .constant(0.5)) } }
             }
         } mixer: {
-            Color.red.frame(width: 200)
+            Color.red.frame(width: SurfaceMetrics.mixerWidth)
         }
     }
 

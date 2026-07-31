@@ -22,6 +22,22 @@ enum PanelID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .settings: return "Settings"
         }
     }
+
+    /// The digit in this panel's `⌘⌥N` shortcut, or nil past the ninth panel.
+    ///
+    /// One source for both the shortcut and the tooltip that advertises it. They were two
+    /// independent `index + 1` expressions in two files with nothing tying them together, so a
+    /// reordered `allCases` would have silently made every tooltip a lie.
+    ///
+    /// Optional rather than an `Int`, because the shortcut was built as
+    /// `Character("\(index + 1)")` and `Character.init` requires exactly one grapheme cluster —
+    /// at the tenth panel that is `Character("10")`, which traps at first render, i.e. at launch.
+    /// The rail's whole stated premise is that a later phase adds a tool by adding one case here;
+    /// case ten must not be a crash.
+    var shortcutNumber: Int? {
+        guard let index = Self.allCases.firstIndex(of: self), index < 9 else { return nil }
+        return index + 1
+    }
 }
 
 /// The collapsible sections of a deck strip. Configuration only — see the spec's §2.3 rule.
@@ -71,6 +87,31 @@ struct Arrangement: Codable, Equatable, Sendable {
 final class SurfaceLayout: ObservableObject {
     /// The panel never narrows past this, however far the divider is dragged.
     static let minPanelWidth: Double = 260
+
+    /// Absolute ceiling, applied when no window width is available to clamp against.
+    ///
+    /// Exists so that *forgetting* to pass a width cannot reintroduce an unbounded panel. A caller
+    /// that knows the window gets the real clamp; one that does not still gets a bound.
+    static let maxPanelWidth: Double = 900
+
+    /// The fixed width the panel shares its window with: the rail, two dividers, the resize handle,
+    /// the deck strips' own minimum, and the mixer strip.
+    ///
+    /// A fraction of the window would NOT be a correct ceiling — at the minimum window size, half
+    /// the width still starves the strips' 620pt minimum and pushes the mixer out. The bound the
+    /// operator actually needs is "everything else still fits", which is this subtraction.
+    /// `SurfaceMetrics` owns the parts; `testTheReservedWidthMatchesTheRegionsItClaimsToCover`
+    /// fails if the two ever drift apart.
+    static let reservedSurfaceWidth: Double = 872
+
+    /// The widest the panel may be drawn in a surface of `surfaceWidth`.
+    ///
+    /// The floor outranks the ceiling: on a window too narrow for both, the panel keeps its floor
+    /// and the window's own declared minimum is what guarantees the rest still fits.
+    static func panelWidthCeiling(inSurfaceOfWidth surfaceWidth: Double) -> Double {
+        guard surfaceWidth.isFinite else { return maxPanelWidth }
+        return max(minPanelWidth, min(surfaceWidth - reservedSurfaceWidth, maxPanelWidth))
+    }
 
     @Published private(set) var openPanel: PanelID?
     @Published private(set) var panelWidth: Double
@@ -123,13 +164,41 @@ final class SurfaceLayout: ObservableObject {
         endShowModeOverride()
     }
 
-    /// Clamped here rather than in the drag handler: the floor is a property of the layout, and a
-    /// view-local clamp would let a future second call site write a 40pt panel.
+    /// Clamped here rather than in the drag handler: the bounds are a property of the layout, and a
+    /// view-local clamp would let a future second call site write a 40pt — or a 4000pt — panel.
+    ///
+    /// `availableWidth` is the width of the surface the panel sits in. Pass it whenever it is
+    /// known; the default exists only so a caller without geometry still gets `maxPanelWidth`
+    /// rather than no ceiling at all.
+    ///
+    /// This originally clamped the floor only. `DragGesture` keeps reporting locations after the
+    /// pointer leaves the window, so dragging the handle right and releasing could make the panel
+    /// wider than the window — pushing the deck strips and the entire mixer strip off-screen,
+    /// taking BLACKOUT, SHOW MODE and the OUTPUT destination picker with them. The resize handle
+    /// went off-window too, so the mouse could not undo it, and `.onChange` persisted the result
+    /// 300ms later, so it survived a relaunch. Found at the phase 3a branch review, 2026-07-31.
     ///
     /// Resizing is NOT a show-mode-ending action — it is a continuous adjustment of a panel that
     /// show mode has already closed, so the case cannot arise.
-    func setPanelWidth(_ width: Double) {
-        panelWidth = max(Self.minPanelWidth, width)
+    func setPanelWidth(_ width: Double, availableWidth: Double = .infinity) {
+        // A non-finite width is not a narrow or wide panel, it is a broken one. Rejected outright
+        // rather than clamped: `.infinity` survives `max()` unchanged, and an infinite panelWidth
+        // makes the whole Arrangement unencodable — which `SurfaceLayoutStore.save()` swallows,
+        // silently ending persistence for the session with no symptom until the next launch.
+        guard width.isFinite else { return }
+        let ceiling = Self.panelWidthCeiling(inSurfaceOfWidth: availableWidth)
+        panelWidth = min(max(Self.minPanelWidth, width), ceiling)
+    }
+
+    /// The width the panel should be DRAWN at right now, which is not always the width the operator
+    /// asked for.
+    ///
+    /// Clamping only at drag time leaves the other door open: drag the panel wide on a large
+    /// window, then make the window small, and the stored width once again covers the mixer strip.
+    /// The stored preference is deliberately NOT rewritten — shrinking the window and growing it
+    /// back restores the panel the operator chose, rather than silently keeping the shrunken one.
+    func drawnPanelWidth(inSurfaceOfWidth surfaceWidth: Double) -> Double {
+        min(panelWidth, Self.panelWidthCeiling(inSurfaceOfWidth: surfaceWidth))
     }
 
     // MARK: Show mode

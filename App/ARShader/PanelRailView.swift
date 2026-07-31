@@ -14,7 +14,7 @@ struct PanelRailView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(Array(PanelID.allCases.enumerated()), id: \.element) { index, panel in
+            ForEach(PanelID.allCases) { panel in
                 Button { layout.select(panel: panel) } label: {
                     Image(systemName: panel.systemImage)
                         .font(.system(size: 15))
@@ -25,7 +25,7 @@ struct PanelRailView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("\(panel.title) (⌘⌥\(index + 1))")
+                .help(panel.shortcutNumber.map { "\(panel.title) (⌘⌥\($0))" } ?? panel.title)
             }
             Spacer()
         }

@@ -175,7 +175,7 @@ struct InstrumentView: View {
         } strips: {
             deckStrips
         } mixer: {
-            mixerStrip.frame(width: 200)
+            mixerStrip.frame(width: SurfaceMetrics.mixerWidth)
         }
         .background(shortcuts)
         // Single-parameter form: the project's deployment target is macOS 13, and the
@@ -241,9 +241,12 @@ struct InstrumentView: View {
         ZStack {
             Button("") { layout.toggleShowMode() }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
-            ForEach(Array(PanelID.allCases.enumerated()), id: \.element) { index, panel in
+            // Only panels that HAVE a shortcut digit get a button. Past the ninth there is no
+            // single-character key equivalent to bind, and the old `Character("\(index + 1)")`
+            // trapped at launch rather than degrading — see PanelID.shortcutNumber.
+            ForEach(PanelID.allCases.filter { $0.shortcutNumber != nil }) { panel in
                 Button("") { layout.select(panel: panel) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")),
+                    .keyboardShortcut(KeyEquivalent(Character("\(panel.shortcutNumber!)")),
                                       modifiers: [.command, .option])
             }
         }
@@ -300,7 +303,7 @@ struct InstrumentView: View {
             }
             masterStrip
         }
-        .frame(minWidth: 620)
+        .frame(minWidth: SurfaceMetrics.stripsMinWidth)
     }
 
     /// The master FX chain reads exactly like a deck chain — one mental model for both.

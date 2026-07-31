@@ -20,7 +20,6 @@ final class Instrument: ObservableObject {
     let elementStats = ElementStatsModel()
     /// Panel, section and show-mode state. Restored from the last launch.
     let surfaceLayout: SurfaceLayout
-    private let surfaceStore = SurfaceLayoutStore()
 
     init() {
         self.surfaceLayout = SurfaceLayout(SurfaceLayoutStore().load())

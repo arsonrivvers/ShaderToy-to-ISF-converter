@@ -12,6 +12,55 @@ private struct PanelLeadingEdgeKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+/// Carries the surface's own width down to the resize handle, so the panel can be clamped against
+/// the window it is actually in rather than against a fixed guess.
+private struct SurfaceWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Fixed metrics of the instrument surface.
+///
+/// A non-generic home because `InstrumentSurface` is generic over its four content slots, and Swift
+/// has no stored static properties in generic types — the same reason `coordinateSpace` below is
+/// computed rather than stored.
+///
+/// These were literals scattered across three files until the phase 3a branch review found that the
+/// window's declared minimum had never been raised for the rail and handle this phase added, so at
+/// the app's own minimum width the mixer strip was drawn 52pt outside the window.
+enum SurfaceMetrics {
+    /// Rendered thickness of a macOS `Divider()`. Two sit in the surface: after the rail, and
+    /// before the mixer strip.
+    static let dividerWidth: CGFloat = 1
+    static let dividerCount: CGFloat = 2
+
+    /// The grab strip standing in for the panel's trailing divider. Present only while a panel is
+    /// open, which is also the only time the panel competes for width.
+    static let resizeHandleWidth: CGFloat = 6
+
+    /// The deck strips' own minimum. Below this they clip rather than shrink.
+    static let stripsMinWidth: CGFloat = 620
+
+    /// The mixer strip — BLACKOUT, SHOW MODE, the crossfader and the OUTPUT destination picker.
+    /// Fixed width, and never a region anything else may cover.
+    static let mixerWidth: CGFloat = 200
+
+    /// Everything the panel shares the window with, at the panel's widest legal moment.
+    static var reservedWidth: CGFloat {
+        PanelRailView.width + dividerWidth * dividerCount + resizeHandleWidth
+            + stripsMinWidth + mixerWidth
+    }
+
+    /// The window's declared minimum, sized so that every region above fits WITH a panel open at
+    /// the default 280pt width, plus slack for divider-thickness variation.
+    ///
+    /// Was 1100 through master, which predates the rail and the handle. `reservedWidth` (872) plus
+    /// the 280pt default panel is 1152, so 1100 clipped the mixer strip by 52pt at the app's own
+    /// stated minimum — with no scroll and no clip indicator.
+    static let minWindowWidth: CGFloat = 1180
+    static let minWindowHeight: CGFloat = 720
+}
+
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
 /// content column split into a flexible monitor row over a content-sized deck-strip row.
 ///
@@ -36,6 +85,11 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
     /// which would leave the resize cursor stuck for the rest of the session.
     @State private var isResizeCursorPushed = false
 
+    /// The surface's own width, in points. Read by the resize handle so a drag is clamped against
+    /// the real window rather than an assumed one. Zero until the first preference lands, which the
+    /// drag handler treats as "unknown" rather than as a zero-width window.
+    @State private var surfaceWidth: CGFloat = 0
+
     // No monitor-height floor: the strip is content-sized, so its height comes from the tiles'
     // aspect ratio and nothing below it can squeeze it. A floor existed while the row was
     // flexible; it went with that design.
@@ -51,7 +105,11 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
 
             if layout.openPanel != nil {
                 panel()
-                    .frame(width: CGFloat(layout.panelWidth))
+                    // The DRAWN width, not the stored one: the window can be shrunk after the
+                    // drag, and a stored width that no longer fits must not push the mixer strip
+                    // off-screen. The operator's preference is kept, not rewritten.
+                    .frame(width: CGFloat(layout.drawnPanelWidth(
+                        inSurfaceOfWidth: surfaceWidth > 0 ? Double(surfaceWidth) : .infinity)))
                     .frame(minWidth: CGFloat(SurfaceLayout.minPanelWidth))
                     .accessibilityIdentifier("surface.panel")
                     .background(
@@ -96,8 +154,13 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
             mixer()
         }
         .coordinateSpace(name: Self.coordinateSpace)
-        .background(Color.black)
+        .background(
+            GeometryReader { proxy in
+                Color.black.preference(key: SurfaceWidthKey.self, value: proxy.size.width)
+            }
+        )
         .onPreferenceChange(PanelLeadingEdgeKey.self) { panelLeadingEdge = $0 }
+        .onPreferenceChange(SurfaceWidthKey.self) { surfaceWidth = $0 }
     }
 
     /// A 6pt grab strip standing in for the panel's trailing divider.
@@ -108,7 +171,7 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
     private var panelResizeHandle: some View {
         Rectangle()
             .fill(Color.clear)   // genuinely invisible; contentShape below is what makes it hit-testable
-            .frame(width: 6)
+            .frame(width: SurfaceMetrics.resizeHandleWidth)
             .overlay(Divider(), alignment: .center)
             .contentShape(Rectangle())
             .accessibilityIdentifier("surface.panelResizeHandle")
@@ -141,7 +204,13 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
                         // panel's MEASURED leading edge (not an assumed rail-width + divider-width
                         // constant), is the intended width. Accumulating deltas drifts when a frame
                         // is dropped mid-drag.
-                        layout.setPanelWidth(Double(value.location.x) - Double(panelLeadingEdge))
+                        // Clamped against the surface's real width so a drag past the window edge
+                        // cannot hand the panel the whole window. `surfaceWidth` is 0 until the
+                        // first preference lands; that is "unknown", not "zero-width", so it falls
+                        // back to the model's absolute ceiling rather than pinning to the floor.
+                        layout.setPanelWidth(
+                            Double(value.location.x) - Double(panelLeadingEdge),
+                            availableWidth: surfaceWidth > 0 ? Double(surfaceWidth) : .infinity)
                     }
             )
     }
