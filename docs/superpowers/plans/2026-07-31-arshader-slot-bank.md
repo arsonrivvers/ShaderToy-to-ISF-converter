@@ -208,10 +208,15 @@ final class SlotBankTests: XCTestCase {
     }
 
     func testRecallReturnsTheCapturedValuesIntact() throws {
+        // Uses a REAL file: recall() returns nil for an unavailable slot by design, so a preset
+        // pointing at a path nothing creates would make this test fail for the wrong reason.
         let bank = SlotBank()
-        bank.capture(preset(speed: 0.9), into: 2)
+        bank.capture(Preset.capturing(url: try realFileURL(),
+                                      snapshot: ParamSnapshot(params: ["speed": .float(0.9)])),
+                     into: 2)
         let got = try XCTUnwrap(bank.recall(2))
-        XCTAssertEqual(got.snapshot.params["speed"], .float(0.9))
+        XCTAssertEqual(got.snapshot.params["speed"], .float(0.9),
+                       "The dialled values must survive capture and come back on recall")
     }
 
     func testClearEmptiesOneSlotAndLeavesItsNeighboursAlone() {
@@ -348,7 +353,7 @@ final class SlotBank: ObservableObject {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Expected: PASS, 12 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Mutation-prove the two rules that protect the operator**
 
@@ -365,7 +370,7 @@ git add App/ARShader/SlotBank.swift App/ARShaderTests/SlotBankTests.swift
 git commit -m "feat(3b): SlotBank — eight slots, no view and no Instrument in sight"
 ```
 
-Expected ARShader count: **222**.
+Expected ARShader count: **221**.
 
 ---
 
@@ -507,7 +512,7 @@ git add App/ARShader/SlotBankStore.swift App/ARShaderTests/SlotBankStoreTests.sw
 git commit -m "feat(3b): SlotBankStore — one blob, and it never blocks launch"
 ```
 
-Expected ARShader count: **226**.
+Expected ARShader count: **225**.
 
 ---
 
@@ -609,7 +614,7 @@ reversed — the library truncates names in the middle precisely because long
 AR_Genuary names differ at the end."
 ```
 
-Expected ARShader count: **228**.
+Expected ARShader count: **227**.
 
 ---
 
@@ -836,7 +841,7 @@ Not a pure lift. onCompileFinished is single-owner and the FX path already
 claims it, so load() owns the composition and clears the one-shot after firing."
 ```
 
-Expected ARShader count: **236**.
+Expected ARShader count: **235**.
 
 ---
 
@@ -922,7 +927,7 @@ git add App/ARShader/SurfaceLayout.swift App/ARShader/SlotBankPanelView.swift Ap
 git commit -m "feat(3b): the bank is the third rail panel — one enum case, as advertised"
 ```
 
-Expected ARShader count: **238**.
+Expected ARShader count: **237**.
 
 ---
 
@@ -1077,7 +1082,7 @@ Update `InstrumentView.panelContent`:
 
 - [ ] **Step 2: Build and run the full suite**
 
-Expected: 238 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
+Expected: 237 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
 
 - [ ] **Step 3: Verify the safety property by inspection**
 
@@ -1105,7 +1110,7 @@ xcodebuild test -project App/TrueISFEditor.xcodeproj -scheme TrueISFEditor -deri
 swift test --package-path ShadertoyISFKit --scratch-path /tmp/stkit-build-bank
 ```
 
-Expected: ARShader **238**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
+Expected: ARShader **237**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
 
 - [ ] **Step 2: Write the smoke report with legs UNRUN**
 
