@@ -263,7 +263,7 @@ struct InstrumentView: View {
         case .settings:
             SettingsPanelView(instrument: instrument)
         case .bank:
-            SlotBankPanelView(instrument: instrument)
+            SlotBankPanelView(instrument: instrument, target: $libraryTarget)
         case nil:
             EmptyView()
         }
