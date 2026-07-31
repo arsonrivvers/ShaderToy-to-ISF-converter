@@ -733,7 +733,9 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
             if layout.openPanel != nil {
                 panel()
                     .frame(width: CGFloat(layout.panelWidth))
-                    .frame(minWidth: Self.minPanelWidth)
+                    // The floor lives on SurfaceLayout, where the width is written — NOT a static
+                    // on this view. One source of truth; see setPanelWidth.
+                    .frame(minWidth: CGFloat(SurfaceLayout.minPanelWidth))
                 Divider()
             }
 
