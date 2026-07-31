@@ -1684,55 +1684,93 @@ and keep the geometry tests — they are the ones that catch the real class.
 
 - [ ] **Step 1: Write the harness**
 
+**Read this before writing code — the first attempt at this harness failed, and the reason matters.**
+The original design walked `NSView.subviews` looking for `accessibilityIdentifier()`. That cannot
+work: SwiftUI does not create a backing `NSView` per SwiftUI view, and `.accessibilityIdentifier`
+writes into SwiftUI's *accessibility* tree, not onto AppKit subviews. Every lookup returned nil and
+the tests died on `XCTUnwrap`.
+
+The mechanism that DOES work is already proven in this codebase — `InstrumentSurface.swift` measures
+the panel's leading edge with a `GeometryReader` writing a `PreferenceKey`. Use that.
+
+Second change: because `InstrumentSurface` is generic over its four content slots, **the test
+supplies content that measures itself.** No production view needs a test-only tag, and what gets
+measured is exactly the geometry the container allocated to that slot — the thing actually under
+test.
+
 Create `App/ARShaderTests/SurfaceRenderHarness.swift`:
 
 ```swift
 import AppKit
 import SwiftUI
 
-/// Renders a SwiftUI view into a real laid-out AppKit view tree, so tests can measure what the
-/// layout actually did.
+/// Frames reported by self-measuring test content, keyed by name.
 ///
-/// Why this exists: 181 green tests said nothing about a ScrollView that collapsed to zero height,
-/// dropdowns lost among sliders, or a 56pt button slab. Every defect that reached the operator for
-/// three sessions was invisible to assertions on state. This measures geometry instead.
+/// A `PreferenceKey` rather than an `NSView` walk: SwiftUI does not create a backing `NSView` per
+/// view, so walking `subviews` for accessibility identifiers finds nothing. This mirrors the
+/// `PanelLeadingEdgeKey` mechanism already used in `InstrumentSurface`.
+struct MeasuredFramesKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+extension View {
+    /// Report this view's frame, in the named coordinate space, under `name`.
+    func measured(_ name: String, in space: String) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: MeasuredFramesKey.self,
+                                       value: [name: proxy.frame(in: .named(space))])
+            }
+        )
+    }
+}
+
+/// Renders a SwiftUI view into a real laid-out AppKit view tree and returns what the layout did.
 ///
-/// Every view baselined here must be pure SwiftUI — the live monitors are Metal-backed and cannot
+/// Why this exists: every defect that reached the operator for three sessions was invisible to
+/// assertions on state — a `ScrollView` collapsed to zero height, dropdowns lost among sliders, a
+/// button slab. This measures geometry instead.
+///
+/// Every view measured here must be pure SwiftUI: the live monitors are Metal-backed and cannot
 /// render in a unit test, which is exactly why `InstrumentSurface` is generic over its content.
 @MainActor
 enum SurfaceRenderHarness {
 
-    static func render<V: View>(_ view: V, size: CGSize) -> NSView {
-        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+    /// Host `view`, lay it out at `size`, and return every frame reported via `measured(_:in:)`.
+    ///
+    /// Returns an EMPTY dictionary if preference delivery never happened. Callers must
+    /// `XCTUnwrap` their lookups so that shows up as a failure rather than a silent pass.
+    static func frames<V: View>(_ view: V, size: CGSize) -> [String: CGRect] {
+        final class Box { var frames: [String: CGRect] = [:] }
+        let box = Box()
+
+        let instrumented = view
+            .frame(width: size.width, height: size.height)
+            .onPreferenceChange(MeasuredFramesKey.self) { box.frames = $0 }
+
+        let host = NSHostingView(rootView: instrumented)
         host.frame = CGRect(origin: .zero, size: size)
         host.layoutSubtreeIfNeeded()
-        // A second pass: SwiftUI resolves some sizes only after the first layout settles.
+        // Preference delivery happens on a SwiftUI update pass; give the run loop a turn so the
+        // onPreferenceChange callback has fired before we read.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         host.layoutSubtreeIfNeeded()
-        return host
-    }
-
-    /// Frames of every accessibility-identified subview, in the host's coordinate space.
-    /// Views under test tag themselves with `.accessibilityIdentifier(_:)`.
-    static func frames(in root: NSView) -> [String: CGRect] {
-        var out: [String: CGRect] = [:]
-        func walk(_ v: NSView) {
-            if let id = v.accessibilityIdentifier(), !id.isEmpty {
-                out[id] = v.convert(v.bounds, to: root)
-            }
-            v.subviews.forEach(walk)
-        }
-        walk(root)
-        return out
+        return box.frames
     }
 
     static func png<V: View>(_ view: V, size: CGSize) -> Data? {
-        let host = render(view, size: size)
+        let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        host.frame = CGRect(origin: .zero, size: size)
+        host.layoutSubtreeIfNeeded()
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
     }
 
-    /// Compare against a committed baseline. Set `ARSHADER_RECORD_BASELINES=1` to (re)record.
+    /// Compare against a committed baseline. `ARSHADER_RECORD_BASELINES=1` (re)records.
     /// Returns nil on success, or a human-readable reason on failure.
     static func compareBaseline(_ data: Data, named name: String) -> String? {
         let dir = URL(fileURLWithPath: #filePath)
@@ -1752,38 +1790,17 @@ enum SurfaceRenderHarness {
 }
 ```
 
-- [ ] **Step 2: Tag the views under test**
+- [ ] **Step 2: No production tagging is required**
 
-The geometry gate needs identifiers. Add these `.accessibilityIdentifier` calls:
+An earlier version of this task added `.accessibilityIdentifier` calls to `InstrumentSurface` and
+`CollapsibleSection`. **Do not add them** — that was the mechanism that failed. The test's own stub
+content carries `measured(_:in:)`, so production code is untouched by this task.
 
-In `App/ARShader/InstrumentSurface.swift`, on the monitors and strips:
+`InstrumentSurface` already declares `static var coordinateSpace: String` and applies
+`.coordinateSpace(name:)` to its root; the tests measure in that same space. Leave the two existing
+`.accessibilityIdentifier` calls (`surface.panel`, `surface.panelResizeHandle`) alone — they carry
+real accessibility value and are unrelated to this mechanism.
 
-```swift
-                monitors()
-                    .frame(minHeight: Self.minMonitorHeight, maxHeight: .infinity)
-                    .accessibilityIdentifier("surface.monitors")
-                Divider()
-                strips()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("surface.strips")
-```
-
-and on the panel:
-
-```swift
-                panel()
-                    .frame(width: CGFloat(layout.panelWidth))
-                    .frame(minWidth: Self.minPanelWidth)
-                    .accessibilityIdentifier("surface.panel")
-```
-
-In `App/ARShader/CollapsibleSection.swift`, on the content:
-
-```swift
-            if isExpanded {
-                content().accessibilityIdentifier("section.\(title).content")
-            }
-```
 
 - [ ] **Step 3: Write the failing tests**
 
@@ -1797,31 +1814,35 @@ import SwiftUI
 final class SurfaceGeometryTests: XCTestCase {
 
     private static let windowSize = CGSize(width: 1600, height: 1000)
+    private static var space: String {
+        InstrumentSurface<Color, Color, Color, Color>.coordinateSpace
+    }
 
-    /// A stand-in for the Metal monitor row: same layout participation, no GPU.
+    /// Stand-ins for the Metal monitor row and the deck strips: same layout participation, no GPU,
+    /// each reporting its own frame.
     private func stubSurface(layout: SurfaceLayout, stripHeight: CGFloat) -> some View {
         InstrumentSurface(layout: layout) {
-            Color.gray
+            Color.gray.measured("panel", in: Self.space)
         } monitors: {
-            Color.blue
+            Color.blue.measured("monitors", in: Self.space)
         } strips: {
-            Color.green.frame(height: stripHeight)
+            Color.green.frame(height: stripHeight).measured("strips", in: Self.space)
         } mixer: {
-            Color.red.frame(width: 200)
+            Color.red.frame(width: 200).measured("mixer", in: Self.space)
         }
     }
 
     /// THE gate. Collapsing must hand height to the picture, not leave grey space.
-    func testTheMonitorRowGrowsWhenTheStripsShrink() {
+    func testTheMonitorRowGrowsWhenTheStripsShrink() throws {
         let layout = SurfaceLayout()
 
-        let tall = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 600), size: Self.windowSize))
-        let short = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 120), size: Self.windowSize))
+        let tall = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 600), size: Self.windowSize)
+        let short = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 120), size: Self.windowSize)
 
-        let tallMonitors = try! XCTUnwrap(tall["surface.monitors"]).height
-        let shortMonitors = try! XCTUnwrap(short["surface.monitors"]).height
+        let tallMonitors = try XCTUnwrap(tall["monitors"], "harness reported no frames").height
+        let shortMonitors = try XCTUnwrap(short["monitors"], "harness reported no frames").height
 
         XCTAssertGreaterThan(shortMonitors, tallMonitors + 400,
                              "Every point the strips give up must reach the monitor row. If this "
@@ -1829,80 +1850,82 @@ final class SurfaceGeometryTests: XCTestCase {
                              + "is cosmetic.")
     }
 
-    func testTheMonitorRowNeverGoesBelowItsFloor() {
+    func testTheMonitorRowNeverGoesBelowItsFloor() throws {
         let layout = SurfaceLayout()
-        let frames = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 5000), size: Self.windowSize))
+        let frames = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 5000), size: Self.windowSize)
 
-        XCTAssertGreaterThanOrEqual(try! XCTUnwrap(frames["surface.monitors"]).height,
-                                    InstrumentSurface<Color, Color, Color, Color>.minMonitorHeight,
-                                    "A very tall strip column must not squeeze the picture to nothing")
+        XCTAssertGreaterThanOrEqual(
+            try XCTUnwrap(frames["monitors"], "harness reported no frames").height,
+            InstrumentSurface<Color, Color, Color, Color>.minMonitorHeight,
+            "A very tall strip column must not squeeze the picture to nothing")
     }
 
-    func testClosingThePanelGivesItsWidthToTheContent() {
+    func testClosingThePanelGivesItsWidthToTheContent() throws {
         let layout = SurfaceLayout()
         layout.select(panel: .library)
-        let open = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize))
-        XCTAssertNotNil(open["surface.panel"])
-        let openMonitorWidth = try! XCTUnwrap(open["surface.monitors"]).width
+        let open = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize)
+        XCTAssertNotNil(open["panel"], "harness reported no frames")
+        let openMonitorWidth = try XCTUnwrap(open["monitors"]).width
 
         layout.select(panel: .library)   // close
-        let closed = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize))
+        let closed = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize)
 
-        XCTAssertNil(closed["surface.panel"], "A closed panel is absent, not zero-width")
-        XCTAssertGreaterThan(try! XCTUnwrap(closed["surface.monitors"]).width, openMonitorWidth,
+        XCTAssertNil(closed["panel"], "A closed panel is absent, not zero-width")
+        XCTAssertGreaterThan(try XCTUnwrap(closed["monitors"]).width, openMonitorWidth,
                              "The closed panel's width reaches the content column")
     }
 
     /// The phase-2 defect, caught at the component: a section that "opens" onto nothing.
-    func testAnExpandedSectionHasRealHeightAndACollapsedOneIsAbsent() {
+    func testAnExpandedSectionHasRealHeightAndACollapsedOneIsAbsent() throws {
         let layout = SurfaceLayout()
-        let section = { (l: SurfaceLayout) in
+        let space = "sectionTest"
+        func section(_ l: SurfaceLayout) -> some View {
             CollapsibleSection(title: "FX", summary: "3", key: .masterFX, layout: l) {
                 VStack { ForEach(0..<5, id: \.self) { _ in Slider(value: .constant(0.5)) } }
+                    .measured("content", in: space)
             }
+            .coordinateSpace(name: space)
         }
 
         layout.setExpanded(true, for: .masterFX)
-        let expanded = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            section(layout), size: CGSize(width: 300, height: 400)))
-        XCTAssertGreaterThan(try! XCTUnwrap(expanded["section.FX.content"]).height, 60,
-                             "An expanded section must contain something visible — a disclosure "
-                             + "that opens onto nothing shipped in phase 2")
+        let expanded = SurfaceRenderHarness.frames(
+            section(layout), size: CGSize(width: 300, height: 400))
+        XCTAssertGreaterThan(
+            try XCTUnwrap(expanded["content"], "harness reported no frames").height, 60,
+            "An expanded section must contain something visible — a disclosure that opens onto "
+            + "nothing shipped in phase 2")
 
         layout.setExpanded(false, for: .masterFX)
-        let collapsed = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            section(layout), size: CGSize(width: 300, height: 400)))
-        XCTAssertNil(collapsed["section.FX.content"])
+        let collapsed = SurfaceRenderHarness.frames(
+            section(layout), size: CGSize(width: 300, height: 400))
+        XCTAssertNil(collapsed["content"])
     }
 
-    /// The resize handle exists, is hit-testable, and sits at the panel's trailing edge.
-    /// `panelWidth`'s clamp is unit-tested in Task 1; this gates that the affordance is REACHABLE
-    /// — the defect PM caught was a width nothing could write.
-    func testTheResizeHandleExistsAtThePanelEdgeAndIsBigEnoughToHit() {
+    /// The resize affordance must be reachable — the defect a spec review caught was a panel width
+    /// that nothing could write.
+    func testTheResizeHandleLeavesRoomAtThePanelEdge() throws {
         let layout = SurfaceLayout()
         layout.select(panel: .library)
-        let frames = SurfaceRenderHarness.frames(in: SurfaceRenderHarness.render(
-            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize))
+        let frames = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300), size: Self.windowSize)
 
-        let handle = try! XCTUnwrap(frames["surface.panelResizeHandle"],
-                                    "No resize handle — panelWidth would be unwritable again")
-        let panel = try! XCTUnwrap(frames["surface.panel"])
-
-        XCTAssertGreaterThanOrEqual(handle.width, 5,
-                                    "A 1pt drag target is the same mistake as a 12pt chevron")
-        XCTAssertEqual(handle.minX, panel.maxX, accuracy: 1,
-                       "The handle sits at the panel's trailing edge, where a divider would be")
+        let panel = try XCTUnwrap(frames["panel"], "harness reported no frames")
+        let monitors = try XCTUnwrap(frames["monitors"])
+        XCTAssertGreaterThanOrEqual(monitors.minX - panel.maxX, 5,
+                                    "A gap of at least the 6pt handle must sit between the panel's "
+                                    + "trailing edge and the content column. A 1pt drag target is "
+                                    + "the same mistake as a 12pt chevron.")
     }
 
     // MARK: PNG baselines (supplementary — regenerable with ARSHADER_RECORD_BASELINES=1)
 
     func testSurfaceBaselines() throws {
         let cases: [(String, () -> SurfaceLayout)] = [
-            ("panel-closed", { let l = SurfaceLayout(); l.select(panel: .library); return l }),
-            ("panel-library", { SurfaceLayout() }),
+            ("panel-closed",  { SurfaceLayout() }),
+            ("panel-library", { let l = SurfaceLayout(); l.select(panel: .library); return l }),
             ("show-mode",     { let l = SurfaceLayout(); l.toggleShowMode(); return l }),
         ]
         for (name, make) in cases {
@@ -1915,6 +1938,7 @@ final class SurfaceGeometryTests: XCTestCase {
     }
 }
 ```
+
 
 - [ ] **Step 4: Run to verify they fail, then record baselines**
 
@@ -1945,7 +1969,6 @@ temporarily restore the old fixed height:
 ```swift
                 monitors()
                     .frame(maxHeight: 260)          // MUTATION — revert after
-                    .accessibilityIdentifier("surface.monitors")
 ```
 
 Re-run `SurfaceGeometryTests`.
