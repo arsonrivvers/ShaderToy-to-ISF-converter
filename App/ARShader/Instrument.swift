@@ -18,8 +18,11 @@ final class Instrument: ObservableObject {
     let renderStats = RenderStatsModel()
     /// Per-monitor GPU cost, when metering is on. Fed from the render thread, published on main.
     let elementStats = ElementStatsModel()
+    /// Panel, section and show-mode state. Restored from the last launch.
+    let surfaceLayout: SurfaceLayout
 
     init() {
+        self.surfaceLayout = SurfaceLayout(SurfaceLayoutStore().load())
         // The same shared device/queue the editor uses, so both apps cooperate with one GPU
         // context rather than each minting their own.
         let props = RenderProperties.global()

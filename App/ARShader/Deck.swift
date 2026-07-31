@@ -1,7 +1,7 @@
 import Foundation
 import Metal
 
-enum DeckID: String, CaseIterable, Identifiable, Sendable {
+enum DeckID: String, CaseIterable, Identifiable, Codable, Sendable {
     case one = "1"
     case two = "2"
     var id: String { rawValue }

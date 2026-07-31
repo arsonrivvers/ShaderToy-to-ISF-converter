@@ -236,6 +236,17 @@ struct MonitorTile: View {
                                     + "one frame for the whole instrument.")
                     }
                 }
+                // An outline, because a black tile showing a black frame has no visible bounds at
+                // all — the labels and readouts float in an unbroken field and the operator cannot
+                // tell where one preview ends and the next begins (operator, 2026-07-31, from the
+                // first look at phase 3a). PROGRAM reads brighter: it is what reaches the audience.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(source == .master
+                                      ? Color.white.opacity(0.35)
+                                      : Color.white.opacity(0.15),
+                                      lineWidth: 1)
+                )
             HStack(spacing: 6) {
                 Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button).controlSize(.small)
                 Toggle("Off", isOn: $isOff).toggleStyle(.button).controlSize(.small)

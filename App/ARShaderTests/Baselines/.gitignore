@@ -1,0 +1,4 @@
+# The baseline-recording sentinel is a local, transient switch — never a committed file.
+# Committing it would make every checkout re-record over the baselines and report red.
+# The PNGs in this directory ARE tracked; only this trigger is ignored.
+RECORD

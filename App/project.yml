@@ -192,6 +192,12 @@ targets:
       - path: ARShaderTests/Fixtures
         buildPhase: resources
         type: folder
+      # Committed layout baselines. The tests read these from the SOURCE tree via `#filePath`
+      # (see SurfaceRenderHarness.baselinesDirectory), so this entry is for visibility in Xcode
+      # rather than for lookup — recording must write the copy that gets committed.
+      - path: ARShaderTests/Baselines
+        buildPhase: resources
+        type: folder
       - path: ISFRuntime
       - path: ARShader
         excludes:

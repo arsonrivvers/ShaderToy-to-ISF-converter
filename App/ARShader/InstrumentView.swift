@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One deck's strip: name, opacity (set AND effective), blend mode, and its generated controls.
@@ -17,11 +18,52 @@ struct DeckStripView: View {
     @ObservedObject var fx: FXChain
     @ObservedObject var stats: RenderStatsModel
     @ObservedObject var library: LibraryModel
+    @ObservedObject var layout: SurfaceLayout
+    /// The collapsed SOURCES header prints the current route, and the ROUTER publishes route
+    /// changes — `unit` does not republish when a route changes (see `SourceRoutingView`). Without
+    /// this the summary freezes at whatever it read first, which is precisely the frozen-"—"
+    /// defect documented at the top of this file, reintroduced one level up.
+    @ObservedObject var router: SourceRouter
+
+    init(id: DeckID, unit: ShaderUnit, mixer: MixerState, fx: FXChain, stats: RenderStatsModel,
+         library: LibraryModel, layout: SurfaceLayout) {
+        self.id = id
+        self.unit = unit
+        self.mixer = mixer
+        self.fx = fx
+        self.stats = stats
+        self.library = library
+        self.layout = layout
+        self._router = ObservedObject(wrappedValue: unit.imageSources)
+    }
 
     private var layer: LayerParams? { mixer.layers().first { $0.deck == id } }
 
+    /// Routable image inputs, summarised for the collapsed header. A generator has none and the
+    /// section is not rendered at all.
+    private var sourceRows: [DeckControlModel.ControlRow] {
+        DeckControlModel.rows(for: unit.inputs, reservesPrimaryInput: unit.reservesPrimaryInput)
+            .filter { $0.kind == .routed || $0.kind == .chainFed }
+    }
+
+    private var sourcesSummary: String {
+        // Read through the observed `router`, not `unit.imageSources`: the value is the same
+        // object, but only the observed reference makes this recompute when a route changes.
+        let first = sourceRows.first.map { router.source(for: $0.input.name).displayName }
+        guard let first else { return "" }
+        return sourceRows.count > 1 ? "\(first) +\(sourceRows.count - 1)" : first
+    }
+
+    /// Non-image controls — what ShaderControlsView actually renders.
+    private var parameterCount: Int {
+        DeckControlModel.rows(for: unit.inputs, reservesPrimaryInput: unit.reservesPrimaryInput)
+            .filter { $0.kind != .routed && $0.kind != .chainFed }
+            .count
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // ── Performance controls. These never collapse. ──
             HStack {
                 Text("DECK \(id.displayName)")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -35,11 +77,6 @@ struct DeckStripView: View {
                 .lineLimit(1).truncationMode(.middle)
                 .help(unit.shaderName ?? "No shader loaded")
 
-            // Routing sits with the shader's identity, not among its knobs: it is the first thing
-            // you set on a filter, and it renders nothing at all for a generator.
-            SourceRoutingView(unit: unit, library: library)
-
-            // Both values, always — the fader the operator set AND what it is contributing.
             HStack {
                 Text("Opacity").font(.system(size: 11))
                 Spacer()
@@ -70,10 +107,30 @@ struct DeckStripView: View {
                 }
             }
 
+            // ── Configuration. These collapse. ──
+            // A generator has no image inputs, so the SOURCES section is absent entirely rather
+            // than present-and-empty — same rule SourceRoutingView already follows.
+            if !sourceRows.isEmpty {
+                Divider()
+                CollapsibleSection(title: "SOURCES", summary: sourcesSummary,
+                                   key: .deck(id, .sources), layout: layout) {
+                    // showsHeader: false — the section supplies the title here. The FX-stage call
+                    // site keeps the default and draws its own.
+                    SourceRoutingView(unit: unit, library: library, showsHeader: false)
+                }
+            }
+
             Divider()
-            FXChainView(title: "FX", chain: fx, stats: stats, library: library)
+            CollapsibleSection(title: "FX", summary: "\(fx.stages.count)",
+                               key: .deck(id, .fx), layout: layout) {
+                FXChainView(title: "FX", chain: fx, stats: stats, library: library)
+            }
+
             Divider()
-            ShaderControlsView(unit: unit)
+            CollapsibleSection(title: "PARAMETERS", summary: "\(parameterCount)",
+                               key: .deck(id, .parameters), layout: layout) {
+                ShaderControlsView(unit: unit)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,32 +144,54 @@ struct InstrumentView: View {
     @ObservedObject private var mixer: MixerState
     @ObservedObject private var output: OutputWindowController
     @ObservedObject private var stats: RenderStatsModel
+    @ObservedObject private var layout: SurfaceLayout
+    @ObservedObject private var masterFX: FXChain
     @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
-    @State private var widthField = ""
-    @State private var heightField = ""
     @State private var renderScaleField = ""
     @State private var cueScaleField = ""
+    /// Debounces `Arrangement` persistence. `panelWidth` is part of `Arrangement` and the panel
+    /// resize handle writes it on every drag delta, so saving on every `onChange` would encode
+    /// and hit `UserDefaults` on nearly every frame of a drag. Cancelled and replaced on each
+    /// change; `flushArrangement()` cancels it and saves immediately, so a pending debounce can
+    /// never be the reason the final position is lost.
+    @State private var arrangementPersistTask: Task<Void, Never>?
+    @State private var terminationObserver: NSObjectProtocol?
 
     init(instrument: Instrument) {
         self.instrument = instrument
         self.mixer = instrument.mixer
         self.output = instrument.output
         self.stats = instrument.renderStats
+        self.layout = instrument.surfaceLayout
+        self.masterFX = instrument.renderer.masterFX
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        InstrumentSurface(layout: layout) {
+            panelContent
+        } monitors: {
             monitors
-            Divider()
-            HSplitView {
-                LibraryPanelView(instrument: instrument, target: $libraryTarget)
-                    .frame(minWidth: 260, idealWidth: 300)
-                deckStrips
-                mixerStrip.frame(width: 200)
+        } strips: {
+            deckStrips
+        } mixer: {
+            mixerStrip.frame(width: SurfaceMetrics.mixerWidth)
+        }
+        .background(shortcuts)
+        // Single-parameter form: the project's deployment target is macOS 13, and the
+        // two-parameter `onChange(of:initial:_:)` the brief specified needs macOS 14.
+        //
+        // Debounced, not saved on every call: see `arrangementPersistTask`'s doc comment. A
+        // continuous panel-width drag fires this on nearly every frame; waiting for a short quiet
+        // period coalesces that into roughly one write per drag instead of one per delta.
+        .onChange(of: layout.arrangement) { new in
+            arrangementPersistTask?.cancel()
+            arrangementPersistTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                SurfaceLayoutStore().save(new)
             }
         }
-        .background(Color.black)
         .onAppear {
             if keys == nil {
                 let monitor = BlackoutKeyMonitor(mixer: mixer) {
@@ -121,10 +200,83 @@ struct InstrumentView: View {
                 monitor.start()
                 keys = monitor
             }
+            // Quitting the app (⌘Q, Dock ▸ Quit) does not reliably send this view an
+            // `onDisappear` before the process exits, so the debounce above needs a second flush
+            // path that isn't tied to view teardown. `willTerminateNotification` fires on the main
+            // thread while the app is still alive, ahead of the actual exit.
+            if terminationObserver == nil {
+                terminationObserver = NotificationCenter.default.addObserver(
+                    forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+                ) { _ in
+                    // `queue: .main` guarantees this runs on the main thread; `assumeIsolated`
+                    // bridges that into the `@MainActor` isolation `flushArrangement()` and
+                    // `SurfaceLayout` need, with no `async` hop — a hop here could still be
+                    // sitting unrun in the queue when the process actually exits, which is exactly
+                    // the silent-loss case this observer exists to close.
+                    MainActor.assumeIsolated { flushArrangement() }
+                }
+            }
         }
-        .onDisappear { keys?.stop(); keys = nil }
+        .onDisappear {
+            keys?.stop(); keys = nil
+            if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+            terminationObserver = nil
+            flushArrangement()
+        }
     }
 
+    /// Cancels any pending debounced write and saves the current arrangement synchronously.
+    /// Called on view teardown and on app termination — the two points where a still-pending
+    /// debounce could otherwise silently drop the last change instead of persisting it.
+    private func flushArrangement() {
+        arrangementPersistTask?.cancel()
+        arrangementPersistTask = nil
+        SurfaceLayoutStore().save(layout.arrangement)
+    }
+
+    /// Hidden buttons that exist only to carry keyboard shortcuts. `.keyboardShortcut` needs a
+    /// control; these are the smallest thing that is one. Blackout stays with BlackoutKeyMonitor —
+    /// it must work even when SwiftUI focus is somewhere unhelpful.
+    private var shortcuts: some View {
+        ZStack {
+            Button("") { layout.toggleShowMode() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            // Only panels that HAVE a shortcut digit get a button. Past the ninth there is no
+            // single-character key equivalent to bind, and the old `Character("\(index + 1)")`
+            // trapped at launch rather than degrading — see PanelID.shortcutNumber.
+            ForEach(PanelID.allCases.filter { $0.shortcutNumber != nil }) { panel in
+                Button("") { layout.select(panel: panel) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(panel.shortcutNumber!)")),
+                                      modifiers: [.command, .option])
+            }
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
+    /// Whichever tool the rail has open. Task 7 adds `.settings`.
+    @ViewBuilder private var panelContent: some View {
+        switch layout.openPanel {
+        case .library:
+            LibraryPanelView(instrument: instrument, target: $libraryTarget)
+        case .settings:
+            SettingsPanelView(instrument: instrument)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    /// A / B / PROGRAM left to right — deck, deck, then what they composite into.
+    ///
+    /// This strip is deliberately CONTENT-SIZED, not flexible. Each tile takes its height from the
+    /// available width through its 16:9 ratio, so the strip only changes size when the WINDOW does
+    /// — never when a section is collapsed below it. An earlier version of this phase made the row
+    /// flexible so freed height would go to the picture; on device that meant the previews resized
+    /// every time the operator opened or closed PARAMETERS, and "the windows jump around" was the
+    /// first thing said about it (2026-07-31). A preview that moves when you touch an unrelated
+    /// control is worse than a smaller one that stays put. Collapsing now buys less scrolling in
+    /// the strips, not a bigger picture.
     private var monitors: some View {
         HStack(spacing: 10) {
             MonitorTile(instrument: instrument, source: .deck(.one), label: "DECK A")
@@ -134,20 +286,24 @@ struct InstrumentView: View {
                         drivesClock: true)
         }
         .padding(10)
-        .frame(maxHeight: 260)
     }
 
+    /// `alignment: .top` — the columns hang from the top of the region, they do not float in the
+    /// middle of it. With sections collapsed a centred column left a large empty band between the
+    /// monitor strip and DECK A, and the three columns drifted relative to each other as their
+    /// content changed height (operator, 2026-07-31). Top-aligned, a collapsed column simply gets
+    /// shorter and everything above it stays put.
     private var deckStrips: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
                 DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
                               fx: instrument.deck(id).fx, stats: stats,
-                              library: instrument.library)
+                              library: instrument.library, layout: layout)
                 Divider()
             }
             masterStrip
         }
-        .frame(minWidth: 620)
+        .frame(minWidth: SurfaceMetrics.stripsMinWidth)
     }
 
     /// The master FX chain reads exactly like a deck chain — one mental model for both.
@@ -157,9 +313,11 @@ struct InstrumentView: View {
             Text("Applied to the program feed, before blackout.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             Divider()
-            ScrollView {
-                FXChainView(title: "MASTER FX", chain: instrument.renderer.masterFX, stats: stats,
-                            library: instrument.library)
+            CollapsibleSection(title: "MASTER FX",
+                               summary: "\(masterFX.stages.count)",
+                               key: .masterFX, layout: layout) {
+                FXChainView(title: "MASTER FX", chain: masterFX,
+                            stats: stats, library: instrument.library)
             }
         }
         .padding(10)
@@ -180,12 +338,23 @@ struct InstrumentView: View {
             }
 
             Divider()
-            resolutionPickers
+            scalePickers
             Divider()
             outputPicker
 
             Spacer()
             statsReadout
+
+            Button { layout.toggleShowMode() } label: {
+                Text(layout.showMode ? "SHOW MODE ON" : "SHOW MODE")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: 22)
+            }
+            .buttonStyle(.bordered)
+            .tint(layout.showMode ? .accentColor : .gray)
+            .help("⌘⇧P collapses every section and closes the panel, so the monitors take the "
+                  + "space. Press it again to restore. Touching a section while in show mode "
+                  + "leaves show mode and keeps your change.")
 
             Button {
                 mixer.toggleBlackoutLatch()
@@ -201,56 +370,17 @@ struct InstrumentView: View {
             .tint(mixer.isBlackedOut ? .red : .gray)
             .help("⌘B latches blackout. Hold Escape for a momentary blackout.")
 
-            Text("⌘B latch · hold ESC · ⌘⇧F output")
+            Text("⌘B latch · hold ESC · ⌘⇧F output · ⌘⇧P show")
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .padding(10)
     }
 
-    /// Output resolution drives the master AND what the decks rasterise at while live.
-    /// Cue resolution is what a deck rasterises at while it is NOT on program — the only place
-    /// there is real GPU to save, since monitors merely sample an existing texture.
-    private var resolutionPickers: some View {
+    /// The two scales stay on the strip: these are what gets reached for when the GPU is
+    /// struggling mid-set. Output size and destination moved to the settings panel.
+    private var scalePickers: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text("OUTPUT RES").font(.system(size: 11, weight: .bold, design: .monospaced))
-                Spacer()
-                // Presets are a convenience tucked into a menu, not the vocabulary — typing a size
-                // is the primary control.
-                Menu {
-                    ForEach(RenderSize.presets, id: \.self) { preset in
-                        Button(preset.label) { applyOutput(preset) }
-                    }
-                } label: {
-                    Image(systemName: "list.bullet")
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 22)
-                .help("Common sizes")
-            }
-
-            HStack(spacing: 4) {
-                TextField("W", text: $widthField)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 62)
-                    .onSubmit { commitTypedResolution() }
-                Text("×").foregroundStyle(.secondary)
-                TextField("H", text: $heightField)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 62)
-                    .onSubmit { commitTypedResolution() }
-                Button("Set") { commitTypedResolution() }
-                    .controlSize(.small)
-            }
-            .font(.system(size: 11, design: .monospaced))
-
-            Text(String(format: "%.1f MP", instrument.renderer.outputResolution.megapixels))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Divider()
-
             scaleField(title: "PREVIEW SCALE",
                        text: $renderScaleField,
                        current: instrument.renderer.previewScale,
@@ -345,25 +475,7 @@ struct InstrumentView: View {
                                              scale: instrument.renderer.previewScale)
     }
 
-    private func applyOutput(_ size: RenderSize) {
-        instrument.renderer.outputResolution = size
-        syncResolutionFields()
-    }
-
-    /// Parse what was typed. A field that is empty or nonsense keeps the current value rather than
-    /// snapping to a default — losing a deliberately-set output size to a stray keystroke mid-set
-    /// would be worse than ignoring the edit.
-    private func commitTypedResolution() {
-        let current = instrument.renderer.outputResolution
-        let w = Int(widthField.trimmingCharacters(in: .whitespaces)) ?? current.width
-        let h = Int(heightField.trimmingCharacters(in: .whitespaces)) ?? current.height
-        applyOutput(RenderSize(width: w, height: h))   // RenderSize clamps to safe bounds
-    }
-
     private func syncResolutionFields() {
-        let r = instrument.renderer.outputResolution
-        widthField = String(r.width)
-        heightField = String(r.height)
         renderScaleField = String(instrument.renderer.previewScale.percent)
         cueScaleField = String(instrument.renderer.cueRenderScale.percent)
     }
