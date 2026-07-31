@@ -25,6 +25,13 @@ final class ShaderUnit: ObservableObject {
     let imageSources: SourceRouter
 
     @Published private(set) var shaderName: String?
+    /// The file this unit was loaded from, when there was one.
+    ///
+    /// `shaderName` is only `lastPathComponent` and cannot be reversed into a URL: filenames are
+    /// not unique across the corpus, and a shader can be loaded from outside the scanned folders.
+    /// The slot bank captures this; without it a `Preset` cannot name its own shader.
+    /// Nil for the `load(source:name:)` path, which has no file behind it.
+    @Published private(set) var sourceURL: URL?
     @Published private(set) var compileError: String?
     @Published private(set) var compileErrorLine: Int?
     @Published private(set) var inputs: [ISFPreviewInput] = []
@@ -67,10 +74,15 @@ final class ShaderUnit: ObservableObject {
             onCompileFinished?()
             return
         }
+        // load(source:name:) clears sourceURL at its start (it has no file behind it in general),
+        // so this unit's URL is restamped AFTER that call, not before — setting it first would be
+        // immediately wiped out by the clear.
         load(source: text, name: url.lastPathComponent)
+        sourceURL = url
     }
 
     func load(source: String, name: String) {
+        sourceURL = nil
         loadGeneration += 1
         let generation = loadGeneration
         isLoading = true
