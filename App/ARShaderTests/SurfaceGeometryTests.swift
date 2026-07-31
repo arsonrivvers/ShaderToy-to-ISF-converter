@@ -11,11 +11,17 @@ final class SurfaceGeometryTests: XCTestCase {
 
     /// Stand-ins for the Metal monitor row and the deck strips: same layout participation, no GPU,
     /// each reporting its own frame.
+    /// The monitor stub carries an intrinsic height, because the real one does: a `MonitorTile`
+    /// derives its height from its 16:9 ratio against the offered width. A bare `Color` has no
+    /// intrinsic height and would collapse to nothing under `fixedSize`, testing a shape the app
+    /// never has.
+    private static let stubMonitorHeight: CGFloat = 300
+
     private func stubSurface(layout: SurfaceLayout, stripHeight: CGFloat) -> some View {
         InstrumentSurface(layout: layout) {
             Color.gray.measured("panel", in: Self.space)
         } monitors: {
-            Color.blue.measured("monitors", in: Self.space)
+            Color.blue.frame(height: Self.stubMonitorHeight).measured("monitors", in: Self.space)
         } strips: {
             Color.green.frame(height: stripHeight).measured("strips", in: Self.space)
         } mixer: {
@@ -23,8 +29,14 @@ final class SurfaceGeometryTests: XCTestCase {
         }
     }
 
-    /// THE gate. Collapsing must hand height to the picture, not leave grey space.
-    func testTheMonitorRowGrowsWhenTheStripsShrink() throws {
+    /// THE gate, and it is the opposite of what this phase first shipped.
+    ///
+    /// The monitor strip must NOT resize when the content below it changes. The first version made
+    /// it flexible so collapsing a section would hand its height to the picture; on device that
+    /// meant the previews jumped every time PARAMETERS was opened or closed, and the operator
+    /// rejected it on sight (2026-07-31). Stability beat size. If this test ever fails, the strip
+    /// has gone flexible again and the previews will move under the operator's hands mid-set.
+    func testTheMonitorStripDoesNotResizeWhenTheStripsBelowItChange() throws {
         let layout = SurfaceLayout()
 
         let tall = SurfaceRenderHarness.frames(
@@ -35,21 +47,32 @@ final class SurfaceGeometryTests: XCTestCase {
         let tallMonitors = try XCTUnwrap(tall["monitors"], "harness reported no frames").height
         let shortMonitors = try XCTUnwrap(short["monitors"], "harness reported no frames").height
 
-        XCTAssertGreaterThan(shortMonitors, tallMonitors + 400,
-                             "Every point the strips give up must reach the monitor row. If this "
-                             + "fails, collapsing frees space nothing uses and the whole feature "
-                             + "is cosmetic.")
+        XCTAssertEqual(shortMonitors, tallMonitors, accuracy: 0.5,
+                       "A 480pt change below the monitor strip must not move it by even a point")
+        XCTAssertEqual(tallMonitors, Self.stubMonitorHeight, accuracy: 0.5,
+                       "The strip takes its height from its content, not from what is left over")
     }
 
-    func testTheMonitorRowNeverGoesBelowItsFloor() throws {
+    /// The other half of "doesn't jump": the strip must not MOVE either.
+    ///
+    /// A strip that keeps its height but slides down the window when content below it grows is
+    /// just as disorienting as one that resizes. It is pinned to the top of the content column, so
+    /// its origin is fixed regardless of what is below it.
+    func testTheMonitorStripStaysPinnedToTheTop() throws {
         let layout = SurfaceLayout()
-        let frames = SurfaceRenderHarness.frames(
-            stubSurface(layout: layout, stripHeight: 5000), size: Self.windowSize)
 
-        XCTAssertGreaterThanOrEqual(
-            try XCTUnwrap(frames["monitors"], "harness reported no frames").height,
-            InstrumentSurface<Color, Color, Color, Color>.minMonitorHeight,
-            "A very tall strip column must not squeeze the picture to nothing")
+        let tall = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 600), size: Self.windowSize)
+        let short = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 120), size: Self.windowSize)
+
+        let tallY = try XCTUnwrap(tall["monitors"], "harness reported no frames").minY
+        let shortY = try XCTUnwrap(short["monitors"], "harness reported no frames").minY
+
+        XCTAssertEqual(tallY, shortY, accuracy: 0.5,
+                       "The monitor strip must not slide when the content below it changes")
+        XCTAssertLessThan(tallY, 1.0,
+                          "It sits at the very top of the content column, not floating below it")
     }
 
     func testClosingThePanelGivesItsWidthToTheContent() throws {

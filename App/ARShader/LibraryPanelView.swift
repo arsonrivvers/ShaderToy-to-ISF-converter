@@ -85,10 +85,15 @@ struct LibraryPanelView: View {
                 .frame(width: 150)
             }
 
+            // Unlabelled: the segments say A / A FX / B / B FX / MST FX, and "Load onto" ate a
+            // column of a 300pt panel to restate what picking a segment then clicking a shader
+            // obviously does (operator, 2026-07-31). The accessibility label stays.
             Picker("Load onto", selection: $target) {
                 ForEach(LibraryTarget.allCases) { Text($0.shortLabel).tag($0) }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Load onto")
 
             List(entries) { entry in
                 Button {

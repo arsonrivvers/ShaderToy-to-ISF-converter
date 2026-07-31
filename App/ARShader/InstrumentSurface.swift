@@ -36,8 +36,10 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
     /// which would leave the resize cursor stuck for the rest of the session.
     @State private var isResizeCursorPushed = false
 
-    /// The monitors never shrink below this, however much is expanded below them.
-    static var minMonitorHeight: CGFloat { 160 }
+    // No monitor-height floor: the strip is content-sized, so its height comes from the tiles'
+    // aspect ratio and nothing below it can squeeze it. A floor existed while the row was
+    // flexible; it went with that design.
+    //
     // The panel's floor lives on SurfaceLayout, not here — it is clamped where the width is
     // written (`setPanelWidth`), so there is one source of truth rather than a view-local copy
     // that a second call site could bypass.
@@ -63,16 +65,23 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
             }
 
             VStack(spacing: 0) {
-                // Flexible, and FIRST in the greedy order: the monitor row takes whatever the deck
-                // strips are not using. Collapsing a section hands its height straight to the
-                // picture — without this the feature frees space nothing uses, and "the monitors
-                // are too small" is untouched no matter how much collapses.
+                // CONTENT-SIZED, deliberately. The monitor strip takes its height from the tiles'
+                // 16:9 ratio against the available width, so it changes only when the WINDOW
+                // changes — never when a section below it collapses.
+                //
+                // This reverses an earlier version of this phase, which made the row flexible so
+                // freed height would flow to the picture. It did, and on device that read as the
+                // previews jumping every time PARAMETERS was opened or closed. Stability beat
+                // size: a preview that moves when you touch an unrelated control is worse than a
+                // smaller one that stays put (operator, 2026-07-31). What collapsing buys now is
+                // less scrolling in the strips.
                 monitors()
-                    .frame(minHeight: Self.minMonitorHeight, maxHeight: .infinity)
-                Divider()
-                // Content-sized: shrinks as sections collapse rather than holding its height.
-                strips()
                     .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                // Flexible: the strips absorb whatever the monitor strip does not take, and scroll
+                // within it when a shader's parameter list is long.
+                strips()
+                    .frame(maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity)
 

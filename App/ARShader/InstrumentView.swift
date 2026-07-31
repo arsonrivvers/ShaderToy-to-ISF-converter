@@ -264,6 +264,16 @@ struct InstrumentView: View {
         }
     }
 
+    /// A / B / PROGRAM left to right — deck, deck, then what they composite into.
+    ///
+    /// This strip is deliberately CONTENT-SIZED, not flexible. Each tile takes its height from the
+    /// available width through its 16:9 ratio, so the strip only changes size when the WINDOW does
+    /// — never when a section is collapsed below it. An earlier version of this phase made the row
+    /// flexible so freed height would go to the picture; on device that meant the previews resized
+    /// every time the operator opened or closed PARAMETERS, and "the windows jump around" was the
+    /// first thing said about it (2026-07-31). A preview that moves when you touch an unrelated
+    /// control is worse than a smaller one that stays put. Collapsing now buys less scrolling in
+    /// the strips, not a bigger picture.
     private var monitors: some View {
         HStack(spacing: 10) {
             MonitorTile(instrument: instrument, source: .deck(.one), label: "DECK A")
