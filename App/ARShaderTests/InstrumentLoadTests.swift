@@ -120,4 +120,111 @@ final class InstrumentLoadTests: XCTestCase {
                      + "capture reads sourceURL to decide whether there is anything to capture")
         XCTAssertNil(unit.shaderName, "The two must agree about what is up")
     }
+
+    // MARK: Task 5 — the load seam
+
+    /// Awaits one compile, which is asynchronous — the unit compiles on a background queue and
+    /// fires `onCompileFinished` back on the main actor. Distinct name from `loadAndWait` above:
+    /// that one takes a bare `ShaderUnit`, this one drives `Instrument.load(_:onto:thenApply:)`.
+    private func loadTargetAndWait(_ instrument: Instrument, _ url: URL,
+                                   onto target: LibraryTarget,
+                                   thenApply snapshot: ParamSnapshot? = nil) async {
+        await withCheckedContinuation { continuation in
+            var resumed = false
+            instrument.onLoadSettledForTesting = {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            instrument.load(url, onto: target, thenApply: snapshot)
+        }
+        instrument.onLoadSettledForTesting = nil
+    }
+
+    func testADeckTargetReplacesTheShader() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile("first"), onto: .deck(.one))
+        await loadTargetAndWait(instrument, try makeShaderFile("second"), onto: .deck(.one))
+        XCTAssertEqual(instrument.deck(.one).unit.sourceURL?.lastPathComponent.hasPrefix("second"),
+                       true, "A deck REPLACES; it does not accumulate")
+    }
+
+    func testAnFXTargetAppendsAStage() async throws {
+        let instrument = Instrument()
+        let before = instrument.renderer.masterFX.stages.count
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .masterFX)
+        XCTAssertEqual(instrument.renderer.masterFX.stages.count, before + 1,
+                       "An FX target APPENDS a stage; it does not replace the chain")
+    }
+
+    func testASnapshotIsAppliedAfterTheCompileLands() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one),
+                          thenApply: ParamSnapshot(params: ["speed": .float(0.25)]))
+        XCTAssertEqual(instrument.deck(.one).unit.params.exportSnapshot().params["speed"],
+                       .float(0.25),
+                       "Applied before the compile lands, the parameters would not exist to receive it")
+    }
+
+    /// The collision the PM review caught. Assign only the snapshot handler and this goes red.
+    func testAnFXLoadWithASnapshotStillRepublishesTheChain() async throws {
+        let instrument = Instrument()
+        var republishes = 0
+        instrument.renderer.masterFX.onStagesChangedForTesting = { republishes += 1 }
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .masterFX,
+                          thenApply: ParamSnapshot(params: ["speed": .float(0.3)]))
+        XCTAssertGreaterThan(republishes, 0,
+                             "onCompileFinished is single-owner: a snapshot handler that replaces "
+                             + "the chain republish silently stops the FX stage updating")
+        instrument.renderer.masterFX.onStagesChangedForTesting = nil
+    }
+
+    /// The stale one-shot. Without the clear, `onCompileFinished` keeps pointing at the closure
+    /// that applied THIS load's snapshot, so a later load that bypasses `Instrument.load` entirely
+    /// (a future MIDI reload, an edit-and-recompile path — anything that calls `ShaderUnit.load`
+    /// directly) would re-fire it and force this preset's values back onto an unrelated shader.
+    ///
+    /// Deviation from the brief's literal test: the brief compared param values after a SECOND
+    /// `instrument.load(...)` call, but that path always calls `attach` again first, which
+    /// unconditionally overwrites `onCompileFinished` before the second compile can even start —
+    /// so that comparison can never observe a stale one-shot regardless of whether the clear runs.
+    /// Worse, both loads used `makeShaderFile()`, which always declares the same `"speed"` input;
+    /// `ParamStore.syncInputs`'s deliberate, separately-tested "same-typed survivor must be kept"
+    /// behavior (`ParamStoreTests.testSyncInputsPrunesVanishedAndTypeChanged_keepsSurvivors`) then
+    /// carries `0.25` into the second shader ANYWAY, on every run, whether or not the one-shot is
+    /// cleared — so the brief's assertion fails unconditionally for a reason unrelated to this
+    /// task. Asserting on `onCompileFinished` directly tests the actual invariant and is
+    /// independent of that unrelated mechanism.
+    func testTheOneShotIsClearedSoALaterLoadDoesNotReplayOldValues() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one),
+                          thenApply: ParamSnapshot(params: ["speed": .float(0.25)]))
+        XCTAssertNil(instrument.deck(.one).unit.onCompileFinished,
+                     "A later load that bypasses Instrument.load must not re-fire this load's "
+                     + "snapshot onto whatever it compiles next")
+    }
+
+    /// Falsifiable because Instrument OWNS surfaceLayout and load() could therefore reach it.
+    func testLoadingDoesNotEndShowMode() async throws {
+        let instrument = Instrument()
+        instrument.surfaceLayout.toggleShowMode()
+        XCTAssertTrue(instrument.surfaceLayout.showMode)
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one))
+        XCTAssertTrue(instrument.surfaceLayout.showMode,
+                      "Loading a shader is a performance action. Only deliberate LAYOUT actions "
+                      + "end a show.")
+    }
+
+    func testCurrentPresetIsNilUntilSomethingIsLoaded() {
+        XCTAssertNil(Instrument().currentPreset(of: .one))
+    }
+
+    func testCurrentPresetCapturesTheLiveValues() async throws {
+        let instrument = Instrument()
+        await loadTargetAndWait(instrument, try makeShaderFile(), onto: .deck(.one))
+        instrument.deck(.one).unit.params.set("speed", .float(0.8))
+        let preset = try XCTUnwrap(instrument.currentPreset(of: .one))
+        XCTAssertEqual(preset.snapshot.params["speed"], .float(0.8),
+                       "Capture takes what is dialled NOW, not the header defaults")
+    }
 }

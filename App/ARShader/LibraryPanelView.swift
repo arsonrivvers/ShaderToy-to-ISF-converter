@@ -49,28 +49,6 @@ struct LibraryPanelView: View {
         self.library = instrument.library
     }
 
-    /// A deck REPLACES its shader; a chain APPENDS a stage.
-    private func load(_ url: URL) {
-        switch target {
-        case .deck(let id):
-            instrument.deck(id).unit.load(url: url)
-        case .deckFX(let id):
-            append(url, to: instrument.deck(id).fx)
-        case .masterFX:
-            append(url, to: instrument.renderer.masterFX)
-        }
-    }
-
-    private func append(_ url: URL, to chain: FXChain) {
-        let stage = FXStage(device: instrument.device, queue: instrument.queue,
-                            clock: instrument.renderer.clock)
-        // Republish once the scene lands, so a stage starts encoding as soon as it compiles rather
-        // than waiting for an unrelated mutation.
-        stage.unit.onCompileFinished = { [weak chain] in chain?.stageDidChangeScene() }
-        chain.append(stage)
-        stage.unit.load(url: url)
-    }
-
     private var entries: [LibraryEntry] { selection.results(in: library) }
 
     var body: some View {
@@ -97,7 +75,7 @@ struct LibraryPanelView: View {
 
             List(entries) { entry in
                 Button {
-                    load(entry.url)
+                    instrument.load(entry.url, onto: target)
                 } label: {
                     Text(entry.name)
                         .font(.system(size: 12, design: .monospaced))
