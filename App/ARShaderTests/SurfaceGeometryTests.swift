@@ -73,11 +73,16 @@ final class SurfaceGeometryTests: XCTestCase {
     func testAnExpandedSectionHasRealHeightAndACollapsedOneIsAbsent() throws {
         let layout = SurfaceLayout()
         let space = "sectionTest"
+        // The section measures ITSELF as well as its content. The header is present in both
+        // states, so "section" reported is proof the harness ran — without it the collapsed
+        // half of this test would pass on an empty dictionary, i.e. verify nothing. Applied
+        // before `.coordinateSpace` so the reader resolves inside the space it names.
         func section(_ l: SurfaceLayout) -> some View {
             CollapsibleSection(title: "FX", summary: "3", key: .masterFX, layout: l) {
                 VStack { ForEach(0..<5, id: \.self) { _ in Slider(value: .constant(0.5)) } }
                     .measured("content", in: space)
             }
+            .measured("section", in: space)
             .coordinateSpace(name: space)
         }
 
@@ -92,7 +97,10 @@ final class SurfaceGeometryTests: XCTestCase {
         layout.setExpanded(false, for: .masterFX)
         let collapsed = SurfaceRenderHarness.frames(
             section(layout), size: CGSize(width: 300, height: 400))
-        XCTAssertNil(collapsed["content"])
+        // Ordered deliberately: prove the harness ran BEFORE concluding anything from an absence.
+        // A starved dictionary fails here rather than passing the nil check for the wrong reason.
+        XCTAssertNotNil(collapsed["section"], "harness reported no frames")
+        XCTAssertNil(collapsed["content"], "a collapsed section must not render its content")
     }
 
     /// The resize affordance must be reachable — the defect a spec review caught was a panel width

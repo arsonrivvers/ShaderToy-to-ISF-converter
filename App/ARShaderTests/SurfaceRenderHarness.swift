@@ -85,11 +85,15 @@ enum SurfaceRenderHarness {
     /// Presence of this file switches `compareBaseline` from gating to recording.
     ///
     /// A file rather than the `ARSHADER_RECORD_BASELINES=1` environment variable the brief
-    /// specified: xcodebuild does not forward environment into a hosted macOS unit-test process on
-    /// this toolchain. Verified, not assumed — a diagnostic run with the variable set both as a
-    /// parent-process export AND as a `TEST_RUNNER_`-prefixed build setting saw
-    /// `ProcessInfo.processInfo.environment` contain NEITHER. The documented switch could never
-    /// have fired, so baselines could never have been recorded.
+    /// specified. Measured, not assumed: a diagnostic run set the variable BOTH as a parent-process
+    /// shell export AND as a `TEST_RUNNER_`-prefixed build setting, and the hosted test process saw
+    /// `ProcessInfo.processInfo.environment` contain neither. Those two routes are ruled out on
+    /// this toolchain (Xcode 26.1.1); env delivery in general is NOT — XcodeGen can declare
+    /// `schemes.ARShader.test.environmentVariables`, which bakes the value into the scheme and was
+    /// not tried.
+    ///
+    /// The sentinel is kept anyway, on its own merits rather than as a fallback: an environment
+    /// variable cannot make a recording run announce itself, and this can (below).
     ///
     /// A recording run is also made structurally unable to look like a passing one: the caller
     /// consumes the sentinel and fails the test outright (see `testSurfaceBaselines`). So a
@@ -102,6 +106,20 @@ enum SurfaceRenderHarness {
 
     /// Compare against a committed baseline, or record it when the sentinel is present.
     /// Returns nil on success, or a human-readable reason on failure.
+    ///
+    /// **These baselines are machine-specific, and they are NOT the load-bearing gate.** The
+    /// geometry assertions in `SurfaceGeometryTests` are; these are supplementary.
+    ///
+    /// Two reasons to re-record rather than investigate when all of them go red at once:
+    /// - The comparison is **byte-exact**, with no pixel tolerance, so any antialiasing or
+    ///   control-metric change across a macOS point release turns every baseline red together.
+    /// - They are recorded at the **display's backing scale** — currently 2x, i.e. 3200x2000 PNGs
+    ///   for a 1600x1000 logical view. A 1x display, a different window-server context, or CI will
+    ///   produce a different pixel size and fail for a reason that has nothing to do with layout.
+    ///
+    /// So: valid for the display configuration they were recorded on. On a different machine or in
+    /// CI they must be re-recorded (see `recordSentinel`) — and if it is ONLY these that are red
+    /// while the geometry tests stay green, the layout is fine and the environment changed.
     static func compareBaseline(_ data: Data, named name: String) -> String? {
         let file = baselinesDirectory.appendingPathComponent("\(name).png")
 
