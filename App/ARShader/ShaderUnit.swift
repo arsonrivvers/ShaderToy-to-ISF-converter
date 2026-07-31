@@ -49,6 +49,9 @@ final class ShaderUnit: ObservableObject {
     private let compileQueue = DispatchQueue(label: "arshader.deck.compile", qos: .userInitiated)
     /// Monotonic: a compile finishing for anything but the current generation is superseded.
     private var loadGeneration = 0
+    /// The URL the in-flight load came from, if any. Consumed by `apply` on success only, so a
+    /// failed or superseded load never stamps `sourceURL` — it stays on whatever is still playing.
+    private var pendingSourceURL: URL?
     /// True when this unit's first image input is fed externally (an FX stage's chain feed) rather
     /// than routed. Decks are false: their shader's inputs are the operator's to route.
     /// Read by `ShaderControlsView` so that input is labelled rather than given a source picker.
@@ -74,17 +77,17 @@ final class ShaderUnit: ObservableObject {
             onCompileFinished?()
             return
         }
-        // load(source:name:) clears sourceURL at its start (it has no file behind it in general),
-        // so this unit's URL is restamped AFTER that call, not before — setting it first would be
-        // immediately wiped out by the clear.
-        load(source: text, name: url.lastPathComponent)
-        sourceURL = url
+        load(source: text, name: url.lastPathComponent, url: url)
     }
 
     func load(source: String, name: String) {
-        sourceURL = nil
+        load(source: source, name: name, url: nil)
+    }
+
+    private func load(source: String, name: String, url: URL?) {
         loadGeneration += 1
         let generation = loadGeneration
+        pendingSourceURL = url
         isLoading = true
         let device = self.device
         compileQueue.async { [weak self] in
@@ -106,6 +109,7 @@ final class ShaderUnit: ObservableObject {
         compileError = nil
         compileErrorLine = nil
         shaderName = name
+        sourceURL = pendingSourceURL
         inputs = result.inputs
         imageSources.updateInputs(result.inputs, reservePrimary: reservesPrimaryInput)
         params.syncInputs(result.inputs)

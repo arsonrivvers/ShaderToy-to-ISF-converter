@@ -585,14 +585,47 @@ In `App/ARShader/ShaderUnit.swift`, add next to `shaderName`:
     @Published private(set) var sourceURL: URL?
 ```
 
-Then in `load(url:)`, immediately before the existing `load(source:name:)` call:
+**`sourceURL` is stamped where the SWAP happens, not where the load starts.**
+
+`apply(_:name:generation:)`'s failure path deliberately changes nothing — the previous shader keeps
+rendering and `shaderName` keeps naming it, per the compile-first-swap-on-success doctrine. A
+synchronous stamp in `load(url:)` would therefore leave `sourceURL` naming the shader that FAILED
+while `shaderName` names the one still playing, and `currentPreset(of:)` reads `sourceURL` — so
+capture would store a failed shader's URL beside the playing shader's values, producing a slot that
+recalls something which does not compile.
+
+Thread the URL through per-generation and stamp it only on success:
 
 ```swift
-        sourceURL = url
+    private var pendingSourceURL: URL?
+
+    func load(url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            compileError = "Could not read \(url.lastPathComponent)."
+            onCompileFinished?()
+            return
+        }
+        load(source: text, name: url.lastPathComponent, url: url)
+    }
+
+    func load(source: String, name: String) { load(source: source, name: name, url: nil) }
+
+    private func load(source: String, name: String, url: URL?) {
+        loadGeneration += 1
+        let generation = loadGeneration
+        pendingSourceURL = url
+        // ...rest unchanged...
+    }
 ```
 
-Leave `load(source:name:)` setting `sourceURL = nil` at its start, so a source-loaded unit never
-claims a file it does not have.
+and in `apply`, in the SUCCESS branch only, immediately after `shaderName = name`:
+
+```swift
+        sourceURL = pendingSourceURL
+```
+
+A superseded load returns early on the generation guard and never stamps. A source-only load carries
+a nil `pendingSourceURL`, so it clears correctly without a separate `sourceURL = nil`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -614,7 +647,7 @@ reversed — the library truncates names in the middle precisely because long
 AR_Genuary names differ at the end."
 ```
 
-Expected ARShader count: **227**.
+Expected ARShader count: **229**.
 
 ---
 
@@ -841,7 +874,7 @@ Not a pure lift. onCompileFinished is single-owner and the FX path already
 claims it, so load() owns the composition and clears the one-shot after firing."
 ```
 
-Expected ARShader count: **235**.
+Expected ARShader count: **237**.
 
 ---
 
@@ -927,7 +960,7 @@ git add App/ARShader/SurfaceLayout.swift App/ARShader/SlotBankPanelView.swift Ap
 git commit -m "feat(3b): the bank is the third rail panel — one enum case, as advertised"
 ```
 
-Expected ARShader count: **237**.
+Expected ARShader count: **239**.
 
 ---
 
@@ -1082,7 +1115,7 @@ Update `InstrumentView.panelContent`:
 
 - [ ] **Step 2: Build and run the full suite**
 
-Expected: 237 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
+Expected: 239 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
 
 - [ ] **Step 3: Verify the safety property by inspection**
 
@@ -1110,7 +1143,7 @@ xcodebuild test -project App/TrueISFEditor.xcodeproj -scheme TrueISFEditor -deri
 swift test --package-path ShadertoyISFKit --scratch-path /tmp/stkit-build-bank
 ```
 
-Expected: ARShader **237**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
+Expected: ARShader **239**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
 
 - [ ] **Step 2: Write the smoke report with legs UNRUN**
 
