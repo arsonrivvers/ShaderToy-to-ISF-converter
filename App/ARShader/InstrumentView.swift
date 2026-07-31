@@ -87,6 +87,7 @@ struct InstrumentView: View {
     @ObservedObject private var mixer: MixerState
     @ObservedObject private var output: OutputWindowController
     @ObservedObject private var stats: RenderStatsModel
+    @ObservedObject private var layout: SurfaceLayout
     @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
     @State private var widthField = ""
@@ -99,20 +100,19 @@ struct InstrumentView: View {
         self.mixer = instrument.mixer
         self.output = instrument.output
         self.stats = instrument.renderStats
+        self.layout = instrument.surfaceLayout
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        InstrumentSurface(layout: layout) {
+            panelContent
+        } monitors: {
             monitors
-            Divider()
-            HSplitView {
-                LibraryPanelView(instrument: instrument, target: $libraryTarget)
-                    .frame(minWidth: 260, idealWidth: 300)
-                deckStrips
-                mixerStrip.frame(width: 200)
-            }
+        } strips: {
+            deckStrips
+        } mixer: {
+            mixerStrip.frame(width: 200)
         }
-        .background(Color.black)
         .onAppear {
             if keys == nil {
                 let monitor = BlackoutKeyMonitor(mixer: mixer) {
@@ -125,6 +125,18 @@ struct InstrumentView: View {
         .onDisappear { keys?.stop(); keys = nil }
     }
 
+    /// Whichever tool the rail has open. Task 7 adds `.settings`.
+    @ViewBuilder private var panelContent: some View {
+        switch layout.openPanel {
+        case .library:
+            LibraryPanelView(instrument: instrument, target: $libraryTarget)
+        case .settings:
+            SettingsPanelView(instrument: instrument)
+        case nil:
+            EmptyView()
+        }
+    }
+
     private var monitors: some View {
         HStack(spacing: 10) {
             MonitorTile(instrument: instrument, source: .deck(.one), label: "DECK A")
@@ -134,7 +146,6 @@ struct InstrumentView: View {
                         drivesClock: true)
         }
         .padding(10)
-        .frame(maxHeight: 260)
     }
 
     private var deckStrips: some View {
