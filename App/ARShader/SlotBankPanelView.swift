@@ -1,12 +1,16 @@
 import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
-/// The slot bank: eight cells, a SOURCE deck picker, and nothing else.
+/// The slot bank: eight cells, a SOURCE deck picker, a RECALL TO destination picker, and nothing
+/// else.
 ///
-/// Recall fires into the load-target picker the library already owns — one answer to "load onto
-/// what", shared by library clicks and slot hits. SOURCE is separate and means the opposite
-/// direction: which deck a capture READS from. Sending library clicks to master FX while capturing
-/// deck A is a normal state, so one control could not carry both meanings.
+/// Two pickers, two directions, both visible here because the Bank and Library panels are
+/// mutually exclusive — with the Bank open, the Library's own copy of `target` is off-screen. Both
+/// bind the SAME `$target`, so there is no duplicated state, just a second view of one value where
+/// slots are actually fired: SOURCE (deck A/B) is where a capture READS from; RECALL TO is where a
+/// recall WRITES to. Leaving RECALL TO on a stale value such as `MST FX` would make recall
+/// additive — every slot click appends a new FX stage instead of swapping a deck — so it must be
+/// visible on this surface, not just the Library's.
 struct SlotBankPanelView: View {
     let instrument: Instrument
     @Binding var target: LibraryTarget
@@ -21,12 +25,29 @@ struct SlotBankPanelView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Picker("Capture from", selection: $source) {
-                ForEach(DeckID.allCases) { Text($0.displayName).tag($0) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SOURCE")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Picker("Capture from", selection: $source) {
+                    ForEach(DeckID.allCases) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Capture from — which deck a capture reads")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityLabel("Capture from")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("RECALL TO")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Picker("Load onto", selection: $target) {
+                    ForEach(LibraryTarget.allCases) { Text($0.shortLabel).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Load onto — where a recall writes")
+            }
 
             ForEach(0..<SlotBank.slotCount, id: \.self) { index in
                 SlotCell(index: index,
@@ -46,18 +67,20 @@ struct SlotBankPanelView: View {
         instrument.load(preset.shaderURL, onto: target, thenApply: preset.snapshot)
     }
 
-    /// The ONLY call site of `capture` in this view. Both gestures that reach it — clicking an
-    /// empty cell, and Replace on a filled one — are explicit user acts. A plain click on a filled
-    /// cell routes to `recall`, never here: losing a dialled-in look to a one-cell mis-click is
-    /// unrecoverable and would happen exactly once before the bank stopped being trusted.
+    /// The ONLY call site of `capture` in this view. Every gesture that reaches it — clicking an
+    /// empty cell, Replace in the context menu, and ⌥-click — is an explicit user act. A plain
+    /// click on a filled cell routes to `recall`, never here: losing a dialled-in look to a
+    /// one-cell mis-click is unrecoverable and would happen exactly once before the bank stopped
+    /// being trusted.
     private func capture(into index: Int) {
         guard let preset = instrument.currentPreset(of: source) else { return }
         bank.capture(preset, into: index)
     }
 }
 
-/// One cell. Empty cells invite capture; filled ones recall and hide their destructive actions
-/// behind hover.
+/// One cell. Empty cells invite capture; filled ones recall on a plain click and hide Replace and
+/// Clear behind a context menu — unconditionally available, not just under a mouse that happens to
+/// have entered from the right direction.
 private struct SlotCell: View {
     let index: Int
     let preset: Preset?
@@ -66,60 +89,71 @@ private struct SlotCell: View {
     let onCapture: () -> Void
     let onClear: () -> Void
 
-    @State private var isHovering = false
-
     var body: some View {
-        HStack(spacing: 6) {
-            Text("\(index + 1)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 14)
+        // The single tap-delivery path for this cell. A real `Button` (not a bare
+        // `.onTapGesture`) so VoiceOver gets a native button trait and an activate action for
+        // free, matching `LibraryPanelView`'s row pattern. The accessibility label sits on the
+        // Button itself, which SwiftUI already treats as one combined element — no child text or
+        // control announces separately.
+        Button(action: activate) {
+            HStack(spacing: 6) {
+                Text("\(index + 1)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
 
-            if let preset {
-                Text(preset.name)
-                    .font(.system(size: 11, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)   // long AR_Genuary names differ at the END
-                    .foregroundStyle(isAvailable ? .primary : .secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if isHovering {
-                    Button("Replace", action: onCapture).buttonStyle(.plain)
-                        .font(.system(size: 10))
-                    Button("Clear", action: onClear).buttonStyle(.plain)
-                        .font(.system(size: 10))
+                if let preset {
+                    Text(preset.name)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)   // long AR_Genuary names differ at the END
+                        .foregroundStyle(isAvailable ? .primary : .secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("empty")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else {
-                Text("empty")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.vertical, 5).padding(.horizontal, 6)
+            .frame(minHeight: 28)
+            .background(preset == nil ? Color.clear : Color.white.opacity(0.06))
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 5).padding(.horizontal, 6)
-        .frame(minHeight: 28)
-        .background(preset == nil ? Color.clear : Color.white.opacity(0.06))
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        // EXACTLY ONE tap gesture. Two `.onTapGesture` modifiers on the same view both fire,
-        // so a second one for ⌥-click would make an option-click recall AND capture — breaking
-        // the one safety property this cell exists to protect. The modifier check lives inside
-        // the single handler instead.
-        .onTapGesture {
-            if preset == nil {
-                onCapture()                       // empty: nothing can be lost
-            } else if NSEvent.modifierFlags.contains(.option) {
-                onCapture()                       // ⌥-click: the deliberate overwrite
-            } else {
-                onRecall()                        // plain click on a filled cell: ALWAYS recall
+        .buttonStyle(.plain)
+        .contextMenu {
+            if preset != nil {
+                // Disabled while the file is missing: a plain click is already a dead recall in
+                // that state (`SlotBank.recall` returns nil), and leaving Replace live invites
+                // destroying the entry the model deliberately preserves through a bad mount.
+                Button("Replace with SOURCE deck", action: onCapture)
+                    .disabled(!isAvailable)
+                // Left enabled even when unavailable: deliberately clearing a slot whose file is
+                // gone for good is legitimate.
+                Button("Clear slot", role: .destructive, action: onClear)
             }
         }
         .help(helpText)
         .accessibilityLabel(preset.map { "Slot \(index + 1), \($0.name)" } ?? "Slot \(index + 1), empty")
     }
 
+    /// Empty → capture (nothing can be lost). Filled + ⌥ → capture (the deliberate overwrite).
+    /// Filled, no modifier → ALWAYS recall. This is the one place the modifier check happens; the
+    /// Button above is the one place a tap can originate.
+    private func activate() {
+        if preset == nil {
+            onCapture()
+        } else if NSEvent.modifierFlags.contains(.option) {
+            onCapture()
+        } else {
+            onRecall()
+        }
+    }
+
     private var helpText: String {
         guard let preset else { return "Click to capture the SOURCE deck into slot \(index + 1)" }
         if !isAvailable { return "\(preset.name) — file not found" }
-        return "\(preset.name) — click to recall, ⌥-click to replace"
+        return "\(preset.name) — click to recall, ⌥-click to replace, right-click for more"
     }
 }
