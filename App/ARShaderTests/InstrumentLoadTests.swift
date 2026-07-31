@@ -103,4 +103,21 @@ final class InstrumentLoadTests: XCTestCase {
                        + "still name it — capture reads this, and would otherwise store a shader "
                        + "that does not compile")
     }
+
+    /// Round 2: `unload()` (the Clear button's target, `InstrumentView.swift:72`) reset
+    /// `shaderName` but not `sourceURL`, so a cleared deck kept naming its last file — capture
+    /// would then read a `sourceURL` for a deck with nothing playing.
+    func testUnloadingClearsTheSourceURLAsWellAsTheName() async throws {
+        let instrument = Instrument()
+        let unit = instrument.deck(.one).unit
+        await loadAndWait(unit, try makeShaderFile("loaded"))
+        XCTAssertNotNil(unit.sourceURL)
+
+        unit.unload()
+
+        XCTAssertNil(unit.sourceURL,
+                     "A cleared deck has nothing playing, so it must not still name a file — "
+                     + "capture reads sourceURL to decide whether there is anything to capture")
+        XCTAssertNil(unit.shaderName, "The two must agree about what is up")
+    }
 }

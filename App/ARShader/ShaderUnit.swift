@@ -120,9 +120,11 @@ final class ShaderUnit: ObservableObject {
 
     /// Clear the unit back to no shader — it contributes nothing.
     func unload() {
-        loadGeneration += 1
+        loadGeneration += 1   // cancels any in-flight compile: its apply() will fail the guard
+        pendingSourceURL = nil
         core.setScene(nil, imageInputNames: [])
         shaderName = nil
+        sourceURL = nil
         inputs = []
         compileError = nil
         params.resetAll()
