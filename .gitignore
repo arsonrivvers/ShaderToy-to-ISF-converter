@@ -18,3 +18,6 @@ App/ddata-review/
 .superpowers/
 .worktrees/
 App/ddata-release/
+# ARShader UI visual references: third-party screenshots, no established
+# provenance, and this repo is public. Local design use only.
+docs/arshader/ui-reference/
