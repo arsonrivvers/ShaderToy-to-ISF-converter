@@ -35,9 +35,14 @@ final class SurfaceGeometryTests: XCTestCase {
                 .frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
                 .measured("monitors", in: Self.space)
         } slots: {
-            // Rigid, unlike the monitor stub: this one only needs to REPORT a chosen height so the
-            // gate below can vary it, not prove itself flexible.
-            Color.yellow.frame(height: slotHeight).measured("slots", in: Self.space)
+            // Flexible, like the monitor stub, and for the same reason (fix-round-1): a rigid
+            // stub can only ever prove the STUB is rigid, not that the production `slots()`
+            // wrapping still applies `.fixedSize(vertical: true)`. This one has an ideal height
+            // (`slotHeight`) it will exceed if `InstrumentSurface` ever proposes more — exactly
+            // what a regression to a flexible slots row would do.
+            Color.yellow
+                .frame(minHeight: slotHeight, maxHeight: .infinity)
+                .measured("slots", in: Self.space)
         } strips: {
             // The 620pt minimum is production's (`deckStrips`), and the stub must carry it: without
             // it the strips compress instead of pushing, the surface never overflows, and
@@ -115,6 +120,14 @@ final class SurfaceGeometryTests: XCTestCase {
                        "A 160pt change in the slot strip must not resize the monitors")
         XCTAssertEqual(a.minY, b.minY, accuracy: 0.5,
                        "…nor slide them. This is the §2.1 reversal, extended to the new strip.")
+
+        // Fix-round-1: the slots stub is now flexible (see stubSurface), so this also detects the
+        // slots region ITSELF going flexible — a rigid stub could only ever prove the stub was
+        // rigid, never that production's `.fixedSize(vertical: true)` wrapping still applies.
+        XCTAssertEqual(try XCTUnwrap(short["slots"], "harness reported no frames").height, 40,
+                       accuracy: 0.5,
+                       "The slot strip is content-sized too: a flexible slots region would "
+                       + "stretch this stub past its ideal.")
     }
 
     func testClosingThePanelGivesItsWidthToTheContent() throws {
@@ -220,6 +233,26 @@ final class SurfaceGeometryTests: XCTestCase {
                        SurfaceLayout.reservedSurfaceWidth, accuracy: 0.001,
                        "SurfaceLayout.reservedSurfaceWidth must equal the sum of the regions in "
                        + "SurfaceMetrics. One of them changed without the other.")
+    }
+
+    /// Fix-round-1, task 6R. Eight cells must fit without scrolling in the COMMON case — the app
+    /// at its declared minimum width with no panel open. With a panel open the strip may scroll;
+    /// that is a visible, recoverable degradation (the `ScrollView` in `SlotBankStripView`). What
+    /// must never happen is cells narrower than their own floor, which overlaps their hit areas
+    /// and lets an edge click fire the neighbouring slot — the defect this test exists to catch
+    /// before it reaches the rendered surface. Pure arithmetic, no rendering needed, same shape as
+    /// `testTheReservedWidthMatchesTheRegionsItClaimsToCover` above.
+    func testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen() {
+        let contentColumn = SurfaceMetrics.minWindowWidth
+            - PanelRailView.width
+            - SurfaceMetrics.dividerWidth * SurfaceMetrics.dividerCount
+            - SurfaceMetrics.mixerWidth
+        let cellsRegion = contentColumn - SurfaceMetrics.slotStripLeadingChromeWidth
+        let needed = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.slotCount)
+            + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.slotCount - 1)
+        XCTAssertGreaterThanOrEqual(cellsRegion, needed,
+                                    "The slot strip does not fit its own eight cells at the "
+                                    + "window minimum. Raise minWindowWidth or shrink the chrome.")
     }
 
     /// The ceiling has to leave the default panel intact at the minimum window, or the app ships a

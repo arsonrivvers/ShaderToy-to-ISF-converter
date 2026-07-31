@@ -28,7 +28,7 @@ struct SlotBankStripView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: SurfaceMetrics.slotStripGapWidth) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SOURCE")
                     .font(.system(size: 9, design: .monospaced))
@@ -40,7 +40,7 @@ struct SlotBankStripView: View {
                 .labelsHidden()
                 .accessibilityLabel("Capture from — which deck a capture reads")
             }
-            .frame(width: 90)
+            .frame(width: SurfaceMetrics.slotStripSourceWidth)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("RECALL TO")
@@ -53,23 +53,34 @@ struct SlotBankStripView: View {
                 .labelsHidden()
                 .accessibilityLabel("Load onto — where a recall writes")
             }
-            .frame(width: 220)
+            .frame(width: SurfaceMetrics.slotStripRecallWidth)
 
             Divider()
 
-            HStack(spacing: 6) {
-                ForEach(0..<SlotBank.slotCount, id: \.self) { index in
-                    SlotCell(index: index,
-                             preset: bank.slots[index],
-                             isAvailable: bank.isAvailable(index),
-                             onRecall: { recall(index) },
-                             onCapture: { capture(into: index) },
-                             onClear: { bank.clear(index) })
-                        .frame(maxWidth: .infinity)
+            // Horizontal scroll, not a fixed shrink: below `SurfaceMetrics.minCellWidth` per
+            // cell, cells no longer compress further — they scroll instead. A narrower window
+            // (or a panel open at the floor) degrades into visible scrolling rather than
+            // invisible hit-area overlap between neighbouring cells, which is what let an edge
+            // click fire the WRONG slot before this fix (fix-round-1, task 6R). Sized by the
+            // outer `.fixedSize(vertical: true)` `InstrumentSurface` already applies to the
+            // whole `slots()` slot — confirmed empirically to bound this ScrollView to its
+            // content's ideal height rather than the greedy full-window height it reports when
+            // unconstrained.
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
+                    ForEach(0..<SlotBank.slotCount, id: \.self) { index in
+                        SlotCell(index: index,
+                                 preset: bank.slots[index],
+                                 isAvailable: bank.isAvailable(index),
+                                 onRecall: { recall(index) },
+                                 onCapture: { capture(into: index) },
+                                 onClear: { bank.clear(index) })
+                            .frame(minWidth: SurfaceMetrics.minCellWidth, maxWidth: .infinity)
+                    }
                 }
             }
         }
-        .padding(8)
+        .padding(SurfaceMetrics.slotStripPadding)
     }
 
     private func recall(_ index: Int) {

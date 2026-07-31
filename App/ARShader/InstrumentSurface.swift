@@ -59,6 +59,53 @@ enum SurfaceMetrics {
     /// stated minimum — with no scroll and no clip indicator.
     static let minWindowWidth: CGFloat = 1180
     static let minWindowHeight: CGFloat = 720
+
+    // MARK: Slot strip (task 6R)
+    //
+    // `SlotBankStripView`'s own leading chrome, hoisted here rather than left as magic numbers
+    // in the view — a fix-round-1 review found that at `minWindowWidth` with a panel open, eight
+    // cells were squeezed to ~31pt, below `SlotCell`'s own ~32pt floor, so adjacent cells'
+    // `.contentShape(Rectangle())` hit areas overlapped and an edge click could fire the WRONG
+    // slot on the one surface whose entire safety property is that a click cannot destroy
+    // anything. `slotStripLeadingChromeWidth` and `minCellWidth` make that arithmetic testable
+    // (`testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen`); the cells themselves now sit
+    // in a horizontal `ScrollView` so any further squeeze degrades into visible scrolling rather
+    // than invisible overlap.
+
+    /// The strip's own outer `.padding(_:)` (same value on all four sides).
+    static let slotStripPadding: CGFloat = 8
+
+    /// The SOURCE (deck A/B) picker's fixed width.
+    static let slotStripSourceWidth: CGFloat = 90
+
+    /// The RECALL TO (five-way) picker's fixed width.
+    static let slotStripRecallWidth: CGFloat = 220
+
+    /// The gap between SOURCE and RECALL TO, RECALL TO and the divider, and the divider and the
+    /// cells region — three of these.
+    static let slotStripGapWidth: CGFloat = 10
+    static let slotStripGapCount: CGFloat = 3
+
+    /// Spacing between adjacent cells inside the (scrollable) cells row.
+    static let slotStripCellSpacing: CGFloat = 6
+
+    /// Everything in the slot strip that is fixed, BEFORE the cells region: both padding edges,
+    /// both pickers, the three gaps around them, and the one `Divider()` separating RECALL TO
+    /// from the cells. Derived from its own named parts rather than a single magic number, so a
+    /// future change to any one part moves this automatically and the fit test below catches a
+    /// regression instead of silently drifting stale.
+    static var slotStripLeadingChromeWidth: CGFloat {
+        slotStripPadding * 2 + slotStripSourceWidth + slotStripRecallWidth
+            + slotStripGapWidth * slotStripGapCount + dividerWidth
+    }
+
+    /// A cell's own floor: `SlotCell`'s horizontal padding (6pt × 2 = 12pt), its index-number
+    /// frame (14pt), and the 6pt spacing between the index and the name = 32pt before a single
+    /// glyph of the shader's name is drawn. 56pt leaves room for a few characters of an 11pt
+    /// monospaced name before the row starts scrolling. Below the 32pt floor,
+    /// adjacent cells' `.contentShape(Rectangle())` hit areas overlap and an edge click can fire
+    /// the WRONG slot — the exact defect this constant exists to prevent.
+    static let minCellWidth: CGFloat = 56
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
