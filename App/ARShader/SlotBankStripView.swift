@@ -1,17 +1,21 @@
 import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
-/// The slot bank: eight cells, a SOURCE deck picker, a RECALL TO destination picker, and nothing
-/// else.
+/// The slot bank: a SOURCE deck picker, a RECALL TO destination picker, and one row of eight cells
+/// — always visible directly under the monitors, never a panel to open mid-set.
 ///
-/// Two pickers, two directions, both visible here because the Bank and Library panels are
-/// mutually exclusive — with the Bank open, the Library's own copy of `target` is off-screen. Both
-/// bind the SAME `$target`, so there is no duplicated state, just a second view of one value where
-/// slots are actually fired: SOURCE (deck A/B) is where a capture READS from; RECALL TO is where a
-/// recall WRITES to. Leaving RECALL TO on a stale value such as `MST FX` would make recall
-/// additive — every slot click appends a new FX stage instead of swapping a deck — so it must be
-/// visible on this surface, not just the Library's.
-struct SlotBankPanelView: View {
+/// Moved here from the rail (task 6R) because recall fires at `target`, and a rail panel put that
+/// picker off-screen exactly when the Bank panel itself was open — an operator could fire a slot at
+/// an invisible destination, where one wrong value silently appends unbounded FX stages. An
+/// always-visible strip keeps the destination always visible too.
+///
+/// Two pickers, two directions, both on the strip's leading edge. Both bind the SAME `$target` the
+/// Library panel binds, so there is no duplicated state: SOURCE (deck A/B) is where a capture READS
+/// from; RECALL TO is where a recall WRITES to. Leaving RECALL TO on a stale value such as `MST FX`
+/// would make recall additive — every slot click appends a new FX stage instead of swapping a deck.
+///
+/// One row of eight cells only. Rows, collapse, and the resize drag are task 7R.
+struct SlotBankStripView: View {
     let instrument: Instrument
     @Binding var target: LibraryTarget
     @ObservedObject private var bank: SlotBank
@@ -24,7 +28,7 @@ struct SlotBankPanelView: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SOURCE")
                     .font(.system(size: 9, design: .monospaced))
@@ -36,6 +40,7 @@ struct SlotBankPanelView: View {
                 .labelsHidden()
                 .accessibilityLabel("Capture from — which deck a capture reads")
             }
+            .frame(width: 90)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("RECALL TO")
@@ -48,16 +53,21 @@ struct SlotBankPanelView: View {
                 .labelsHidden()
                 .accessibilityLabel("Load onto — where a recall writes")
             }
+            .frame(width: 220)
 
-            ForEach(0..<SlotBank.slotCount, id: \.self) { index in
-                SlotCell(index: index,
-                         preset: bank.slots[index],
-                         isAvailable: bank.isAvailable(index),
-                         onRecall: { recall(index) },
-                         onCapture: { capture(into: index) },
-                         onClear: { bank.clear(index) })
+            Divider()
+
+            HStack(spacing: 6) {
+                ForEach(0..<SlotBank.slotCount, id: \.self) { index in
+                    SlotCell(index: index,
+                             preset: bank.slots[index],
+                             isAvailable: bank.isAvailable(index),
+                             onRecall: { recall(index) },
+                             onCapture: { capture(into: index) },
+                             onClear: { bank.clear(index) })
+                        .frame(maxWidth: .infinity)
+                }
             }
-            Spacer(minLength: 0)
         }
         .padding(8)
     }
