@@ -35,6 +35,9 @@ struct CollapsibleSection<Content: View>: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
                 }
+                // The full-row hit target is a property of this component and must not depend on
+                // a greedy sibling in the consumer. Expand to max width regardless of content.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
