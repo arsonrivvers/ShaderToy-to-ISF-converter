@@ -647,7 +647,7 @@ reversed — the library truncates names in the middle precisely because long
 AR_Genuary names differ at the end."
 ```
 
-Expected ARShader count: **229**.
+Expected ARShader count: **230**.
 
 ---
 
@@ -874,7 +874,7 @@ Not a pure lift. onCompileFinished is single-owner and the FX path already
 claims it, so load() owns the composition and clears the one-shot after firing."
 ```
 
-Expected ARShader count: **237**.
+Expected ARShader count: **238**.
 
 ---
 
@@ -960,7 +960,7 @@ git add App/ARShader/SurfaceLayout.swift App/ARShader/SlotBankPanelView.swift Ap
 git commit -m "feat(3b): the bank is the third rail panel — one enum case, as advertised"
 ```
 
-Expected ARShader count: **239**.
+Expected ARShader count: **240**.
 
 ---
 
@@ -1115,7 +1115,7 @@ Update `InstrumentView.panelContent`:
 
 - [ ] **Step 2: Build and run the full suite**
 
-Expected: 239 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
+Expected: 240 tests, 0 failures. No new tests in this task — the view's logic is routing, and the model beneath it is fully covered.
 
 - [ ] **Step 3: Verify the safety property by inspection**
 
@@ -1143,7 +1143,7 @@ xcodebuild test -project App/TrueISFEditor.xcodeproj -scheme TrueISFEditor -deri
 swift test --package-path ShadertoyISFKit --scratch-path /tmp/stkit-build-bank
 ```
 
-Expected: ARShader **239**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
+Expected: ARShader **240**, TrueISFEditor **514 (3 skipped)**, ShadertoyISFKit **312**. Any other ARShader number means a test was lost — find it before continuing.
 
 - [ ] **Step 2: Write the smoke report with legs UNRUN**
 
