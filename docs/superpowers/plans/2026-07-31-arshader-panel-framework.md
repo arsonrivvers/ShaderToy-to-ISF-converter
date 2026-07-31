@@ -2063,11 +2063,19 @@ Then, after the operator confirms:
 - [ ] **Step 3: Verify the binary is genuinely fresh**
 
 ```bash
-strings ~/Applications/ARShader.app/Contents/MacOS/ARShader | grep -c "Show mode collapses every section"
+strings ~/Applications/ARShader.app/Contents/MacOS/ARShader.debug.dylib \
+  | grep -c "collapses every section and closes the panel"
 ```
 
-Expected: `1` or more. Swift strings ≤15 bytes are invisible to `strings`, which is why a long
-marker is used. **Do not tell the operator to relaunch if this is 0.**
+Expected: `1` or more.
+
+**Grep the `.debug.dylib`, NOT `Contents/MacOS/ARShader`.** Under Xcode 26 a Debug build leaves the
+main binary as a ~58KB stub and puts all the real code in `ARShader.debug.dylib` (~4.6MB). Checking
+the stub returns 0 for every marker, always — so it would "prove" a stale install forever and can
+never prove a fresh one. This is the same trap already recorded for TrueISFEditor.
+
+A long marker is used because Swift strings ≤15 bytes are stored inline and are invisible to
+`strings`. **Do not tell the operator to relaunch if this is 0.**
 
 - [ ] **Step 4: Write the smoke report with the legs unchecked**
 
