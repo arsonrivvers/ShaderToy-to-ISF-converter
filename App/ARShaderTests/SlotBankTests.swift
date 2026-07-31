@@ -38,9 +38,12 @@ final class SlotBankTests: XCTestCase {
 
     func testRecallReturnsTheCapturedValuesIntact() throws {
         let bank = SlotBank()
-        bank.capture(preset(speed: 0.9), into: 2)
+        bank.capture(Preset.capturing(url: try realFileURL(),
+                                      snapshot: ParamSnapshot(params: ["speed": .float(0.9)])),
+                     into: 2)
         let got = try XCTUnwrap(bank.recall(2))
-        XCTAssertEqual(got.snapshot.params["speed"], .float(0.9))
+        XCTAssertEqual(got.snapshot.params["speed"], .float(0.9),
+                       "The dialled values must survive capture and come back on recall")
     }
 
     func testClearEmptiesOneSlotAndLeavesItsNeighboursAlone() {
