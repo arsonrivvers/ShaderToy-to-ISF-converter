@@ -1195,3 +1195,95 @@ git commit -m "docs(3b): live smoke report — suites green, legs PENDING"
 | `ParamStore.exportSnapshot()` / `applySnapshot(_:)` | `ParamStore.swift:191` / `:201` |
 
 **One signature changes between tasks, deliberately:** Task 6 creates `SlotBankPanelView(instrument:)` as a placeholder; Task 7 changes it to `SlotBankPanelView(instrument:target:)` and updates the single call site in `InstrumentView.panelContent`. An implementer working Task 6 in isolation should not "fix" this by adding the binding early — Task 6's gate is that the rail grew by one case, and nothing more.
+
+---
+
+# REVISED TASKS — the bank became a strip (2026-07-31, mid-execution)
+
+Tasks 6 and 7 above are **superseded**. Their model-side dependencies (Tasks 1–5) are unaffected.
+Task 7's `SlotCell` — the real `Button`, the context-menu Replace/Clear, the ⌥-click overwrite, the
+`isAvailable` disabling — is sound and carries over verbatim; only its container changes.
+
+### Task 6R: Move the bank out of the rail and into a strip
+
+**Files:**
+- Modify: `App/ARShader/SurfaceLayout.swift` — remove `case bank` from `PanelID`
+- Modify: `App/ARShader/InstrumentView.swift` — remove the `.bank` case from `panelContent`; render the strip
+- Modify: `App/ARShader/InstrumentSurface.swift` — add a `slots` content slot between `monitors` and `strips`
+- Modify: `App/ARShader/SlotBankPanelView.swift` → rename to `SlotBankStripView.swift`, horizontal layout
+- Modify: `App/ARShaderTests/SurfaceLayoutTests.swift` — remove the two `.bank` tests
+- Modify: `App/ARShaderTests/SurfaceGeometryTests.swift` — the surface gains a fifth slot
+- Re-record: the three PNG baselines (back to a two-icon rail)
+
+**Interfaces:**
+- Consumes: `SlotBank`, `Instrument.load(_:onto:thenApply:)`, `Instrument.currentPreset(of:)`.
+- Produces: `SlotBankStripView(instrument:target:)`, `InstrumentSurface`'s fifth generic slot.
+
+`InstrumentSurface` becomes generic over five slots, not four. The strip sits **between** the
+monitor row and the deck strips, in the same `VStack`:
+
+```
+monitors()        .fixedSize(horizontal: false, vertical: true)   // unchanged, content-sized
+Divider()
+slots()           .fixedSize(horizontal: false, vertical: true)   // NEW, content-sized
+Divider()
+strips()          .frame(maxHeight: .infinity, alignment: .top)   // unchanged, flexible
+```
+
+**Both the monitor row and the slot strip are content-sized; only the deck strips are flexible.**
+That is what keeps the §2.1 reversal intact — the monitors still do not resize and do not slide when
+anything below them changes, and the geometry gates that pin it must still pass **untouched**. If
+either gate fails, stop and report: the strip has taken height from the wrong region.
+
+One row of eight cells for this task. Rows come in Task 7R.
+
+- [ ] **Step 1: Extend the geometry gate BEFORE moving anything.** Add to `SurfaceGeometryTests`:
+
+```swift
+    func testTheMonitorStripIsUnmovedByTheSlotStripBelowIt() throws {
+        let layout = SurfaceLayout()
+        let short = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300, slotHeight: 40), size: Self.windowSize)
+        let tall = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300, slotHeight: 200), size: Self.windowSize)
+
+        let a = try XCTUnwrap(short["monitors"], "harness reported no frames")
+        let b = try XCTUnwrap(tall["monitors"], "harness reported no frames")
+        XCTAssertEqual(a.height, b.height, accuracy: 0.5,
+                       "A 160pt change in the slot strip must not resize the monitors")
+        XCTAssertEqual(a.minY, b.minY, accuracy: 0.5,
+                       "…nor slide them. This is the §2.1 reversal, extended to the new strip.")
+    }
+```
+Give `stubSurface` a `slotHeight` parameter and a fifth self-measuring stub. Run it: it must FAIL to compile before the surface has a slots slot.
+
+- [ ] **Step 2: Add the fifth slot to `InstrumentSurface`** and wire the strip in `InstrumentView`. Run the geometry tests. The new gate and both existing monitor gates must all pass.
+
+- [ ] **Step 3: Revert `PanelID.bank`.** Remove the case, both switch arms, the `panelContent` case, and the two `.bank` tests in `SurfaceLayoutTests`. `PanelID.allCases.count` returns to 2.
+
+- [ ] **Step 4: Convert the cell container to horizontal.** `SlotBankStripView` lays eight `SlotCell`s in an `HStack`. **`SlotCell` itself changes as little as possible** — it is reviewed and sound. The SOURCE (A/B) and RECALL TO (five-way) pickers move into the strip's leading edge.
+
+- [ ] **Step 5: Re-record the three PNG baselines** via the `RECORD` sentinel. They change twice over: the rail loses an icon and the surface gains a strip. **Before re-recording, confirm the pairwise-distinctness assertion in `testSurfaceBaselines` still passes** — three baselines that became identical would mean the strip renders nothing.
+
+- [ ] **Step 6: Full suite, foreground.** Report the count. Commit by explicit path.
+
+### Task 7R: Rows, collapse, and the resize drag
+
+**Files:**
+- Modify: `App/ARShader/SlotBank.swift` — `slotCount` 8 → 40, add `static let maxRows = 5`, `perRow = 8`
+- Modify: `App/ARShader/SurfaceLayout.swift` — `Arrangement.bankRows`, `Arrangement.isBankCollapsed`, `setBankRows(_:)`, `toggleBankCollapsed()`
+- Modify: `App/ARShader/SlotBankStripView.swift` — draw `bankRows × 8`, the disclosure, the drag handle, the hidden-count marker
+- Modify: `App/ARShaderTests/SurfaceLayoutTests.swift`, `App/ARShaderTests/SlotBankTests.swift`
+
+**The two invariants this task exists to protect, both tested falsifiably:**
+
+1. **Shrinking rows must not destroy a preset.** Capture into slot 15 (row 2), `setBankRows(1)`, assert `slots[15]` is still non-nil and that `setBankRows(2)` shows it unchanged. This is structural — resize touches `Arrangement`, never `SlotBank` — so the test should be impossible to fail without someone deliberately wiring resize into the model.
+2. **Show mode must not collapse the bank.** `isBankCollapsed` has no `SectionKey`, so `toggleShowMode()` cannot reach it. Assert: collapse false, enter show mode, assert still false; and assert `SectionKey.all` contains nothing bank-related. Falsifiable — adding a bank `SectionKey` turns it red.
+
+Also: `bankRows` clamps to `1...5`; `Arrangement` round-trips both new fields through `SlotBankStore`'s sibling `SurfaceLayoutStore`; a stored `bankRows` of 0 or 99 normalises on load.
+
+### Task 8R: Regression, install, smoke report
+
+As Task 8 above, with the legs rewritten for the strip: the strip is always visible; drag its top
+edge to add a row and the monitors do not move; shrink with a look in the hidden row and the look
+survives; collapse it and show mode does not; eight names legible at full width.
