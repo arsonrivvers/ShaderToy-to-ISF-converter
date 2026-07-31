@@ -1291,17 +1291,21 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Create: `App/ARShader/SettingsPanelView.swift`
 - Modify: `App/ARShader/InstrumentSurface.swift` (delete the Task 4 stub)
-- Modify: `App/ARShader/InstrumentView.swift` (`resolutionPickers` lines 214-285, `outputPicker`
-  lines 391-404, `mixerStrip` lines 169-209)
+- Modify: `App/ARShader/InstrumentView.swift` (`resolutionPickers` lines 214-285, `mixerStrip`
+  lines 169-209). `outputPicker` (lines 391-404) is deliberately NOT touched.
 
 **Interfaces:**
-- Consumes: `Instrument`, `RenderSize`, `RenderScale`, `OutputWindowController`, `ScreenInfo`,
-  `OutputMenu`.
+- Consumes: `Instrument`, `RenderSize`, `RenderScale`. (`OutputWindowController`, `ScreenInfo` and
+  `OutputMenu` stay with `InstrumentView`'s `outputPicker`, which does not move.)
 - Produces: `SettingsPanelView(instrument:)`.
 
-`OUTPUT RES` and the `OUTPUT` destination picker move. `PREVIEW SCALE` and `CUE SCALE` **stay on
-the mixer strip** — they are what gets reached for when the GPU is struggling during a set, and a
-panel-open gesture at that moment is the wrong cost.
+**Only `OUTPUT RES` moves.** `PREVIEW SCALE`, `CUE SCALE` and the `OUTPUT` destination picker all
+stay on the mixer strip — each is reached for at a bad moment, when a panel-open gesture is the
+wrong cost. The scales are what gets dropped when the GPU is struggling mid-set; the destination
+picker is what gets used when a cable is kicked, per M1 smoke legs 17 (*"Unplug mid-set"*) and 18
+(*"Reconnecting and re-selecting the display restores fullscreen output"*). An earlier draft moved
+the picker too; PM spec review caught the contradiction with the smoke report this spec cites as
+its own source, and the operator confirmed the picker stays.
 
 - [ ] **Step 1: Delete the stub**
 
@@ -1310,26 +1314,25 @@ Remove the `SettingsPanelView` stub from the bottom of `App/ARShader/InstrumentS
 - [ ] **Step 2: Create the panel**
 
 Create `App/ARShader/SettingsPanelView.swift`. Move `applyOutput`, `commitTypedResolution`, the
-`OUTPUT RES` block from `resolutionPickers`, and `outputPicker` here verbatim:
+`OUTPUT RES` block from `resolutionPickers` here verbatim. Do NOT move `outputPicker`:
 
 ```swift
 import SwiftUI
 
-/// Load-in configuration: what the instrument renders at, and where it goes.
+/// Load-in configuration: what the instrument renders at.
 ///
-/// These are set once before a show, not reached for mid-song — which is why they left the mixer
-/// strip. PREVIEW SCALE and CUE SCALE deliberately did NOT come with them: those are the controls
-/// the operator reaches for when the GPU is struggling during a set, and a panel-open gesture at
-/// that moment is the wrong cost.
+/// Output SIZE is set once before a show, which is why it left the mixer strip. Three things
+/// deliberately did NOT come with it — PREVIEW SCALE and CUE SCALE (dropped when the GPU is
+/// struggling mid-set) and the OUTPUT destination picker (used when a cable is kicked, per M1
+/// smoke legs 17-18). Each is reached for at a bad moment, and a panel-open gesture then is the
+/// wrong cost.
 struct SettingsPanelView: View {
     let instrument: Instrument
-    @ObservedObject private var output: OutputWindowController
     @State private var widthField = ""
     @State private var heightField = ""
 
     init(instrument: Instrument) {
         self.instrument = instrument
-        self.output = instrument.output
     }
 
     var body: some View {
@@ -1337,8 +1340,6 @@ struct SettingsPanelView: View {
             Text("SETTINGS").font(.system(size: 12, weight: .bold, design: .monospaced))
             Divider()
             outputResolution
-            Divider()
-            outputPicker
             Spacer()
         }
         .padding(10)
@@ -1380,22 +1381,6 @@ struct SettingsPanelView: View {
         }
     }
 
-    /// Output ships CLOSED; this is the deliberate operator enable.
-    private var outputPicker: some View {
-        let screens = ScreenInfo.current()
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("OUTPUT").font(.system(size: 11, weight: .bold, design: .monospaced))
-            Picker("", selection: Binding(
-                get: { output.destination },
-                set: { output.setDestination($0) })) {
-                ForEach(OutputMenu.options(for: screens), id: \.self) { option in
-                    Text(OutputMenu.title(for: option, screens: screens)).tag(option)
-                }
-            }
-            .labelsHidden()
-        }
-    }
-
     private func apply(_ size: RenderSize) {
         instrument.renderer.outputResolution = size
         syncFields()
@@ -1423,9 +1408,11 @@ struct SettingsPanelView: View {
 
 In `App/ARShader/InstrumentView.swift`:
 
-1. Delete `outputPicker` (lines 391-404), `applyOutput` (348-351), `commitTypedResolution`
-   (356-361), and the `widthField` / `heightField` `@State` properties (92-93).
-2. In `mixerStrip`, replace `resolutionPickers` and `outputPicker` with a single `scalePickers`.
+1. Delete `applyOutput` (lines 348-351), `commitTypedResolution` (356-361), and the `widthField`
+   / `heightField` `@State` properties (92-93). **Keep `outputPicker` (391-404) exactly as it is**
+   — it stays on the strip.
+2. In `mixerStrip`, replace `resolutionPickers` with `scalePickers`. `outputPicker` keeps its
+   existing place in the strip, unchanged.
 3. Replace `resolutionPickers` (lines 214-285) with:
 
 ```swift
@@ -2012,8 +1999,8 @@ Create `docs/reports/live-smoke-instrument-m2-phase3a.md` with status `PENDING` 
 10. In show mode, expanding DECK A's FX leaves show mode and keeps FX open; the rest stay collapsed.
 11. `⌘B` latches blackout with a panel open, and in show mode. Hold Escape still works.
 12. `⌘⇧F` still toggles the output window.
-13. OUTPUT RES and the output picker are in Settings and still work; PREVIEW/CUE SCALE are still
-    on the mixer strip and still work.
+13. OUTPUT RES is in Settings and still works. PREVIEW SCALE, CUE SCALE **and the OUTPUT
+    destination picker** are all still on the mixer strip and still work.
 14. Quit and relaunch: the arrangement is exactly as left.
 15. A generator on a deck shows no SOURCES section at all (not an empty one).
 
@@ -2044,7 +2031,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 | §2.2 rail, toggle semantics, shortcuts | 3, 8; semantics tested in 1 (#4) |
 | §2.2 panel width draggable, 260pt floor, remembered | **4b** (the handle), 1 (the clamp), 2 (persistence), 9 (handle reachable) |
 | §2.3 what collapses + summary in header | 5, 6 |
-| §2.4 settings panel day one | 7 |
+| §2.4 settings panel day one (OUTPUT RES only; OUTPUT picker stays on the strip) | 7 |
 | §2.5 show mode + edit-in-show-mode | 1 (logic + 2 tests), 8 (UI) |
 | §3.1 `SurfaceLayout`, `Arrangement` | 1 |
 | §3.2 lives in `App/ARShader` | Global Constraints; every Create path |

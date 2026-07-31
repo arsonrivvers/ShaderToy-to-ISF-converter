@@ -111,13 +111,25 @@ count is that failure mode by design.
 
 ### 2.4 The settings panel, day one
 
-`OUTPUT RES` (the typed W×H, its presets menu, and the megapixel readout) and the `OUTPUT`
-destination picker move off the mixer strip into the settings panel. They are set at load-in, not
-mid-song.
+`OUTPUT RES` — the typed W×H, its presets menu, and the megapixel readout — moves off the mixer
+strip into the settings panel. It is set at load-in, not mid-song.
 
-`PREVIEW SCALE` and `CUE SCALE` **stay on the mixer strip.** They are what the operator reaches for
-when the GPU is struggling during a set, and putting them behind a panel open would cost a gesture
-at exactly the wrong moment.
+**Three controls deliberately stay on the mixer strip**, because each is reached for at a bad
+moment when a panel-open gesture is the wrong cost:
+
+- `PREVIEW SCALE` and `CUE SCALE` — what the operator drops when the GPU is struggling during a
+  set.
+- The **`OUTPUT` destination picker.** This one reverses an earlier draft of this spec, on evidence
+  from the Milestone 1 live smoke that the draft cited as its own source. Leg 17 is *"Unplug
+  mid-set"* and leg 18 is *"Reconnecting and **re-selecting the display** restores fullscreen
+  output"* — so re-selecting the display is a mid-set action, performed in the one scenario where
+  the operator is already dealing with a failure on stage. Putting it behind a rail click plus a
+  panel open is the same mistake the scales rule avoids. Only the *configuration* of output size
+  moves; choosing where the picture goes stays one click away.
+
+Legs 15–18 have never run on hardware, so this is reasoned from the smoke report's own wording
+rather than from felt experience; if running them shows the picker is genuinely never touched
+mid-set, moving it later costs nothing.
 
 ### 2.5 Show mode
 
