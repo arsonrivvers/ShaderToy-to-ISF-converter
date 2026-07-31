@@ -941,6 +941,7 @@ Expected ARShader count: **238**.
 - [ ] **Step 1: Write the implementation**
 
 ```swift
+import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
 /// The slot bank: eight cells, a SOURCE deck picker, and nothing else.
@@ -1042,11 +1043,19 @@ private struct SlotCell: View {
         .background(preset == nil ? Color.clear : Color.white.opacity(0.06))
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
+        // EXACTLY ONE tap gesture. Two `.onTapGesture` modifiers on the same view both fire,
+        // so a second one for ⌥-click would make an option-click recall AND capture — breaking
+        // the one safety property this cell exists to protect. The modifier check lives inside
+        // the single handler instead.
         .onTapGesture {
-            // A filled cell can ONLY recall. Overwriting requires Replace or ⌥-click.
-            if preset == nil { onCapture() } else { onRecall() }
+            if preset == nil {
+                onCapture()                       // empty: nothing can be lost
+            } else if NSEvent.modifierFlags.contains(.option) {
+                onCapture()                       // ⌥-click: the deliberate overwrite
+            } else {
+                onRecall()                        // plain click on a filled cell: ALWAYS recall
+            }
         }
-        .modifier(OptionClickCapture(isFilled: preset != nil, onCapture: onCapture))
         .help(helpText)
         .accessibilityLabel(preset.map { "Slot \(index + 1), \($0.name)" } ?? "Slot \(index + 1), empty")
     }
@@ -1058,19 +1067,6 @@ private struct SlotCell: View {
     }
 }
 
-/// ⌥-click as the fast path for capture-over, equivalent to hover ▸ Replace. Split out so the
-/// modifier order stays readable and the gesture has exactly one definition.
-private struct OptionClickCapture: ViewModifier {
-    let isFilled: Bool
-    let onCapture: () -> Void
-
-    func body(content: Content) -> some View {
-        content.onTapGesture {
-            guard isFilled, NSEvent.modifierFlags.contains(.option) else { return }
-            onCapture()
-        }
-    }
-}
 ```
 
 Update `InstrumentView.panelContent`:
