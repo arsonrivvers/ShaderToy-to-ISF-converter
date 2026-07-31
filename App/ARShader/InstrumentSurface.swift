@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
@@ -28,7 +29,8 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
                 panel()
                     .frame(width: CGFloat(layout.panelWidth))
                     .frame(minWidth: CGFloat(SurfaceLayout.minPanelWidth))
-                Divider()
+                    .accessibilityIdentifier("surface.panel")
+                panelResizeHandle
             }
 
             VStack(spacing: 0) {
@@ -48,8 +50,37 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
             Divider()
             mixer()
         }
+        .coordinateSpace(name: Self.coordinateSpace)
         .background(Color.black)
     }
+
+    /// A 6pt grab strip standing in for the panel's trailing divider.
+    ///
+    /// Wider than the 1pt Divider it replaces because this is aimed at with a mouse mid-session; a
+    /// 1pt target is the same mistake as a 12pt chevron. It still READS as a divider — the visible
+    /// rule is 1pt, the hit area is 6.
+    private var panelResizeHandle: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.001))   // hit-testable, visually absent
+            .frame(width: 6)
+            .overlay(Divider(), alignment: .center)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("surface.panelResizeHandle")
+            .onHover { inside in
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(coordinateSpace: .named(Self.coordinateSpace))
+                    .onChanged { value in
+                        // Absolute, not incremental: the handle sits at the panel's trailing edge,
+                        // so the drag's x IN THE SURFACE's space IS the intended width minus the
+                        // rail. Accumulating deltas drifts when a frame is dropped mid-drag.
+                        layout.setPanelWidth(Double(value.location.x) - Double(PanelRailView.width))
+                    }
+            )
+    }
+
+    static var coordinateSpace: String { "instrumentSurface" }
 }
 
 /// Replaced by the real panel in Task 7.
