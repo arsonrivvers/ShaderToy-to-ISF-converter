@@ -1,6 +1,17 @@
 import AppKit
 import SwiftUI
 
+/// Carries the panel's measured leading edge (in `InstrumentSurface.coordinateSpace`) up from the
+/// panel's own geometry to the resize handle's drag handler.
+///
+/// Measured rather than assumed: the panel's leading edge sits after the rail AND a `Divider()`,
+/// and macOS divider thickness is not a constant worth hardcoding. Reading the real geometry means
+/// this stays correct if the divider's rendered width ever changes.
+private struct PanelLeadingEdgeKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
 /// content column split into a flexible monitor row over a content-sized deck-strip row.
 ///
@@ -13,6 +24,17 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
     @ViewBuilder var monitors: () -> Monitors
     @ViewBuilder var strips: () -> Strips
     @ViewBuilder var mixer: () -> Mixer
+
+    /// The panel's measured leading-edge X, in `Self.coordinateSpace`. Written by the
+    /// `PanelLeadingEdgeKey` preference from the panel's own geometry; read by the resize handle's
+    /// drag handler so the arithmetic never has to assume a divider's rendered width.
+    @State private var panelLeadingEdge: CGFloat = 0
+
+    /// Whether the resize handle currently holds a pushed `NSCursor`. Tracked so push/pop stay
+    /// balanced: a bare hover-in/hover-out pair assumes hover-out always fires, but SwiftUI can
+    /// remove the handle (panel closes mid-hover, e.g. ⌘⌥1) without ever calling `onHover(false)`,
+    /// which would leave the resize cursor stuck for the rest of the session.
+    @State private var isResizeCursorPushed = false
 
     /// The monitors never shrink below this, however much is expanded below them.
     static var minMonitorHeight: CGFloat { 160 }
@@ -30,6 +52,13 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
                     .frame(width: CGFloat(layout.panelWidth))
                     .frame(minWidth: CGFloat(SurfaceLayout.minPanelWidth))
                     .accessibilityIdentifier("surface.panel")
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: PanelLeadingEdgeKey.self,
+                                value: proxy.frame(in: .named(Self.coordinateSpace)).minX)
+                        }
+                    )
                 panelResizeHandle
             }
 
@@ -52,6 +81,7 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
         }
         .coordinateSpace(name: Self.coordinateSpace)
         .background(Color.black)
+        .onPreferenceChange(PanelLeadingEdgeKey.self) { panelLeadingEdge = $0 }
     }
 
     /// A 6pt grab strip standing in for the panel's trailing divider.
@@ -61,21 +91,41 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
     /// rule is 1pt, the hit area is 6.
     private var panelResizeHandle: some View {
         Rectangle()
-            .fill(Color.secondary.opacity(0.001))   // hit-testable, visually absent
+            .fill(Color.clear)   // genuinely invisible; contentShape below is what makes it hit-testable
             .frame(width: 6)
             .overlay(Divider(), alignment: .center)
             .contentShape(Rectangle())
             .accessibilityIdentifier("surface.panelResizeHandle")
             .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                // Balanced and idempotent: only push if we don't already hold a push, only pop if
+                // we do. See `isResizeCursorPushed`'s doc comment for why an unguarded pop can be
+                // skipped entirely.
+                if inside {
+                    guard !isResizeCursorPushed else { return }
+                    NSCursor.resizeLeftRight.push()
+                    isResizeCursorPushed = true
+                } else {
+                    guard isResizeCursorPushed else { return }
+                    NSCursor.pop()
+                    isResizeCursorPushed = false
+                }
+            }
+            .onDisappear {
+                // Backstop for the case `onHover(false)` never fires: the panel closes (⌘⌥1, or
+                // clicking the active rail icon) while the pointer is still over the handle, and
+                // SwiftUI tears the view down without a final hover-out.
+                guard isResizeCursorPushed else { return }
+                NSCursor.pop()
+                isResizeCursorPushed = false
             }
             .gesture(
                 DragGesture(coordinateSpace: .named(Self.coordinateSpace))
                     .onChanged { value in
-                        // Absolute, not incremental: the handle sits at the panel's trailing edge,
-                        // so the drag's x IN THE SURFACE's space IS the intended width minus the
-                        // rail. Accumulating deltas drifts when a frame is dropped mid-drag.
-                        layout.setPanelWidth(Double(value.location.x) - Double(PanelRailView.width))
+                        // Absolute, not incremental: the drag's x IN THE SURFACE's space, minus the
+                        // panel's MEASURED leading edge (not an assumed rail-width + divider-width
+                        // constant), is the intended width. Accumulating deltas drifts when a frame
+                        // is dropped mid-drag.
+                        layout.setPanelWidth(Double(value.location.x) - Double(panelLeadingEdge))
                     }
             )
     }
