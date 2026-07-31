@@ -148,6 +148,28 @@ final class SurfaceGeometryTests: XCTestCase {
     // creating an empty `ARShaderTests/Baselines/RECORD` file and re-running (see
     // `SurfaceRenderHarness.recordSentinel` for why a file and not an environment variable).
 
+    /// The baseline stub differs from the geometry stub in exactly one way: its strips slot holds a
+    /// real `CollapsibleSection` bound to `layout`.
+    ///
+    /// Without it, show mode had NO visible effect on the render — the geometry stub is four solid
+    /// `Color`s that do not read `layout.showMode`, and `toggleShowMode()`'s only other act is
+    /// closing a panel that is already closed by default. `show-mode.png` was therefore
+    /// byte-identical to `panel-closed.png` and could never differ, whatever the code did. Two of
+    /// three baselines were the same image, and one of them was a test incapable of failing.
+    private func stubSurfaceForBaselines(layout: SurfaceLayout) -> some View {
+        InstrumentSurface(layout: layout) {
+            Color.gray
+        } monitors: {
+            Color.blue.frame(height: Self.stubMonitorHeight)
+        } strips: {
+            CollapsibleSection(title: "FX", summary: "3", key: .masterFX, layout: layout) {
+                VStack { ForEach(0..<5, id: \.self) { _ in Slider(value: .constant(0.5)) } }
+            }
+        } mixer: {
+            Color.red.frame(width: 200)
+        }
+    }
+
     func testSurfaceBaselines() throws {
         let recording = SurfaceRenderHarness.isRecording
 
@@ -156,12 +178,29 @@ final class SurfaceGeometryTests: XCTestCase {
             ("panel-library", { let l = SurfaceLayout(); l.select(panel: .library); return l }),
             ("show-mode",     { let l = SurfaceLayout(); l.toggleShowMode(); return l }),
         ]
+
+        var rendered: [String: Data] = [:]
         for (name, make) in cases {
             let data = try XCTUnwrap(SurfaceRenderHarness.png(
-                stubSurface(layout: make(), stripHeight: 300), size: Self.windowSize))
+                stubSurfaceForBaselines(layout: make()), size: Self.windowSize))
+            rendered[name] = data
             if let reason = SurfaceRenderHarness.compareBaseline(data, named: name) {
                 XCTFail(reason)
             }
+        }
+
+        // The three states must actually LOOK different. This is the assertion whose absence let
+        // an identical pair sit in the suite unnoticed: comparing each render to its own baseline
+        // is green even when two renders are the same image, so the duplication is invisible to
+        // the comparison and only visible across it. Checked on every run, including a recording
+        // one — a re-record is exactly when a stub could silently stop distinguishing states.
+        for (a, b) in [("panel-closed", "panel-library"),
+                       ("panel-closed", "show-mode"),
+                       ("panel-library", "show-mode")] {
+            XCTAssertNotEqual(rendered[a], rendered[b],
+                              "\(a) and \(b) rendered byte-identically. A baseline that cannot "
+                              + "differ from another cannot fail, so it gates nothing — the stub "
+                              + "no longer distinguishes these two states.")
         }
 
         // A recording run verified nothing, so it must never report green — otherwise "the suite
