@@ -147,8 +147,6 @@ struct InstrumentView: View {
     @ObservedObject private var masterFX: FXChain
     @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
-    @State private var widthField = ""
-    @State private var heightField = ""
     @State private var renderScaleField = ""
     @State private var cueScaleField = ""
 
@@ -251,7 +249,7 @@ struct InstrumentView: View {
             }
 
             Divider()
-            resolutionPickers
+            scalePickers
             Divider()
             outputPicker
 
@@ -279,49 +277,10 @@ struct InstrumentView: View {
         .padding(10)
     }
 
-    /// Output resolution drives the master AND what the decks rasterise at while live.
-    /// Cue resolution is what a deck rasterises at while it is NOT on program — the only place
-    /// there is real GPU to save, since monitors merely sample an existing texture.
-    private var resolutionPickers: some View {
+    /// The two scales stay on the strip: these are what gets reached for when the GPU is
+    /// struggling mid-set. Output size and destination moved to the settings panel.
+    private var scalePickers: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text("OUTPUT RES").font(.system(size: 11, weight: .bold, design: .monospaced))
-                Spacer()
-                // Presets are a convenience tucked into a menu, not the vocabulary — typing a size
-                // is the primary control.
-                Menu {
-                    ForEach(RenderSize.presets, id: \.self) { preset in
-                        Button(preset.label) { applyOutput(preset) }
-                    }
-                } label: {
-                    Image(systemName: "list.bullet")
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 22)
-                .help("Common sizes")
-            }
-
-            HStack(spacing: 4) {
-                TextField("W", text: $widthField)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 62)
-                    .onSubmit { commitTypedResolution() }
-                Text("×").foregroundStyle(.secondary)
-                TextField("H", text: $heightField)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 62)
-                    .onSubmit { commitTypedResolution() }
-                Button("Set") { commitTypedResolution() }
-                    .controlSize(.small)
-            }
-            .font(.system(size: 11, design: .monospaced))
-
-            Text(String(format: "%.1f MP", instrument.renderer.outputResolution.megapixels))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Divider()
-
             scaleField(title: "PREVIEW SCALE",
                        text: $renderScaleField,
                        current: instrument.renderer.previewScale,
@@ -416,25 +375,7 @@ struct InstrumentView: View {
                                              scale: instrument.renderer.previewScale)
     }
 
-    private func applyOutput(_ size: RenderSize) {
-        instrument.renderer.outputResolution = size
-        syncResolutionFields()
-    }
-
-    /// Parse what was typed. A field that is empty or nonsense keeps the current value rather than
-    /// snapping to a default — losing a deliberately-set output size to a stray keystroke mid-set
-    /// would be worse than ignoring the edit.
-    private func commitTypedResolution() {
-        let current = instrument.renderer.outputResolution
-        let w = Int(widthField.trimmingCharacters(in: .whitespaces)) ?? current.width
-        let h = Int(heightField.trimmingCharacters(in: .whitespaces)) ?? current.height
-        applyOutput(RenderSize(width: w, height: h))   // RenderSize clamps to safe bounds
-    }
-
     private func syncResolutionFields() {
-        let r = instrument.renderer.outputResolution
-        widthField = String(r.width)
-        heightField = String(r.height)
         renderScaleField = String(instrument.renderer.previewScale.percent)
         cueScaleField = String(instrument.renderer.cueRenderScale.percent)
     }

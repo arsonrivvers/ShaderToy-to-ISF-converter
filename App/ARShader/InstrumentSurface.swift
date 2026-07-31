@@ -132,9 +132,3 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
 
     static var coordinateSpace: String { "instrumentSurface" }
 }
-
-/// Replaced by the real panel in Task 7.
-struct SettingsPanelView: View {
-    let instrument: Instrument
-    var body: some View { Color.clear }
-}
