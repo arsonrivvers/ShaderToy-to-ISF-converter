@@ -17,11 +17,52 @@ struct DeckStripView: View {
     @ObservedObject var fx: FXChain
     @ObservedObject var stats: RenderStatsModel
     @ObservedObject var library: LibraryModel
+    @ObservedObject var layout: SurfaceLayout
+    /// The collapsed SOURCES header prints the current route, and the ROUTER publishes route
+    /// changes — `unit` does not republish when a route changes (see `SourceRoutingView`). Without
+    /// this the summary freezes at whatever it read first, which is precisely the frozen-"—"
+    /// defect documented at the top of this file, reintroduced one level up.
+    @ObservedObject var router: SourceRouter
+
+    init(id: DeckID, unit: ShaderUnit, mixer: MixerState, fx: FXChain, stats: RenderStatsModel,
+         library: LibraryModel, layout: SurfaceLayout) {
+        self.id = id
+        self.unit = unit
+        self.mixer = mixer
+        self.fx = fx
+        self.stats = stats
+        self.library = library
+        self.layout = layout
+        self._router = ObservedObject(wrappedValue: unit.imageSources)
+    }
 
     private var layer: LayerParams? { mixer.layers().first { $0.deck == id } }
 
+    /// Routable image inputs, summarised for the collapsed header. A generator has none and the
+    /// section is not rendered at all.
+    private var sourceRows: [DeckControlModel.ControlRow] {
+        DeckControlModel.rows(for: unit.inputs, reservesPrimaryInput: unit.reservesPrimaryInput)
+            .filter { $0.kind == .routed || $0.kind == .chainFed }
+    }
+
+    private var sourcesSummary: String {
+        // Read through the observed `router`, not `unit.imageSources`: the value is the same
+        // object, but only the observed reference makes this recompute when a route changes.
+        let first = sourceRows.first.map { router.source(for: $0.input.name).displayName }
+        guard let first else { return "" }
+        return sourceRows.count > 1 ? "\(first) +\(sourceRows.count - 1)" : first
+    }
+
+    /// Non-image controls — what ShaderControlsView actually renders.
+    private var parameterCount: Int {
+        DeckControlModel.rows(for: unit.inputs, reservesPrimaryInput: unit.reservesPrimaryInput)
+            .filter { $0.kind != .routed && $0.kind != .chainFed }
+            .count
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // ── Performance controls. These never collapse. ──
             HStack {
                 Text("DECK \(id.displayName)")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -35,11 +76,6 @@ struct DeckStripView: View {
                 .lineLimit(1).truncationMode(.middle)
                 .help(unit.shaderName ?? "No shader loaded")
 
-            // Routing sits with the shader's identity, not among its knobs: it is the first thing
-            // you set on a filter, and it renders nothing at all for a generator.
-            SourceRoutingView(unit: unit, library: library)
-
-            // Both values, always — the fader the operator set AND what it is contributing.
             HStack {
                 Text("Opacity").font(.system(size: 11))
                 Spacer()
@@ -70,10 +106,30 @@ struct DeckStripView: View {
                 }
             }
 
+            // ── Configuration. These collapse. ──
+            // A generator has no image inputs, so the SOURCES section is absent entirely rather
+            // than present-and-empty — same rule SourceRoutingView already follows.
+            if !sourceRows.isEmpty {
+                Divider()
+                CollapsibleSection(title: "SOURCES", summary: sourcesSummary,
+                                   key: .deck(id, .sources), layout: layout) {
+                    // showsHeader: false — the section supplies the title here. The FX-stage call
+                    // site keeps the default and draws its own.
+                    SourceRoutingView(unit: unit, library: library, showsHeader: false)
+                }
+            }
+
             Divider()
-            FXChainView(title: "FX", chain: fx, stats: stats, library: library)
+            CollapsibleSection(title: "FX", summary: "\(fx.stages.count)",
+                               key: .deck(id, .fx), layout: layout) {
+                FXChainView(title: "FX", chain: fx, stats: stats, library: library)
+            }
+
             Divider()
-            ShaderControlsView(unit: unit)
+            CollapsibleSection(title: "PARAMETERS", summary: "\(parameterCount)",
+                               key: .deck(id, .parameters), layout: layout) {
+                ShaderControlsView(unit: unit)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,6 +144,7 @@ struct InstrumentView: View {
     @ObservedObject private var output: OutputWindowController
     @ObservedObject private var stats: RenderStatsModel
     @ObservedObject private var layout: SurfaceLayout
+    @ObservedObject private var masterFX: FXChain
     @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
     @State private var widthField = ""
@@ -101,6 +158,7 @@ struct InstrumentView: View {
         self.output = instrument.output
         self.stats = instrument.renderStats
         self.layout = instrument.surfaceLayout
+        self.masterFX = instrument.renderer.masterFX
     }
 
     var body: some View {
@@ -153,7 +211,7 @@ struct InstrumentView: View {
             ForEach(MixerState.layerOrder) { id in
                 DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
                               fx: instrument.deck(id).fx, stats: stats,
-                              library: instrument.library)
+                              library: instrument.library, layout: layout)
                 Divider()
             }
             masterStrip
@@ -168,9 +226,11 @@ struct InstrumentView: View {
             Text("Applied to the program feed, before blackout.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             Divider()
-            ScrollView {
-                FXChainView(title: "MASTER FX", chain: instrument.renderer.masterFX, stats: stats,
-                            library: instrument.library)
+            CollapsibleSection(title: "MASTER FX",
+                               summary: "\(masterFX.stages.count)",
+                               key: .masterFX, layout: layout) {
+                FXChainView(title: "MASTER FX", chain: masterFX,
+                            stats: stats, library: instrument.library)
             }
         }
         .padding(10)

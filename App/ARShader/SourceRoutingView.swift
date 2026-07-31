@@ -15,11 +15,16 @@ struct SourceRoutingView: View {
     /// menu labels would go stale if this observed only the unit.
     @ObservedObject private var router: SourceRouter
     @ObservedObject private var library: LibraryModel
+    /// A `CollapsibleSection` supplies the title on a deck strip, where this view is wrapped. An
+    /// expanded FX stage renders it bare, so there it must draw its own — hence a parameter rather
+    /// than a deletion.
+    private let showsHeader: Bool
 
-    init(unit: ShaderUnit, library: LibraryModel) {
+    init(unit: ShaderUnit, library: LibraryModel, showsHeader: Bool = true) {
         self.unit = unit
         self.router = unit.imageSources
         self.library = library
+        self.showsHeader = showsHeader
     }
 
     /// Image inputs only, in ISF declaration order, each already classified as routable or
@@ -32,8 +37,10 @@ struct SourceRoutingView: View {
     var body: some View {
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("SOURCES")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                if showsHeader {
+                    Text("SOURCES")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                }
                 ForEach(rows) { row in
                     switch row.kind {
                     case .chainFed: chainFedRow(row.input)
