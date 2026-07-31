@@ -78,10 +78,17 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
                 monitors()
                     .fixedSize(horizontal: false, vertical: true)
                 Divider()
-                // Flexible: the strips absorb whatever the monitor strip does not take, and scroll
-                // within it when a shader's parameter list is long.
+                // Flexible, and TOP-ALIGNED: the strips absorb whatever the monitor strip does not
+                // take, and scroll within it when a parameter list is long — but their content
+                // hangs from the top of that region rather than centring in it. Centred, a
+                // collapsed surface left a large empty band under the monitor strip with the deck
+                // controls floating in the middle of the window.
+                //
+                // Top alignment is also what makes room for the strips the operator expects to add
+                // below this one: a centred region would push its content around every time a new
+                // strip appeared underneath.
                 strips()
-                    .frame(maxHeight: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity)
 

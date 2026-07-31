@@ -285,8 +285,13 @@ struct InstrumentView: View {
         .padding(10)
     }
 
+    /// `alignment: .top` — the columns hang from the top of the region, they do not float in the
+    /// middle of it. With sections collapsed a centred column left a large empty band between the
+    /// monitor strip and DECK A, and the three columns drifted relative to each other as their
+    /// content changed height (operator, 2026-07-31). Top-aligned, a collapsed column simply gets
+    /// shorter and everything above it stays put.
     private var deckStrips: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
                 DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
                               fx: instrument.deck(id).fx, stats: stats,
