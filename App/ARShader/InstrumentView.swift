@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One deck's strip: name, opacity (set AND effective), blend mode, and its generated controls.
@@ -149,6 +150,13 @@ struct InstrumentView: View {
     @State private var keys: BlackoutKeyMonitor?
     @State private var renderScaleField = ""
     @State private var cueScaleField = ""
+    /// Debounces `Arrangement` persistence. `panelWidth` is part of `Arrangement` and the panel
+    /// resize handle writes it on every drag delta, so saving on every `onChange` would encode
+    /// and hit `UserDefaults` on nearly every frame of a drag. Cancelled and replaced on each
+    /// change; `flushArrangement()` cancels it and saves immediately, so a pending debounce can
+    /// never be the reason the final position is lost.
+    @State private var arrangementPersistTask: Task<Void, Never>?
+    @State private var terminationObserver: NSObjectProtocol?
 
     init(instrument: Instrument) {
         self.instrument = instrument
@@ -172,8 +180,17 @@ struct InstrumentView: View {
         .background(shortcuts)
         // Single-parameter form: the project's deployment target is macOS 13, and the
         // two-parameter `onChange(of:initial:_:)` the brief specified needs macOS 14.
+        //
+        // Debounced, not saved on every call: see `arrangementPersistTask`'s doc comment. A
+        // continuous panel-width drag fires this on nearly every frame; waiting for a short quiet
+        // period coalesces that into roughly one write per drag instead of one per delta.
         .onChange(of: layout.arrangement) { new in
-            SurfaceLayoutStore().save(new)
+            arrangementPersistTask?.cancel()
+            arrangementPersistTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                SurfaceLayoutStore().save(new)
+            }
         }
         .onAppear {
             if keys == nil {
@@ -183,8 +200,38 @@ struct InstrumentView: View {
                 monitor.start()
                 keys = monitor
             }
+            // Quitting the app (⌘Q, Dock ▸ Quit) does not reliably send this view an
+            // `onDisappear` before the process exits, so the debounce above needs a second flush
+            // path that isn't tied to view teardown. `willTerminateNotification` fires on the main
+            // thread while the app is still alive, ahead of the actual exit.
+            if terminationObserver == nil {
+                terminationObserver = NotificationCenter.default.addObserver(
+                    forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+                ) { _ in
+                    // `queue: .main` guarantees this runs on the main thread; `assumeIsolated`
+                    // bridges that into the `@MainActor` isolation `flushArrangement()` and
+                    // `SurfaceLayout` need, with no `async` hop — a hop here could still be
+                    // sitting unrun in the queue when the process actually exits, which is exactly
+                    // the silent-loss case this observer exists to close.
+                    MainActor.assumeIsolated { flushArrangement() }
+                }
+            }
         }
-        .onDisappear { keys?.stop(); keys = nil }
+        .onDisappear {
+            keys?.stop(); keys = nil
+            if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+            terminationObserver = nil
+            flushArrangement()
+        }
+    }
+
+    /// Cancels any pending debounced write and saves the current arrangement synchronously.
+    /// Called on view teardown and on app termination — the two points where a still-pending
+    /// debounce could otherwise silently drop the last change instead of persisting it.
+    private func flushArrangement() {
+        arrangementPersistTask?.cancel()
+        arrangementPersistTask = nil
+        SurfaceLayoutStore().save(layout.arrangement)
     }
 
     /// Hidden buttons that exist only to carry keyboard shortcuts. `.keyboardShortcut` needs a
