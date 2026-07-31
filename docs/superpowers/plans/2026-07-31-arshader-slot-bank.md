@@ -844,7 +844,7 @@ Expected ARShader count: **236**.
 
 **Files:**
 - Modify: `App/ARShader/SurfaceLayout.swift` (add the case, its `systemImage`, its `title`)
-- Modify: `App/ARShader/InstrumentView.swift` (`panelContent` gains `.bank`)
+- Modify: `App/ARShader/InstrumentView.swift` — add a case to `panelContent` for the bank panel
 - Create: `App/ARShader/SlotBankPanelView.swift` (placeholder body — Task 7 fills it)
 - Test: `App/ARShaderTests/SurfaceLayoutTests.swift` (extend)
 
