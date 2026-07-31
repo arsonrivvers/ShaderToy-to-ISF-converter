@@ -21,7 +21,7 @@ private struct SurfaceWidthKey: PreferenceKey {
 
 /// Fixed metrics of the instrument surface.
 ///
-/// A non-generic home because `InstrumentSurface` is generic over its four content slots, and Swift
+/// A non-generic home because `InstrumentSurface` is generic over its five content slots, and Swift
 /// has no stored static properties in generic types — the same reason `coordinateSpace` below is
 /// computed rather than stored.
 ///
@@ -62,15 +62,18 @@ enum SurfaceMetrics {
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
-/// content column split into a flexible monitor row over a content-sized deck-strip row.
+/// content column split into a content-sized monitor row, a content-sized slot strip, and a
+/// flexible deck-strip row.
 ///
 /// Generic over its content so tests can render this exact layout code with stub views — the live
 /// monitors are Metal-backed and cannot be rendered in a unit test, and a layout gate that skips
 /// the layout is worthless.
-struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>: View {
+struct InstrumentSurface<Panel: View, Monitors: View, Slots: View, Strips: View,
+                          Mixer: View>: View {
     @ObservedObject var layout: SurfaceLayout
     @ViewBuilder var panel: () -> Panel
     @ViewBuilder var monitors: () -> Monitors
+    @ViewBuilder var slots: () -> Slots
     @ViewBuilder var strips: () -> Strips
     @ViewBuilder var mixer: () -> Mixer
 
@@ -136,11 +139,18 @@ struct InstrumentSurface<Panel: View, Monitors: View, Strips: View, Mixer: View>
                 monitors()
                     .fixedSize(horizontal: false, vertical: true)
                 Divider()
-                // Flexible, and TOP-ALIGNED: the strips absorb whatever the monitor strip does not
-                // take, and scroll within it when a parameter list is long — but their content
-                // hangs from the top of that region rather than centring in it. Centred, a
-                // collapsed surface left a large empty band under the monitor strip with the deck
-                // controls floating in the middle of the window.
+                // Also CONTENT-SIZED, for the same reason as the monitors above: the slot strip
+                // (task 6R) sits between the monitors and the deck strips, and it must take height
+                // from the flexible region below it — never from the monitors above. Both the
+                // monitor row and this strip are pinned; only the deck strips give.
+                slots()
+                    .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                // Flexible, and TOP-ALIGNED: the strips absorb whatever the monitor strip and the
+                // slot strip do not take, and scroll within it when a parameter list is long — but
+                // their content hangs from the top of that region rather than centring in it.
+                // Centred, a collapsed surface left a large empty band under the monitor strip with
+                // the deck controls floating in the middle of the window.
                 //
                 // Top alignment is also what makes room for the strips the operator expects to add
                 // below this one: a centred region would push its content around every time a new

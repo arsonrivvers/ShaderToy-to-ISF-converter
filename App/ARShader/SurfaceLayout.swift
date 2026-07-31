@@ -5,7 +5,7 @@ import Foundation
 /// Later phases add cases here and nothing else changes — that is the whole reason the panel is a
 /// rail rather than a set of fixed regions.
 enum PanelID: String, CaseIterable, Codable, Identifiable, Sendable {
-    case library, settings, bank
+    case library, settings
     var id: String { rawValue }
 
     /// SF Symbol for the rail. Drawn glyphs are an art-direction decision, deferred.
@@ -13,7 +13,6 @@ enum PanelID: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .library:  return "square.grid.2x2"
         case .settings: return "gearshape"
-        case .bank:     return "square.grid.3x3"
         }
     }
 
@@ -21,7 +20,6 @@ enum PanelID: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .library:  return "Library"
         case .settings: return "Settings"
-        case .bank:     return "Bank"
         }
     }
 

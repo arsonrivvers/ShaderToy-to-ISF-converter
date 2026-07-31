@@ -6,7 +6,7 @@ final class SurfaceGeometryTests: XCTestCase {
 
     private static let windowSize = CGSize(width: 1600, height: 1000)
     private static var space: String {
-        InstrumentSurface<Color, Color, Color, Color>.coordinateSpace
+        InstrumentSurface<Color, Color, Color, Color, Color>.coordinateSpace
     }
 
     /// Stand-ins for the Metal monitor row and the deck strips: same layout participation, no GPU,
@@ -24,13 +24,20 @@ final class SurfaceGeometryTests: XCTestCase {
     /// stub has to be something a flexible row would visibly stretch.
     private static let stubMonitorIdealHeight: CGFloat = 160
 
-    private func stubSurface(layout: SurfaceLayout, stripHeight: CGFloat) -> some View {
+    /// `slotHeight` defaults so the many callers that only care about `stripHeight` need no change;
+    /// only the new gate below passes it explicitly.
+    private func stubSurface(layout: SurfaceLayout, stripHeight: CGFloat,
+                              slotHeight: CGFloat = 40) -> some View {
         InstrumentSurface(layout: layout) {
             Color.gray.measured("panel", in: Self.space)
         } monitors: {
             Color.blue
                 .frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
                 .measured("monitors", in: Self.space)
+        } slots: {
+            // Rigid, unlike the monitor stub: this one only needs to REPORT a chosen height so the
+            // gate below can vary it, not prove itself flexible.
+            Color.yellow.frame(height: slotHeight).measured("slots", in: Self.space)
         } strips: {
             // The 620pt minimum is production's (`deckStrips`), and the stub must carry it: without
             // it the strips compress instead of pushing, the surface never overflows, and
@@ -90,6 +97,24 @@ final class SurfaceGeometryTests: XCTestCase {
                        "The monitor strip must not slide when the content below it changes")
         XCTAssertLessThan(tallY, 1.0,
                           "It sits at the very top of the content column, not floating below it")
+    }
+
+    /// Task 6R's own gate, extending the §2.1 reversal to the strip inserted below the monitors.
+    /// The slot strip sits BETWEEN the monitors and the deck strips, so it is the new region most
+    /// likely to accidentally take height from — or give height to — the monitor row above it.
+    func testTheMonitorStripIsUnmovedByTheSlotStripBelowIt() throws {
+        let layout = SurfaceLayout()
+        let short = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300, slotHeight: 40), size: Self.windowSize)
+        let tall = SurfaceRenderHarness.frames(
+            stubSurface(layout: layout, stripHeight: 300, slotHeight: 200), size: Self.windowSize)
+
+        let a = try XCTUnwrap(short["monitors"], "harness reported no frames")
+        let b = try XCTUnwrap(tall["monitors"], "harness reported no frames")
+        XCTAssertEqual(a.height, b.height, accuracy: 0.5,
+                       "A 160pt change in the slot strip must not resize the monitors")
+        XCTAssertEqual(a.minY, b.minY, accuracy: 0.5,
+                       "…nor slide them. This is the §2.1 reversal, extended to the new strip.")
     }
 
     func testClosingThePanelGivesItsWidthToTheContent() throws {
@@ -230,6 +255,10 @@ final class SurfaceGeometryTests: XCTestCase {
             // this stub's job is to make show mode VISIBLE (via the section below), not to detect
             // a flexible monitor row — that is the geometry gate's job.
             Color.blue.frame(height: 300)
+        } slots: {
+            // Rigid, same reasoning as the monitor stub above. The real strip's content is not
+            // exercised here — the geometry gate covers layout, this covers the pixel diff.
+            Color.yellow.frame(height: 40)
         } strips: {
             CollapsibleSection(title: "FX", summary: "3", key: .masterFX, layout: layout) {
                 VStack { ForEach(0..<5, id: \.self) { _ in Slider(value: .constant(0.5)) } }

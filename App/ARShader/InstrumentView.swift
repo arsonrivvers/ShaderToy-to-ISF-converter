@@ -172,6 +172,8 @@ struct InstrumentView: View {
             panelContent
         } monitors: {
             monitors
+        } slots: {
+            SlotBankStripView(instrument: instrument, target: $libraryTarget)
         } strips: {
             deckStrips
         } mixer: {
@@ -262,8 +264,6 @@ struct InstrumentView: View {
             LibraryPanelView(instrument: instrument, target: $libraryTarget)
         case .settings:
             SettingsPanelView(instrument: instrument)
-        case .bank:
-            SlotBankPanelView(instrument: instrument, target: $libraryTarget)
         case nil:
             EmptyView()
         }

@@ -223,19 +223,4 @@ final class SurfaceLayoutTests: XCTestCase {
             .masterFX,
         ]), "Performance controls are not collapsible and must never appear here")
     }
-
-    /// The deliberate test of phase 3a's central claim: adding a tool costs one enum case.
-    func testTheBankIsTheThirdRailPanelAndBindsCommandOptionThree() {
-        XCTAssertEqual(PanelID.allCases.count, 3, "library, settings, bank")
-        XCTAssertEqual(PanelID.bank.shortcutNumber, 3,
-                       "The rail's premise is that a new tool costs one case and inherits ⌘⌥N")
-        XCTAssertFalse(PanelID.bank.title.isEmpty)
-    }
-
-    func testOpeningTheBankSwapsRatherThanStacking() {
-        let layout = SurfaceLayout()
-        layout.select(panel: .library)
-        layout.select(panel: .bank)
-        XCTAssertEqual(layout.openPanel, .bank, "The rail swaps one panel; it never shows two")
-    }
 }
