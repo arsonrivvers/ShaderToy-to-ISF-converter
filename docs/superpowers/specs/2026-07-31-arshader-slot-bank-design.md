@@ -11,9 +11,31 @@ depends_on: docs/superpowers/plans/2026-07-31-arshader-panel-framework.md (phase
 
 ## What this is
 
-Eight slots. Each holds a **preset**: a shader together with the parameter values that were dialled
-when it was captured. Clicking a slot recalls that look onto whatever the load-target picker names.
-The bank is a third tenant of the phase 3a rail.
+A **resizable, collapsible strip of slots directly under the monitor row**. Each slot holds a
+**preset**: a shader together with the parameter values that were dialled when it was captured.
+Clicking a slot recalls that look onto whatever the load-target picker names.
+
+## REVISED mid-execution, 2026-07-31 — the bank is a strip, not a rail panel
+
+The first version of this spec made the bank a third tenant of the phase 3a rail. The operator
+proposed the strip instead, mid-build: *"Why can't we just have them live as a strip directly
+underneath the preview panel? … Resizable, we can adjust the amount of them on the fly if we want
+more shaders per set (1x8, 2 rows of 8 etc), collapsable."*
+
+It is better, not merely different, and it **dissolves** a defect rather than fixing one. The task-7
+review found that recall fires at the load-target picker, which lives on the mixer strip and is
+therefore off-screen exactly when the Bank panel is open — leaving the operator firing slots at an
+invisible destination, where one value silently appends unbounded FX stages. An always-visible strip
+makes the destination always visible too. The problem stops existing.
+
+It also earns its space three other ways: no panel to open mid-set; full window width, so eight
+names are legible where a 280pt rail panel truncated them; and 8-per-row scales one-to-one onto the
+APC40 MkII's 8×5 clip matrix, which a narrow vertical panel never could.
+
+**Cost, stated plainly:** permanent vertical height taken from the deck strips, which is the same
+tradeoff the operator reversed §2.1 over. `PanelID.bank` is reverted and the PNG baselines
+re-recorded back to a two-icon rail. Everything model-side — `Preset`, `SlotBank`, `SlotBankStore`,
+`ShaderUnit.sourceURL`, the load seam — is presentation-independent and survives untouched.
 
 ## Why it is this and not a set list
 
@@ -37,8 +59,8 @@ are deferred to 3c.
 
 **In:**
 - `Preset` — a shader URL plus a `ParamSnapshot`.
-- `SlotBank` — eight slots, capture / recall / clear, persisted across launches.
-- A `PanelID.bank` rail panel presenting the bank.
+- `SlotBank` — **forty** slots (5 rows x 8, the APC40 matrix), capture / recall / clear, persisted.
+- A resizable, collapsible **slot strip** between the monitor row and the deck strips.
 - `ShaderUnit.sourceURL` — the loaded URL is currently discarded, so capture cannot be built
   without it.
 - Extraction of load-to-target out of `LibraryPanelView` onto `Instrument`, **with the interface
@@ -53,8 +75,8 @@ are deferred to 3c.
 - **Naming, browsing and renaming presets** — phase 3c, together with favorites and recents.
 - **Randomization** — later. It operates on a `Preset`'s values, which this shape already supports
   without change.
-- **Slot counts other than eight.** Eight is one APC40 row. The count is a single constant so the
-  full 8×5 grid is a later change of that constant plus a layout, not a change of model.
+- **Slot counts other than forty.** Forty is the APC40 matrix. The MODEL always holds forty; how
+  many are DRAWN is `bankRows x 8`, an arrangement flag the operator drags.
 
 ## Architecture
 
@@ -107,6 +129,39 @@ func currentPreset(of deck: DeckID) -> Preset?   // nil when the deck has no sha
 
 `recall` likewise returns the preset rather than applying it. Applying needs the instrument and the
 target. The model's entire surface is values in, values out.
+
+### Rows, collapse, and why shrinking cannot destroy a look
+
+**The model always holds forty slots. It has no concept of rows at all.** `bankRows` is an
+*arrangement* flag: it decides how many are DRAWN, never how many exist.
+
+That makes the operator's guarantee structural rather than a promise. Dragging from two rows to one
+with looks in row two does not delete them — the array is still forty long, the presets are still on
+disk, and dragging back reveals them unchanged. There is no code path in which a resize can destroy
+a captured look, because resize never touches the model. The strip shows a quiet "N hidden" marker
+when filled slots sit below the visible rows, so they are not silently forgotten.
+
+**`bankRows` and the bank's collapsed flag live on `Arrangement`, OUTSIDE `expanded` and with no
+`SectionKey`.** This is the same structural trick phase 3a used for blackout. Show mode collapses
+every section by iterating `SectionKey.all`; because the bank has no key, **show mode cannot collapse
+it by construction** rather than by promise. That is the correct behaviour: the operator's own rule
+is that configuration collapses and performance never does, and firing slots is performance — the
+same category as the crossfader and BLACKOUT, which show mode already leaves alone. The operator can
+still collapse the strip by hand; show mode just will not do it for them.
+
+```
+// on Arrangement
+var bankRows: Int          // 1...5, default 1. Rows DRAWN, not rows stored.
+var isBankCollapsed: Bool  // default false. No SectionKey — show mode cannot reach it.
+
+// on SurfaceLayout
+func setBankRows(_ rows: Int)     // clamped to 1...SlotBank.maxRows
+func toggleBankCollapsed()
+```
+
+Resize is a drag on the strip's top edge that **snaps to whole rows** — it reads like the panel
+divider the operator already has, and there is no stepper or dialog to hit mid-set. Collapsing is a
+disclosure control on the strip itself.
 
 ### `SlotBankStore`
 
