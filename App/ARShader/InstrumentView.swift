@@ -169,6 +169,12 @@ struct InstrumentView: View {
         } mixer: {
             mixerStrip.frame(width: 200)
         }
+        .background(shortcuts)
+        // Single-parameter form: the project's deployment target is macOS 13, and the
+        // two-parameter `onChange(of:initial:_:)` the brief specified needs macOS 14.
+        .onChange(of: layout.arrangement) { new in
+            SurfaceLayoutStore().save(new)
+        }
         .onAppear {
             if keys == nil {
                 let monitor = BlackoutKeyMonitor(mixer: mixer) {
@@ -179,6 +185,24 @@ struct InstrumentView: View {
             }
         }
         .onDisappear { keys?.stop(); keys = nil }
+    }
+
+    /// Hidden buttons that exist only to carry keyboard shortcuts. `.keyboardShortcut` needs a
+    /// control; these are the smallest thing that is one. Blackout stays with BlackoutKeyMonitor —
+    /// it must work even when SwiftUI focus is somewhere unhelpful.
+    private var shortcuts: some View {
+        ZStack {
+            Button("") { layout.toggleShowMode() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            ForEach(Array(PanelID.allCases.enumerated()), id: \.element) { index, panel in
+                Button("") { layout.select(panel: panel) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")),
+                                      modifiers: [.command, .option])
+            }
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     /// Whichever tool the rail has open. Task 7 adds `.settings`.
@@ -256,6 +280,17 @@ struct InstrumentView: View {
             Spacer()
             statsReadout
 
+            Button { layout.toggleShowMode() } label: {
+                Text(layout.showMode ? "SHOW MODE ON" : "SHOW MODE")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: 22)
+            }
+            .buttonStyle(.bordered)
+            .tint(layout.showMode ? .accentColor : .gray)
+            .help("⌘⇧P collapses every section and closes the panel, so the monitors take the "
+                  + "space. Press it again to restore. Touching a section while in show mode "
+                  + "leaves show mode and keeps your change.")
+
             Button {
                 mixer.toggleBlackoutLatch()
             } label: {
@@ -270,7 +305,7 @@ struct InstrumentView: View {
             .tint(mixer.isBlackedOut ? .red : .gray)
             .help("⌘B latches blackout. Hold Escape for a momentary blackout.")
 
-            Text("⌘B latch · hold ESC · ⌘⇧F output")
+            Text("⌘B latch · hold ESC · ⌘⇧F output · ⌘⇧P show")
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
