@@ -1082,6 +1082,9 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Modify: `App/ARShader/InstrumentView.swift` — the DeckStripView body block at lines 23-80, and
   the masterStrip block at lines 154-167. (Both live in that one file; there is no separate
   DeckStripView source file.)
+- Modify: `App/ARShader/SourceRoutingView.swift` — add an optional `showsHeader` parameter (see
+  Step 3). Its other call site, `FXStageRow` in `App/ARShader/FXChainView.swift`, must keep the
+  header and is deliberately left untouched.
 
 **Interfaces:**
 - Consumes: `CollapsibleSection`, `SectionKey`, `SurfaceLayout`, and the existing
@@ -1095,6 +1098,28 @@ line 19):
 
 ```swift
     @ObservedObject var layout: SurfaceLayout
+    /// The collapsed SOURCES header prints the current route, and the ROUTER publishes route
+    /// changes — `unit` does not republish when a route changes (see `SourceRoutingView`). Without
+    /// this the summary freezes at whatever it read first, which is precisely the frozen-"—"
+    /// defect documented at the top of this file, reintroduced one level up.
+    @ObservedObject var router: SourceRouter
+```
+
+`DeckStripView` needs an explicit initialiser to derive the router from the unit, since a memberwise
+init would force every call site to reach into `unit.imageSources` itself:
+
+```swift
+    init(id: DeckID, unit: ShaderUnit, mixer: MixerState, fx: FXChain, stats: RenderStatsModel,
+         library: LibraryModel, layout: SurfaceLayout) {
+        self.id = id
+        self.unit = unit
+        self.mixer = mixer
+        self.fx = fx
+        self.stats = stats
+        self.library = library
+        self.layout = layout
+        self._router = ObservedObject(wrappedValue: unit.imageSources)
+    }
 ```
 
 Update its construction in `deckStrips` (line 143-145):
@@ -1118,7 +1143,9 @@ Add these computed properties to `DeckStripView`, above `body`:
     }
 
     private var sourcesSummary: String {
-        let first = sourceRows.first.map { unit.imageSources.source(for: $0.input.name).displayName }
+        // Read through the observed `router`, not `unit.imageSources`: the value is the same
+        // object, but only the observed reference makes this recompute when a route changes.
+        let first = sourceRows.first.map { router.source(for: $0.input.name).displayName }
         guard let first else { return "" }
         return sourceRows.count > 1 ? "\(first) +\(sourceRows.count - 1)" : first
     }
@@ -1188,7 +1215,9 @@ Replace lines 23-80 (the whole `body`) with:
                 Divider()
                 CollapsibleSection(title: "SOURCES", summary: sourcesSummary,
                                    key: .deck(id, .sources), layout: layout) {
-                    SourceRoutingView(unit: unit, library: library)
+                    // showsHeader: false — the section supplies the title here. The FX-stage call
+                    // site keeps the default and draws its own.
+                    SourceRoutingView(unit: unit, library: library, showsHeader: false)
                 }
             }
 
@@ -1209,13 +1238,43 @@ Replace lines 23-80 (the whole `body`) with:
     }
 ```
 
-`SourceRoutingView` renders its own `SOURCES` header; remove it there so the section header is not
-doubled. In `App/ARShader/SourceRoutingView.swift`, delete lines 35-36:
+`SourceRoutingView` renders its own `SOURCES` header, which would now be doubled inside the
+`CollapsibleSection`. **Do NOT simply delete it** — `FXStageRow` in `App/ARShader/FXChainView.swift`
+also renders `SourceRoutingView` (inside an expanded FX stage), and that call site is NOT wrapped in
+a `CollapsibleSection`. Deleting the header outright would strip the label off every FX stage's
+source block — a regression in the FX surface the operator signed off on 2026-07-30.
+
+Make the header optional instead. In `App/ARShader/SourceRoutingView.swift`, add a stored property
+after `@ObservedObject private var library: LibraryModel`:
 
 ```swift
-                Text("SOURCES")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+    /// A `CollapsibleSection` supplies the title on a deck strip, where this view is wrapped. An
+    /// expanded FX stage renders it bare, so there it must draw its own — hence a parameter rather
+    /// than a deletion.
+    private let showsHeader: Bool
 ```
+
+and take it in the initialiser, defaulting to `true` so the `FXStageRow` call site is unchanged:
+
+```swift
+    init(unit: ShaderUnit, library: LibraryModel, showsHeader: Bool = true) {
+        self.unit = unit
+        self.router = unit.imageSources
+        self.library = library
+        self.showsHeader = showsHeader
+    }
+```
+
+then guard the header in `body`:
+
+```swift
+                if showsHeader {
+                    Text("SOURCES")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                }
+```
+
+The deck call site inside the `CollapsibleSection` above passes `showsHeader: false`.
 
 - [ ] **Step 4: Collapse the master strip's FX**
 
