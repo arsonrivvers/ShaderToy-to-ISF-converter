@@ -32,20 +32,21 @@ final class Instrument: ObservableObject {
         // Under XCTest, `Instrument()` is built many times across the suite — every ARShader test
         // that touches a deck or the library builds one — and would otherwise read AND overwrite
         // the operator's REAL slot bank in `UserDefaults.standard` on every run. Task 3 already
-        // established the doctrine for this (`SlotBankStoreTests` uses a private suite so tests
+        // established the doctrine for this (`SlotBankStoreTests` uses an isolated store so tests
         // never clobber the real bank); this applies the same isolation one level up, to every
-        // `Instrument()` built under the harness, not just this file's own tests. Chose a fresh
-        // volatile suite per instance (isolates BOTH load and save) over merely skipping the
-        // `onChange` hook below: skipping only the write would still `bankStore.load()` the real
-        // bank into a test instrument's initial state, which is exactly the nondeterminism this is
-        // meant to remove.
-        let bankStore: SlotBankStore
-        if TestHarness.isActive {
-            let suiteName = "ARShader.Instrument.testHarness.\(UUID().uuidString)"
-            bankStore = SlotBankStore(defaults: UserDefaults(suiteName: suiteName) ?? .standard)
-        } else {
-            bankStore = SlotBankStore()
-        }
+        // `Instrument()` built under the harness, not just this file's own tests.
+        //
+        // Round 1 of this fix used a fresh `UserDefaults(suiteName:)` per instance. Round 2 replaced
+        // that: a suite still materialises a real cfprefsd-backed file in ~/Library/Preferences the
+        // moment anything writes to it, and those files never clean themselves up — 5 accumulated
+        // from this alone before the fix, on top of 63 from Task 3's tests doing the same thing.
+        // `InMemoryKeyValueStore` (`SlotBankStore.swift`) isolates BOTH load and save with no file
+        // touched at all — chosen over merely skipping the `onChange` write hook below, because
+        // skipping only the write would still `bankStore.load()` the real bank into a test
+        // instrument's initial state, which is exactly the nondeterminism this exists to remove.
+        let bankStore = TestHarness.isActive
+            ? SlotBankStore(defaults: InMemoryKeyValueStore())
+            : SlotBankStore()
         self.slotBank = SlotBank(slots: bankStore.load())
         // The same shared device/queue the editor uses, so both apps cooperate with one GPU
         // context rather than each minting their own.

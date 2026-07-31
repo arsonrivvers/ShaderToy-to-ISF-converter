@@ -4,12 +4,15 @@ import XCTest
 @MainActor
 final class SlotBankStoreTests: XCTestCase {
 
-    private var defaults: UserDefaults!
+    private var defaults: InMemoryKeyValueStore!
 
     override func setUp() {
         super.setUp()
-        // A private suite so tests never read or clobber the real bank.
-        defaults = UserDefaults(suiteName: "SlotBankStoreTests-\(UUID().uuidString)")
+        // In-memory, not a `UserDefaults(suiteName:)` private suite (coordinator fix round 2): a
+        // suite still materialises a real file in ~/Library/Preferences the moment anything writes
+        // to it, and those files never clean themselves up — this doctrine's OWN prior form left
+        // 63 of them behind. `InMemoryKeyValueStore` isolates the same way with nothing on disk.
+        defaults = InMemoryKeyValueStore()
     }
 
     private func preset(_ speed: Double) -> Preset {

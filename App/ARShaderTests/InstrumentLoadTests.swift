@@ -265,8 +265,10 @@ final class InstrumentLoadTests: XCTestCase {
 
     /// IMPORTANT 2: every `Instrument()` in this suite would otherwise read and overwrite the
     /// operator's REAL slot bank in `UserDefaults.standard`. Confirms the harness gate in
-    /// `Instrument.init()` routes to a volatile suite instead — a capture on a fresh test
-    /// instrument must not move the real key at all.
+    /// `Instrument.init()` routes to `InMemoryKeyValueStore` instead (coordinator fix round 2 —
+    /// round 1's `UserDefaults(suiteName:)` isolated the KEY but still littered a real
+    /// ~/Library/Preferences file per instance) — a capture on a fresh test instrument must not
+    /// move the real key at all.
     func testAFreshInstrumentUnderTheHarnessDoesNotWriteTheRealSlotBank() {
         let before = UserDefaults.standard.data(forKey: SlotBankStore.key)
         let instrument = Instrument()
