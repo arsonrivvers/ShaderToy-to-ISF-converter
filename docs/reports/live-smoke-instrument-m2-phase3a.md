@@ -8,15 +8,19 @@ sections collapse, show mode, and the `⌘⇧P` collapse-everything shortcut. Au
 green; the legs below are reasoned-but-unverified until the operator runs them on device, per the
 on-device gate in `CLAUDE.personal.md`.
 
-- **Build under test:** not yet installed (`./scripts/run-instrument.sh` is the operator's call —
-  it quits any running ARShader instance and was deliberately NOT run as part of this report).
+- **Build under test:** `~/Applications/ARShader.app`, installed 2026-07-31 09:56. `ARShader.debug.dylib`
+  verified byte-identical (sha256 `fb33e28d…`) to the `/tmp/arshader-ddata-panel` build product, which
+  was produced two seconds after the `9688e9d` commit. Under Xcode 26 the real code is in the
+  `.debug.dylib`, not the 58KB `Contents/MacOS/ARShader` stub.
 - **Automated gates:**
   - ARShaderTests: **199 tests, 0 failures** (expected 199 — match)
   - TrueISFEditorTests: **514 tests, 3 skipped, 0 failures** (expected 514 (3 skipped) — match)
   - ShadertoyISFKitTests: **312 tests, 0 failures** (expected 312 — match)
 - **Operator:** Conner (unrun)
 - **Date:** 2026-07-31
-- **Branch:** `m2-panel-framework`, commit `310d397`
+- **Branch:** `m2-panel-framework`, commit `9688e9d` (suite counts recorded at `310d397`; the three
+  commits since are the freshness-check fix, the §2.1 reversal and the top-align, all of which left
+  the 199/514/312 counts unchanged)
 - **Result:** PENDING. No leg has been run or signed.
 
 ## Legs
@@ -31,7 +35,8 @@ State each hypothesis so it can fail. A leg is only CONFIRMED when the operator 
 | 4 | Panel resize | Dragging the panel edge resizes it; it does not go below 260pt | ☐ unrun |
 | 5 | Independent collapse | Each of SOURCES, FX, PARAMETERS collapses and expands on both decks independently | ☐ unrun |
 | 6 | Collapsed summary | A collapsed header still shows its count/summary | ☐ unrun |
-| 7 | Monitors grow | **The monitors visibly grow as sections collapse.** (The whole point.) | ☐ unrun |
+| 7 | Monitors hold still | **The monitor strip does not resize and does not slide when sections collapse or expand, or when the panel opens.** Collapsing buys less scrolling in the strips below, not a bigger picture. (Reversed from "monitors grow" at `e208776` on operator feedback — *"the windows jump around and it's confusing"*.) | ☐ unrun |
+| 7b | Deck columns top-align | The deck columns sit flush to the top of their region rather than floating centred; collapsing a section shortens the column downward | ☐ unrun |
 | 8 | MASTER FX collapse | MASTER FX collapses; its stage count stays visible collapsed | ☐ unrun |
 | 9 | Collapse-all shortcut | `⌘⇧P` collapses everything and closes the panel; `⌘⇧P` again restores it exactly | ☐ unrun |
 | 10 | Show-mode edit escape | In show mode, expanding DECK A's FX leaves show mode and keeps FX open; the rest stay collapsed | ☐ unrun |
