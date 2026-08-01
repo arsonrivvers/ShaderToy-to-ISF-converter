@@ -36,7 +36,8 @@ final class LibrarySelection: ObservableObject {
     }
 }
 
-/// Browse the corpus and drag a shader onto a deck, an FX chain, or a slot.
+/// Browse the corpus, click a shader to load it onto deck A, or drag it onto any deck, FX chain,
+/// or slot.
 struct LibraryPanelView: View {
     let instrument: Instrument
     @StateObject private var selection = LibrarySelection()
@@ -61,15 +62,33 @@ struct LibraryPanelView: View {
                 .frame(width: 150)
             }
 
+            // Fix-round-1, F3 (operator ruling — overrides task 5's "removes click-to-load
+            // entirely"): a plain `Text` dropped the button trait, the activate action, and —
+            // with the picker also gone — every keyboard/VoiceOver path to load a shader anywhere
+            // in the app. Drag and tap coexist on `.draggable`, same as `SlotCell`'s Button below
+            // does with its own drop target. The tap action loads onto deck A specifically — the
+            // one target that can never overwrite a saved look, and `InstrumentView`'s historical
+            // default for the picker this task removed. Not reconfigurable: reintroducing a
+            // target picker is exactly what task 5 removed, and the ruling did not restore it.
             List(entries) { entry in
-                Text(entry.name)
-                    .font(.system(size: 12, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)   // long AR_Genuary names differ at the END
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .draggable(ShaderDrag(source: .library, url: entry.url, snapshot: nil))
-                    .help("Drag onto a deck, an FX chain, or a slot")
+                Button {
+                    instrument.load(entry.url, onto: .deck(.one))
+                } label: {
+                    Text(entry.name)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)   // long AR_Genuary names differ at the END
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .draggable(ShaderDrag(source: .library, url: entry.url, snapshot: nil))
+                // Both halves, not one replacing the other (F4): names are EXPECTED to
+                // middle-truncate (see the comment above), so the full name is the only way to
+                // read a name the row itself cut off, and the drag hint is the only place the
+                // gesture is documented at all.
+                .help("\(entry.name) — click to load onto deck A, or drag onto a deck, an FX "
+                      + "chain, or a slot")
             }
             .listStyle(.inset)
 

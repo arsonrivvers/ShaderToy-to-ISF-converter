@@ -314,6 +314,19 @@ struct MonitorTile: View {
                 else { return false }
                 instrument.load(drag.url, onto: .deck(id), thenApply: drag.snapshot)
                 return true
+            // Accepted limitation, not an oversight (fix-round-1, F2 — operator ruling: keep the
+            // modern API, do not fix). `isTargeted` receives only a `Bool`; SwiftUI resolves the
+            // hovering item's VALUE only inside `action`, at drop time. A deck-sourced drag onto
+            // a DIFFERENT deck is rejected by `ShaderDrag.accepts` (a deck may only be dropped on
+            // a slot — see the `.deck` branch), but this highlight cannot ask "which source is
+            // this?" before the drop lands, so it lights up for another deck's drag too —
+            // correctly rejected a moment later when `action` runs, never loaded. `DropDelegate`'s
+            // `DropInfo.itemProviders(for:)` (macOS 11+) could answer this at
+            // `dropEntered`/`validateDrop`, but every such fix is an API rollback off
+            // `Transferable`/`.dropDestination`, which the brief specified deliberately (see
+            // `ShaderDrag.swift`'s own doc comment). Slots — the one destination that can
+            // actually destroy a dialled-in look — ARE filtered correctly; see
+            // `SlotBankStripView.wouldHighlight(at:)`.
             } isTargeted: { isDropTargeted = $0 }
         } else {
             view

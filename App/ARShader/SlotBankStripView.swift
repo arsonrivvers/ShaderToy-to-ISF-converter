@@ -92,7 +92,8 @@ extension EnvironmentValues {
 /// value of this picker that can append an FX stage, which is what made phase 3b's stale-RECALL-TO
 /// hazard reachable in the first place. That constraint also removes the deck a capture would read
 /// FROM, so there is deliberately no way to capture a look between this task and task 6, which
-/// restores capture via a deck-monitor drag rather than reinstating a picker. See `capture(into:)`.
+/// restores capture via a deck-monitor drag rather than reinstating a picker (see the `ForEach`'s
+/// own `.dropDestination`, the only place `SlotBank.capture` is called from this view).
 ///
 /// Rows, collapse, and the resize drag (task 7R). The model (`SlotBank`) always holds forty slots
 /// and has no concept of rows at all — `layout.bankRows` decides how many are DRAWN, never how
@@ -124,12 +125,47 @@ struct SlotBankStripView: View {
 
     static var recallTargets: [DeckID] { DeckID.allCases }
 
-    /// The slot a compatible drag is currently hovering, ACCEPTANCE-FILTERED — set only when
-    /// `ShaderDrag.accepts` would say yes for THIS slot's fill state and the live ⌥ state, not
-    /// merely when a drag of the right TYPE is hovering (task 5 brief, "must NOT fire for a
-    /// target that would reject"). Safe to compute without knowing the drag's `source`: for a
-    /// `.slot` destination, `accepts` reduces to the identical `!isSlotFilled || option` predicate
-    /// for both legal sources (library, deck) — see `ShaderDrag.accepts`.
+    /// A placeholder URL for `wouldHighlight`'s probe drag — see that method's doc comment. Never
+    /// read; `ShaderDrag.accepts` never inspects `url` when deciding acceptance.
+    private static let highlightProbeURL = URL(fileURLWithPath: "/")
+
+    /// Whether `drag` would be accepted onto slot `index` right now. The ONE call both the drop's
+    /// `.dropDestination` `action` (with the REAL drag) and its `isTargeted` highlight (via
+    /// `wouldHighlight(at:)`, with a placeholder — see that method) route through, so `on: .slot`
+    /// and `isSlotFilled:` are decided in exactly one place rather than the drop and the highlight
+    /// silently agreeing by construction.
+    ///
+    /// **Fix-round-1, F1.** Before this, the `isTargeted` closure re-derived `!isSlotFilled ||
+    /// option` inline instead of asking `ShaderDrag.accepts`, so mutating `on: .slot` →
+    /// `on: .deck(.one)`, or `isSlotFilled: bank.slots[index] != nil` → `isSlotFilled: false`, at
+    /// the action closure's OWN call to `accepts` left all 292 tests green: nothing exercised that
+    /// exact call site, and the inline duplicate could not disagree with a mutation it never saw.
+    /// Not `private`: `SlotBankStripViewDropSeamTests` calls this directly, the same "testable
+    /// seam on the view struct itself" pattern `recallTargets` and `InstrumentView.liveResolution`
+    /// already use — no rendering, no view-drop simulation, just a pure call.
+    func wouldAccept(_ drag: ShaderDrag, at index: Int) -> Bool {
+        ShaderDrag.accepts(drag, on: .slot, isSlotFilled: bank.slots[index] != nil,
+                           withOption: NSEvent.modifierFlags.contains(.option))
+    }
+
+    /// The `isTargeted` highlight's version of the same question, asked before SwiftUI has
+    /// resolved which item is actually hovering — `isTargeted` receives only a `Bool`, never the
+    /// dragged value (see `FXChainView`'s and `MonitorTile`'s doc comments on this same platform
+    /// limitation, fix-round-1 F2). Routes through `wouldAccept` with a placeholder `.library`
+    /// source rather than re-deriving the predicate: for a `.slot` destination,
+    /// `ShaderDrag.accepts` returns the IDENTICAL `!isSlotFilled || option` result for every legal
+    /// source (`.library`, `.deck` — see `accepts(source:on:isSlotFilled:withOption:)`'s own
+    /// switch), so which placeholder source is used here never changes the answer, and this stays
+    /// a genuine call into the shared rule rather than a second implementation of it.
+    func wouldHighlight(at index: Int) -> Bool {
+        wouldAccept(ShaderDrag(source: .library, url: Self.highlightProbeURL, snapshot: nil),
+                   at: index)
+    }
+
+    /// The slot a compatible AND acceptable drag is currently hovering — set only when
+    /// `wouldHighlight(at:)` says yes for THIS slot's fill state and the live ⌥ state, not merely
+    /// when a drag of the right TYPE is hovering (task 5 brief, "must NOT fire for a target that
+    /// would reject").
     @State private var targetedSlot: Int?
 
     /// A slot a drop just refused, driving a brief shake (see `SlotCell`'s `isRejected`). Cleared
@@ -361,22 +397,17 @@ struct SlotBankStripView: View {
                                          isTargeted: targetedSlot == index,
                                          isRejected: rejectedSlot == index,
                                          onRecall: { recall(index) },
-                                         onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
                                     .frame(width: cellWidth, height: cellWidth * 9.0 / 16.0)
-                                    // The never-overwrite invariant restated for a gesture
-                                    // (`ShaderDrag.accepts`) — the single most important mutation
-                                    // proof in the phase: a mid-set drag must never silently
-                                    // replace a dialled-in look. Both legal drop sources (library,
-                                    // deck) reduce to the identical `!isSlotFilled || option`
-                                    // predicate for a `.slot` destination, so evaluating it here
-                                    // needs no knowledge of which source is actually dragging.
+                                    // The never-overwrite invariant restated for a gesture — the
+                                    // single most important mutation proof in the phase: a mid-set
+                                    // drag must never silently replace a dialled-in look. Both this
+                                    // action and the `isTargeted` highlight below route through
+                                    // `wouldAccept`/`wouldHighlight` — ONE decision, not two
+                                    // independent ones that could silently drift apart
+                                    // (fix-round-1, F1).
                                     .dropDestination(for: ShaderDrag.self) { items, _ in
-                                        guard let drag = items.first,
-                                              ShaderDrag.accepts(
-                                                drag, on: .slot,
-                                                isSlotFilled: bank.slots[index] != nil,
-                                                withOption: NSEvent.modifierFlags.contains(.option))
+                                        guard let drag = items.first, wouldAccept(drag, at: index)
                                         else {
                                             rejectedSlot = index      // drives the shake
                                             Task {
@@ -395,13 +426,7 @@ struct SlotBankStripView: View {
                                             if targetedSlot == index { targetedSlot = nil }
                                             return
                                         }
-                                        // Filtered, not the raw flag — see `targetedSlot`'s doc
-                                        // comment: highlighting a target that would reject the
-                                        // drop is worse than no highlight at all on a strip of
-                                        // eight visually identical cells.
-                                        let filled = bank.slots[index] != nil
-                                        let option = NSEvent.modifierFlags.contains(.option)
-                                        targetedSlot = (!filled || option) ? index : nil
+                                        targetedSlot = wouldHighlight(at: index) ? index : nil
                                     }
                                     // The ONE gate that observes the RENDERED frame rather than the
                                     // computed property feeding it — writes `renderedCellWidth`,
@@ -510,17 +535,6 @@ struct SlotBankStripView: View {
         guard let preset = bank.recall(index) else { return }
         instrument.load(preset.shaderURL, onto: .deck(recallTarget), thenApply: preset.snapshot)
     }
-
-    /// **Permanently a no-op as of task 5.** Capture now happens exactly one way: dragging a
-    /// library shader or a deck monitor onto a cell, handled entirely inside the `ForEach`'s own
-    /// `.dropDestination` (it calls `bank.capture` directly — see "Never a second write path into
-    /// `SlotBank.capture`"). `SlotCell`'s empty-cell click still calls `onCapture()`, which still
-    /// reaches this method, because there is no longer anything a click COULD capture from — a
-    /// click, unlike a drag, carries no payload. Left wired rather than removed: ripping out
-    /// `SlotCell`'s click plumbing is a bigger change than this task's copy-accuracy mandate asks
-    /// for, and the cell's help text and context menu (fixed this task) no longer promise the
-    /// click does anything.
-    private func capture(into index: Int) {}
 }
 
 /// How one cell reads. Derived rather than stored, so it cannot drift from the bank.
@@ -593,7 +607,6 @@ private struct SlotCell: View {
     /// A drop just landed here and was refused — drives the shake below.
     let isRejected: Bool
     let onRecall: () -> Void
-    let onCapture: () -> Void
     let onClear: () -> Void
 
     private var state: SlotCellState { .of(preset: preset, isAvailable: isAvailable, liveOn: liveOn) }
@@ -690,18 +703,16 @@ private struct SlotCell: View {
                    value: isRejected)
     }
 
-    /// Empty → capture (nothing can be lost). Filled + ⌥ → capture (the deliberate overwrite).
-    /// Filled, no modifier → ALWAYS recall. This is the one place the modifier check happens; the
-    /// Button above is the one place a tap can originate.
-    private func activate() {
-        if preset == nil {
-            onCapture()
-        } else if NSEvent.modifierFlags.contains(.option) {
-            onCapture()
-        } else {
-            onRecall()
-        }
-    }
+    /// Click always recalls (fix-round-1, F6). ⌥ no longer changes anything about a click: it
+    /// used to route a filled slot's ⌥-click to `onCapture()`, but capture is a drag-only gesture
+    /// now (task 5) and that call reached nothing — an operator holding ⌥ mid-set got silence
+    /// where they expected a recall. ⌥ keeps its "I mean it" meaning where overwriting is a real
+    /// risk: a DROP landing on a filled slot. A click can no longer overwrite anything, so ⌥ has
+    /// nothing left to guard there.
+    ///
+    /// Safe on an empty slot without a guard: `SlotBankStripView.recall(_:)` already no-ops
+    /// (`SlotBank.recall` returns nil) when there is nothing to recall.
+    private func activate() { onRecall() }
 
     private var helpText: String {
         guard let preset else {

@@ -41,7 +41,9 @@ struct FXChainView: View {
                     .help(budgetHelp)
             }
             if chain.stages.isEmpty {
-                Text("Load a shader with this chain selected in the library.")
+                // Fix-round-1, F5: named the "Load onto" picker task 5 deleted. A chain fills
+                // exactly one way now — drag a library shader onto it.
+                Text("Drag a shader here to add it to the chain.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             ForEach(Array(chain.stages.enumerated()), id: \.element.id) { index, stage in
@@ -60,6 +62,18 @@ struct FXChainView: View {
             else { return false }
             instrument.load(drag.url, onto: target, thenApply: drag.snapshot)
             return true
+        // Accepted limitation, not an oversight (fix-round-1, F2 — operator ruling: keep the
+        // modern API, do not fix). `isTargeted` receives only a `Bool`; SwiftUI resolves the
+        // hovering item's VALUE only inside `action`, at drop time. A deck-sourced drag is
+        // rejected by `ShaderDrag.accepts` for every destination here (only a library drag may
+        // fill an FX chain), but this highlight cannot ask "which source is this?" before the
+        // drop lands, so it lights up for a deck drag too — correctly rejected a moment later
+        // when `action` runs, never appended. `DropDelegate`'s `DropInfo.itemProviders(for:)`
+        // (macOS 11+) could answer this at `dropEntered`/`validateDrop`, but every such fix is an
+        // API rollback off `Transferable`/`.dropDestination`, which the brief specified
+        // deliberately (see `ShaderDrag.swift`'s own doc comment). Slots — the one destination
+        // that can actually destroy a dialled-in look — ARE filtered correctly; see
+        // `SlotBankStripView.wouldHighlight(at:)`.
         } isTargeted: { isTargeted = $0 }
     }
 
