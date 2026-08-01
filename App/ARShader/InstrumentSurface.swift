@@ -39,7 +39,19 @@ enum SurfaceMetrics {
     static let resizeHandleWidth: CGFloat = 6
 
     /// The deck strips' own minimum. Below this they clip rather than shrink.
-    static let stripsMinWidth: CGFloat = 620
+    ///
+    /// **620→830, fix-round-1, F3/F4.** The 620pt value predated a real measurement: task 4's
+    /// `testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth` originally measured DECK A / DECK B /
+    /// MASTER at ~619pt with a bare, un-forced `Instrument()` — which turned out to be silently
+    /// reading whatever section-expand state was left in real, persisted `UserDefaults` (F4). Forced
+    /// to a KNOWN state (every `SectionKey` explicitly expanded, not inherited), the SAME empty
+    /// configuration measures **815pt** — an empty FX chain's placeholder text ("Load a shader with
+    /// this chain selected in the library.") and PARAMETERS' own empty state both contribute real
+    /// width that a collapsed section had been hiding. 830 covers that with 15pt of margin. This
+    /// does NOT cover a POPULATED deck strip (a shader with real inputs, an actual FX stage): that
+    /// measured ~993pt in the same fix-round and is a separate, deferred finding — see the test's
+    /// doc comment.
+    static let stripsMinWidth: CGFloat = 830
 
     /// The mixer strip — BLACKOUT, SHOW MODE, the crossfader and the OUTPUT destination picker.
     /// Fixed width, and never a region anything else may cover.
@@ -54,10 +66,11 @@ enum SurfaceMetrics {
     /// The window's declared minimum, sized so that every region above fits WITH a panel open at
     /// the default 280pt width, plus slack for divider-thickness variation.
     ///
-    /// Was 1100 through master, which predates the rail and the handle. `reservedWidth` (872) plus
-    /// the 280pt default panel is 1152, so 1100 clipped the mixer strip by 52pt at the app's own
-    /// stated minimum — with no scroll and no clip indicator.
-    static let minWindowWidth: CGFloat = 1180
+    /// Was 1100 through master, which predates the rail and the handle; raised to 1180 when
+    /// `reservedWidth` was 872 (1180 − (872 + 280) = 28pt slack). Fix-round-1 (task 4, F3/F4) raised
+    /// `stripsMinWidth` 620→830 off a real measurement, moving `reservedWidth` to 1082 — carrying
+    /// the SAME 28pt slack forward: 1082 + 280 + 28 = 1390.
+    static let minWindowWidth: CGFloat = 1390
     static let minWindowHeight: CGFloat = 720
 
     // MARK: Slot strip (task 6R)

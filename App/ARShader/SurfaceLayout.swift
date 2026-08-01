@@ -139,11 +139,12 @@ final class SurfaceLayout: ObservableObject {
     /// the deck strips' own minimum, and the mixer strip.
     ///
     /// A fraction of the window would NOT be a correct ceiling — at the minimum window size, half
-    /// the width still starves the strips' 620pt minimum and pushes the mixer out. The bound the
-    /// operator actually needs is "everything else still fits", which is this subtraction.
-    /// `SurfaceMetrics` owns the parts; `testTheReservedWidthMatchesTheRegionsItClaimsToCover`
-    /// fails if the two ever drift apart.
-    static let reservedSurfaceWidth: Double = 872
+    /// the width still starves the strips' minimum and pushes the mixer out. The bound the operator
+    /// actually needs is "everything else still fits", which is this subtraction. `SurfaceMetrics`
+    /// owns the parts; `testTheReservedWidthMatchesTheRegionsItClaimsToCover` fails if the two ever
+    /// drift apart. 872→1082, fix-round-1 (task 4, F3/F4): `SurfaceMetrics.stripsMinWidth` moved
+    /// 620→830 off a real, deterministic measurement — see that constant's own doc comment.
+    static let reservedSurfaceWidth: Double = 1082
 
     /// The widest the panel may be drawn in a surface of `surfaceWidth`.
     ///

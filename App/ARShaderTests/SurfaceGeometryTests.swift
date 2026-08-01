@@ -244,15 +244,58 @@ final class SurfaceGeometryTests: XCTestCase {
     /// SwiftUI to report the content's IDEAL width instead of stretching to whatever a parent
     /// proposes — and asserts the declared floor actually covers it.
     ///
+    /// **Deterministic, not inherited (fix-round-1, F4).** `Instrument.init` reads the real,
+    /// persisted `SurfaceLayoutStore` for `surfaceLayout` (unlike the slot-bank store, which is
+    /// already isolated under `TestHarness.isActive` — see that init's own comment), so whatever
+    /// expand/collapse state the OPERATOR last left the app in would otherwise leak into this
+    /// measurement, and `CollapsibleSection` renders nothing at all for a collapsed section. Every
+    /// `SectionKey` is force-expanded explicitly before measuring, so the arrangement measured here
+    /// is fully known regardless of what `Instrument()` loaded from disk — the same fix this file's
+    /// own `stubMonitorIdealHeight` comment argues for one layer up.
+    ///
+    /// **That determinism fix changed the measured number, which forced a real constant change
+    /// (fix-round-1, F3+F4 together).** The FIRST version of this test built a bare, un-forced
+    /// `Instrument()` and measured ~619pt — which turned out to be silently reading whatever
+    /// section-expand state was left in real `UserDefaults` on the machine it ran on. Forced to a
+    /// KNOWN state (every section explicitly expanded, never inherited), the SAME empty
+    /// configuration measures **815pt**: an empty FX chain's placeholder text and PARAMETERS' own
+    /// empty state both contribute real width a collapsed section had been hiding. That is a
+    /// GENUINE, deterministic gap against the old 620pt floor — not a machine-dependent fluke, not
+    /// something a doc comment can define away — so `SurfaceMetrics.stripsMinWidth` is raised
+    /// 620→830 (15pt margin over the measurement) rather than documented around. That in turn moves
+    /// `SurfaceMetrics.reservedWidth`/`SurfaceLayout.reservedSurfaceWidth` (872→1082) and, carrying
+    /// forward the SAME 28pt slack `minWindowWidth`'s own doc comment already establishes,
+    /// `SurfaceMetrics.minWindowWidth` (1180→1390). See each constant's own doc comment for that
+    /// arithmetic; `testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen`'s `knownCellOverflow`
+    /// was recomputed against the new `minWindowWidth` too (3→0 — the wider window closes that gap
+    /// as a side effect).
+    ///
+    /// **Populating the strips (real shader + FX stage per deck) measured ~993pt — not asserted
+    /// here, but no longer an open gap either.** I loaded a real fixture onto both decks and an FX
+    /// stage onto deck A, exactly as `InstrumentLoadTests` loads shaders, and re-measured this same
+    /// content with the determinism fix in place: natural width was ~993pt. That load code is not
+    /// checked in (scratch, run to get the number, then reverted — this test measures the empty
+    /// configuration only, per F3's explicit "or state the floor is for the empty configuration"
+    /// option). It is included here because, arithmetically, it is no longer worrying: at the NEW
+    /// `minWindowWidth` (1390) with no panel open, `contentColumn` (see
+    /// `testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen`) is 1144pt — comfortably above the
+    /// measured 993pt, so a populated deck strip has room to render at its natural size rather than
+    /// being compressed. This is arithmetic against a real, once-measured number, not a fresh
+    /// empirical re-check after the `minWindowWidth` raise — worth an operator's eyes on a populated
+    /// deck strip at the new minimum before calling this closed, not just this arithmetic.
+    ///
     /// **Measured, not trusted.** A prior draft of this task's brief asserted the true minimum had
-    /// drifted to ~655pt and the 620pt constant was stale; this measurement puts the real DECK A /
-    /// DECK B / MASTER content at ~619pt — already covered by the existing 620pt floor, with no
-    /// stale gap open. `stripsMinWidth` is left unchanged; raising it to an unverified number would
-    /// have widened `reservedWidth` (and so `minWindowWidth`) for no measured reason. If a future
-    /// change grows the deck strips' content past 620pt, THIS assertion is what will catch it —
-    /// not a second hand-picked constant.
+    /// drifted to ~655pt off the (non-deterministic) 620pt constant. The real number, once measured
+    /// deterministically, is 815pt for the empty configuration — different from ~655pt, but the
+    /// brief's underlying instinct (620 is stale) was right. `stripsMinWidth` is now 830pt (15pt
+    /// margin over 815). If a future change grows the empty configuration past that, THIS assertion
+    /// is what will catch it.
     func testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth() throws {
-        let view = InstrumentView(instrument: Instrument())
+        let instrument = Instrument()
+        // Known, not inherited — see this test's doc comment (F4).
+        for key in SectionKey.all { instrument.surfaceLayout.setExpanded(true, for: key) }
+
+        let view = InstrumentView(instrument: instrument)
         let space = "deckStripsNaturalWidth"
         let content = view.deckStripsContent
             .fixedSize(horizontal: true, vertical: false)
@@ -264,8 +307,8 @@ final class SurfaceGeometryTests: XCTestCase {
         let natural = try XCTUnwrap(frames["strips"], "harness reported no frames").width
 
         XCTAssertLessThanOrEqual(natural, SurfaceMetrics.stripsMinWidth,
-                                 "DECK A / DECK B / MASTER's own natural content width "
-                                 + "(\(natural)pt) exceeds the declared floor "
+                                 "DECK A / DECK B / MASTER's own natural content width in the "
+                                 + "EMPTY configuration (\(natural)pt) exceeds the declared floor "
                                  + "(\(SurfaceMetrics.stripsMinWidth)pt) — raise stripsMinWidth to "
                                  + "at least the measured value, with this failure as the reason.")
     }
@@ -280,26 +323,39 @@ final class SurfaceGeometryTests: XCTestCase {
     /// **Rewritten to bound the gap instead of hiding it.** The SAFETY property this test has
     /// always guarded — a cell can never render below its own floor, so adjacent
     /// `.contentShape(Rectangle())` hit areas cannot overlap and an edge click cannot fire the
-    /// neighbouring slot — is proven structurally by
-    /// `testCellSizeIsPinnedRegardlessOfWindowWidth`: cells render at EXACTLY `minCellWidth` ×
-    /// `slotCellHeight` at every window width tried, via an explicit `.frame(width:height:)` that
-    /// cannot be stretched by an ambient proposal — never narrower. That test is the actual overlap
-    /// guard now; this one does not need to re-derive it. What THIS test bounds is the SIZE of the
-    /// shortfall against `knownCellOverflow`, a named, explicit number instead of a silently
-    /// accepted or silently skipped gap.
+    /// neighbouring slot — rests on `SlotCell`'s call site using an EXACT `.frame(width:
+    /// SurfaceMetrics.minCellWidth, height: SurfaceMetrics.slotCellHeight)`, not a `minWidth` floor:
+    /// SwiftUI's documented behaviour for an exact `.frame(width:height:)` is to report precisely
+    /// that size regardless of any ambient proposal, so a cell can be neither narrower NOR wider
+    /// than `minCellWidth`, by construction of the modifier — this is a property of the code, not
+    /// something a test empirically discovers. **Correction (fix-round-1, F2): an earlier version of
+    /// this comment named `testCellSizeIsPinnedRegardlessOfWindowWidth` as structural proof of that
+    /// pinning — that test built its own stand-in rectangle sized from the SAME constants it then
+    /// compared against, so it proved nothing about `SlotCell`.** Its replacement,
+    /// `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`, measures the REAL
+    /// `SlotBankStripView` and is a genuine regression gate on the sizing chain — but per its own
+    /// doc comment, mutation testing found the render harness cannot distinguish the fixed chain
+    /// from the old, buggy one either, so it does not independently "prove" the anti-overlap
+    /// property beyond what the modifier's own documented semantics already guarantee. This test
+    /// does not need to re-derive either claim — it only bounds the SIZE of the shortfall against
+    /// `knownCellOverflow`, a named, explicit number instead of a silently accepted or silently
+    /// skipped gap.
     ///
-    /// **Recomputed for task 4's shipped numbers, not the brief's estimate.** Task 4 removed
-    /// SOURCE and narrowed RECALL TO to a 2-segment `DeckID` picker at 90pt (`slotStripRecallWidth`)
-    /// with one fewer gap (`slotStripGapCount` 3→2): chrome is now 16 + 90 + 20 + 1 = 127pt (was
-    /// 357pt with SOURCE). At `minWindowWidth` (1180) with no panel open, `contentColumn` is 934pt,
-    /// so `cellsRegion` = 934 − 127 = 807pt. `needed` is unchanged by task 4 — `minCellWidth` (96,
-    /// now derived from `slotCellHeight` rather than an independent literal, see
-    /// `SurfaceMetrics.minCellWidth`) × 8 + `slotStripCellSpacing` (6) × 7 = 810pt. Shortfall = 810
-    /// − 807 = **3pt** — down from 233, but NOT fully closed: reaching zero needed RECALL TO at
-    /// ≤87pt, and 90pt (task 4's actual, shipped width — reusing SOURCE's own, not a hypothetical
-    /// floor) is 3pt over that. A regression that makes the shortfall WORSE fails loudly, here,
-    /// always — never skipped; one that makes it better needs no edit here, only a WIDER gap does.
-    private static let knownCellOverflow: CGFloat = 3
+    /// **Recomputed twice: task 4's shipped chrome, then fix-round-1's `minWindowWidth` raise.**
+    /// Task 4 removed SOURCE and narrowed RECALL TO to a 2-segment `DeckID` picker at 90pt
+    /// (`slotStripRecallWidth`) with one fewer gap (`slotStripGapCount` 3→2): chrome is now
+    /// 16 + 90 + 20 + 1 = 127pt (was 357pt with SOURCE) — that alone dropped the shortfall from 233
+    /// to 3pt, not fully closed. Fix-round-1 (F3/F4) then raised `minWindowWidth` 1180→1390 for an
+    /// unrelated reason (`stripsMinWidth`'s empty-configuration measurement, see that constant's own
+    /// doc comment) — which, as a side effect, also grows `contentColumn` here. At the new
+    /// `minWindowWidth` (1390) with no panel open, `contentColumn` = 1390 − 44 − 2 − 200 = 1144pt,
+    /// so `cellsRegion` = 1144 − 127 = 1017pt. `needed` is unchanged — `minCellWidth` (96) × 8 +
+    /// `slotStripCellSpacing` (6) × 7 = 810pt. Shortfall = 810 − 1017 = **−207pt**: the gap is not
+    /// just closed, the window is now wider than the cells need. `knownCellOverflow` is lowered to
+    /// 0 rather than the exact −207 — a negative "known overflow" constant would read backwards, and
+    /// 0 (no overflow accepted at all) is the honest tightest bound now that there IS no overflow to
+    /// tolerate. A regression that reopens ANY shortfall fails loudly, here, always — never skipped.
+    private static let knownCellOverflow: CGFloat = 0
 
     func testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen() {
         let contentColumn = SurfaceMetrics.minWindowWidth
@@ -320,58 +376,48 @@ final class SurfaceGeometryTests: XCTestCase {
                                  + "lower it so the next regression is caught at the tighter bound.")
     }
 
-    /// Fix-round-2, task 4, addition 1. Replaces `testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth`
-    /// (fix-round-1, F3), which asserted the SAME claim — cells pinned at the floor at every window
-    /// width — and passed, in an isolated harness that gave the `ScrollView` its own directly-set
-    /// `.frame(width:)`. That harness was not faithful to production: the real `ScrollView` is a
-    /// flexible SIBLING of the RECALL TO picker inside an `HStack`, itself inside
-    /// `InstrumentSurface`'s real `slots()` wrapping — not the sole, directly-sized child the old
-    /// harness gave it. On a real window the old `.frame(minWidth: 96, maxWidth: .infinity)` +
-    /// `.aspectRatio(16/9, .fit)` pair let each cell's WIDTH grow to roughly an eighth of the
-    /// available width instead (operator screenshot, 2026-08-01).
+    /// Fix-round-2, task 4, addition 1; rewritten again fix-round-1 (F1). Two prior versions of this
+    /// test both asserted "cells are pinned at the floor" and both passed for the wrong reason.
+    /// v1 (`testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth`, fix-round-1 task 3) gave the
+    /// `ScrollView` its own directly-set `.frame(width:)` — not faithful to production, where it is
+    /// a flexible sibling in an `HStack`. v2 (this test's previous body) fixed that nesting but
+    /// still built its OWN `Color.blue.frame(width: SurfaceMetrics.minCellWidth, height:
+    /// SurfaceMetrics.slotCellHeight)` stand-in and compared the result to the SAME constants it was
+    /// built from — a tautology. Reverting `SlotBankStripView`'s real cell frame to
+    /// `.frame(minWidth:, maxWidth: .infinity)`, or deleting the frame modifier outright, left v2
+    /// green (F1 review finding).
     ///
-    /// **This version reproduces the real nesting — RECALL TO's fixed width, the `Divider()`, and
-    /// the cells' `ScrollView` as HStack siblings, inside an actual `InstrumentSurface` — but
-    /// mutation testing found it STILL cannot distinguish the old, buggy modifier chain from the
-    /// fix.** Reverting this test's stand-in cells to the exact old
-    /// `.aspectRatio(.fit).frame(minWidth:, maxWidth: .infinity)` chain still measured them pinned
-    /// at the floor here; so did rendering the REAL `SlotBankStripView` (not a stand-in) with that
-    /// same old chain restored, inside a real `InstrumentSurface`, with a real `Instrument`. The
+    /// **This version measures the REAL `SlotBankStripView`, not a stand-in, embedded in a real
+    /// `InstrumentSurface`.** `.fixedSize(horizontal: true, vertical: false)` forces it to report
+    /// its own IDEAL width (chrome + the cells row's natural width) instead of whatever a window's
+    /// ambient proposal would proposal it to. If the cells' sizing chain is removed, or reverted to
+    /// something that lets width follow an ambient proposal instead of reporting a fixed ideal, the
+    /// measured total moves — unlike v2, which could not detect either mutation.
+    ///
+    /// **Honesty about what this does and does not prove (unchanged from v2, still true here):**
+    /// mutation testing found NEITHER version can distinguish the actual old, buggy modifier chain
+    /// from the fix, inside this harness. Reverting the REAL `SlotBankStripView`'s cell frame to the
+    /// old `.aspectRatio(.fit) + .frame(minWidth:, maxWidth: .infinity)` chain, rendered inside a
+    /// real `InstrumentSurface` at real window widths, still measured the total pinned here — the
     /// render harness (`SurfaceRenderHarness`, a single `NSHostingView.layoutSubtreeIfNeeded()`
     /// pass) evidently does not reproduce whatever a live, interactively-resized window did to
-    /// produce the operator's screenshot — a known category gap for offscreen SwiftUI layout tests,
-    /// not something fix-round-2 closed. **So this test does not prove the screenshot bug is fixed;
-    /// it proves the fix's mechanism is what it claims to be.** `.frame(width:height:)` reports
-    /// exactly that size to its parent regardless of what the parent proposes — this is documented,
-    /// unconditional SwiftUI behaviour, not something that needs empirical confirmation the way the
-    /// old proposal-dependent `minWidth`/`.aspectRatio(.fit)` combination did. Treat the underlying
-    /// fix as STAGED, not CONFIRMED, until an operator sees the strip at full window width live.
-    func testCellSizeIsPinnedRegardlessOfWindowWidth() throws {
-        let space = "cellSizeDiag"
-        func stripContent() -> some View {
-            HStack(spacing: SurfaceMetrics.slotStripGapWidth) {
-                Color.gray.frame(width: SurfaceMetrics.slotStripRecallWidth)
-                Divider()
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
-                        ForEach(0..<SlotBank.perRow, id: \.self) { i in
-                            Color.blue
-                                .frame(width: SurfaceMetrics.minCellWidth,
-                                       height: SurfaceMetrics.slotCellHeight)
-                                .measured("cell\(i)", in: space)
-                        }
-                    }
-                }
-            }
-            .padding(SurfaceMetrics.slotStripPadding)
-        }
-        func surface(layout: SurfaceLayout) -> some View {
+    /// produce the operator's screenshot. So this test does not prove the screenshot bug is fixed;
+    /// it proves the fix's mechanism is what it claims to be, AND — unlike v2 — that it is coupled
+    /// to production: deleting or genuinely breaking the sizing chain (not just reverting to the old
+    /// proposal-dependent one, which this harness can't distinguish either way) fails it. Treat the
+    /// underlying fix as STAGED, not CONFIRMED, until an operator sees the strip at full window
+    /// width live.
+    func testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth() throws {
+        let space = "slotBankStripWidthDiag"
+        func surface(instrument: Instrument, layout: SurfaceLayout) -> some View {
             InstrumentSurface(layout: layout) {
                 Color.gray
             } monitors: {
                 Color.blue.frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
             } slots: {
-                stripContent()
+                SlotBankStripView(instrument: instrument, layout: layout)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .measured("strip", in: space)
             } strips: {
                 Color.green.frame(minWidth: SurfaceMetrics.stripsMinWidth, minHeight: 300)
             } mixer: {
@@ -380,20 +426,28 @@ final class SurfaceGeometryTests: XCTestCase {
             .coordinateSpace(name: space)
         }
 
-        let layout = SurfaceLayout()
         let narrow = SurfaceRenderHarness.frames(
-            surface(layout: layout),
+            surface(instrument: Instrument(), layout: SurfaceLayout()),
             size: CGSize(width: SurfaceMetrics.minWindowWidth, height: SurfaceMetrics.minWindowHeight))
         let wide = SurfaceRenderHarness.frames(
-            surface(layout: layout), size: CGSize(width: 2400, height: 1200))
+            surface(instrument: Instrument(), layout: SurfaceLayout()),
+            size: CGSize(width: 2400, height: 1200))
 
-        let narrowCell = try XCTUnwrap(narrow["cell0"], "harness reported no frames").width
-        let wideCell = try XCTUnwrap(wide["cell0"], "harness reported no frames").width
-        XCTAssertEqual(narrowCell, SurfaceMetrics.minCellWidth, accuracy: 0.5)
-        XCTAssertEqual(wideCell, SurfaceMetrics.minCellWidth, accuracy: 0.5,
-                       "An explicit .frame(width:height:) must report exactly minCellWidth at "
-                       + "every window width. If this ever moves, something reintroduced an "
-                       + "ambient-proposal dependency and slotStripRowHeight must be reconsidered.")
+        let narrowWidth = try XCTUnwrap(narrow["strip"], "harness reported no frames").width
+        let wideWidth = try XCTUnwrap(wide["strip"], "harness reported no frames").width
+
+        let cellsRowWidth = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.perRow)
+            + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.perRow - 1)
+        let expectedTotal = SurfaceMetrics.slotStripLeadingChromeWidth + cellsRowWidth
+
+        XCTAssertEqual(narrowWidth, expectedTotal, accuracy: 1,
+                       "The real SlotBankStripView's ideal width should be chrome + the eight-cell "
+                       + "row's natural width — got \(narrowWidth), expected \(expectedTotal).")
+        XCTAssertEqual(wideWidth, expectedTotal, accuracy: 1,
+                       "…and must not move with window width. narrow=\(narrowWidth) "
+                       + "wide=\(wideWidth) — a real difference here means the strip's ideal width "
+                       + "somehow depends on the window, which should be structurally impossible "
+                       + "given .fixedSize(horizontal: true).")
     }
 
     /// The ceiling has to leave the default panel intact at the minimum window, or the app ships a
