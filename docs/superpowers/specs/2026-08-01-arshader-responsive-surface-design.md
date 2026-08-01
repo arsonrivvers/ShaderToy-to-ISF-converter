@@ -92,8 +92,18 @@ must never be used as one).
   drag-and-drop is half-built would move the layout under an unfinished feature.
 - The slot-cell clamp specifically — pulled forward into phase 3c task 4C, deliberately narrow.
 
-## Open question for the operator
+## Operator rulings (2026-08-01) — closed, not open
 
-The breakpoint set is a product decision, not an engineering one: at what window size should the
-bank stop showing pictures and go back to names? That wants his eyes on real sizes, not a number
-chosen here.
+**Always pictures, never text.** *"always pictures never text."* There is no window size at which the
+bank falls back to filenames, so the "slot strip below its comfortable width → show names" breakpoint
+above is **struck**. Below the comfortable width the strip scrolls, as it already does. A cell may
+shrink to its legibility/hit-target floor and no further; it may never become a label.
+
+**Target hardware is a 16" MacBook Pro** (1728pt logical at default scaling), and this is a personal
+instrument, not a shipped product. So hardware-compatibility arguments carry less weight here than
+they would elsewhere — the phase 3c task 4 `minWindowWidth` revert stands on its own merits (the
+criterion was measuring ideal text width, not a minimum), not on 13" compatibility.
+
+That said, `OutputDestination.floating` still puts the projector preview in a second window on the
+same screen, so leaving real headroom below 1728pt remains worth something even on the target
+machine.
