@@ -54,15 +54,18 @@ struct DrawnRowHeightKey: PreferenceKey {
 /// measured by `SlotBankStripView` itself. `SlotBankStripView` tried self-measuring first — a
 /// `PreferenceKey`-based `.background(GeometryReader)` reporting upward, tried at `body`'s own outer
 /// `VStack` and at `content`'s inner `HStack` — and both reported 0 at every window width tested.
-/// **Corrected, fix round 1 (F2): this is NOT because any `ScrollView` in the tree breaks any
-/// `PreferenceKey`** — `DrawnCellWidthKey`/`DrawnRowHeightKey`, reported from this SAME `body` level,
-/// resolve correctly, and a retry with a much longer settle loop (up to 60 passes, not the original
-/// 2) did not fix this specific measurement either. See `InstrumentSurface.body`'s own doc comment
-/// (at the identical `.onAppear`/`.onChange` measurement, one level up) for the full, re-verified
-/// account of what actually distinguishes the working cases from this one. `@Environment` is the
-/// opposite direction (parent hands a value DOWN) and needs no `GeometryReader`/`PreferenceKey`
-/// round trip at all — `InstrumentSurface` already knows this width because it is the one proposing
-/// it, which is reason enough to prefer it here regardless of the `PreferenceKey` question.
+/// **Corrected, fix round 1 (F2) — stated here as what was OBSERVED in this reproduction, not as a
+/// general claim about `PreferenceKey` and `ScrollView`:** an earlier draft of this comment claimed
+/// any `ScrollView` in the tree breaks any `PreferenceKey`, which is false —
+/// `DrawnCellWidthKey`/`DrawnRowHeightKey`, reported from this SAME `body` level, resolve correctly.
+/// A proposed alternative (needs a longer settle loop) was also tested directly against this exact
+/// measurement, at the loop's normal cap and again with it raised to 60 passes: both still measured
+/// 0. See `InstrumentSurface.body`'s own doc comment (at the identical `.onAppear`/`.onChange`
+/// measurement, one level up) for the full account of what was actually observed, and for the
+/// caveat that this is evidence from a specific reproduction, not a settled rule about SwiftUI.
+/// `@Environment` is the opposite direction (parent hands a value DOWN) and needs no
+/// `GeometryReader`/`PreferenceKey` round trip at all — `InstrumentSurface` already knows this width
+/// because it is the one proposing it, which is reason enough to prefer it here regardless.
 private struct SlotBankContentColumnWidthKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }

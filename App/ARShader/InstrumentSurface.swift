@@ -158,49 +158,52 @@ enum SurfaceMetrics {
     static let minCellWidth: CGFloat = 96
 
     /// The cell's growth ceiling (task 4C). Without one, task 3's `.frame(minWidth: 96, maxWidth:
-    /// .infinity)` let `.aspectRatio(16/9)` turn window width into row HEIGHT — ~207pt cells, ~116pt
-    /// rows — and the operator rejected it on device ("I can see us shrinking this bar a lot").
-    /// Task 4 swung to the opposite extreme, an exact `.frame(width: 96, height: 54)` that never
-    /// moved at all, which review flagged as "cell area drops ~4.6x in one step to a size never
-    /// seen on device." `.frame(minWidth:maxWidth:)` is `clamp()`; a floor with no ceiling, or an
-    /// exact size with neither, are both a clamp missing one of its three values.
+    /// .infinity)` let `.aspectRatio(16/9)` turn window width into row HEIGHT, and the operator
+    /// rejected it on device ("I can see us shrinking this bar a lot"). The brief, the responsive
+    /// spec, and the task-4 review all quoted a specific figure for how bad it got — ~207pt cells,
+    /// ~116pt rows — but that figure does not reconcile against the operator's actual display
+    /// (confirmed, fix round 2: see below): task 3's chain gives ≈164pt cells at the operator's real
+    /// scaling, not 207. **Corrected rather than repeated: the ~207/~116 figure was read off a
+    /// screenshot IMAGE's pixel width, not logical points, and should not be re-derived from — the
+    /// operator's complaint and this task's fix both stand regardless, only that specific number was
+    /// wrong.** Task 4 swung to the opposite extreme, an exact `.frame(width: 96, height: 54)` that
+    /// never moved at all, which review flagged as "cell area drops ~4.6x in one step to a size
+    /// never seen on device." `.frame(minWidth:maxWidth:)` is `clamp()`; a floor with no ceiling, or
+    /// an exact size with neither, are both a clamp missing one of its three values.
     ///
-    /// **160, picked against ONE reading of "the 16" MacBook Pro target" — corrected, fix round 1
-    /// (F3), to state the consequence at BOTH readings this repo carries, rather than assert one.**
-    /// The operator's rejected screenshot (~207pt cells, ~116pt rows) only falls out of task 3's
-    /// no-ceiling chain at a surface ≈2071pt wide — which is the 16" MBP at **"More Space"** scaling
-    /// (2056pt logical), not the 1728pt default-scaling figure this constant's arithmetic was
-    /// originally built from. Both premises are in this repo (the brief, the responsive spec, and
-    /// the task-4 reviewer's own re-derivation against the screenshot all point to ≈2056–2071;
-    /// nothing in the repo confirms which scaling the operator actually runs). The clamp itself
-    /// holds either way — 160 is a genuine floor-to-ceiling RANGE under both readings — but this
-    /// constant's justification is not the same story at both:
+    /// **160, chosen against the operator's ACTUAL display — 16" MacBook Pro at Default scaling,
+    /// 1728×1117 logical points, confirmed by the operator directly (fix round 2), not assumed or
+    /// read off a screenshot (fix round 1, F3, briefly carried a "state both readings" version of
+    /// this comment before that answer arrived; the "More Space" alternative it hedged against is
+    /// now known not to apply and has been removed).** With no panel open — the widest the cells
+    /// region ever gets — `contentColumn` is 1482pt (1728 − rail 44 − dividers 2 − mixer 200);
+    /// `cellsRegion` is 1482 − `slotStripLeadingChromeWidth` (127) = 1355pt. Eight cells' natural,
+    /// unclamped share of that is `(1355 − spacing×7) / 8` ≈ 164pt. A 160pt ceiling lands just under
+    /// that: eight cells at 160 plus seven 6pt gaps is 1322pt, **33pt of slack** in the 1355pt
+    /// available — close to an exact fit on the operator's own machine, no scroll needed. With a
+    /// panel open at its default 280pt, the same arithmetic gives ≈128pt per cell — comfortably
+    /// inside the range, growing less because there is less room, exactly the intended behaviour.
     ///
-    /// - **At 1728pt (default scaling), no panel open:** `contentColumn` is 1482pt (1728 − rail 44 −
-    ///   dividers 2 − mixer 200); `cellsRegion` is 1482 − `slotStripLeadingChromeWidth` (127) =
-    ///   1355pt. Eight cells' unclamped share is `(1355 − spacing×7) / 8` ≈ 164pt — 160 lands just
-    ///   under that, filling the row (8×160 + 7×6 = 1322pt, 33pt of slack in 1355pt) with no scroll
-    ///   needed.
-    /// - **At 2056pt ("More Space" scaling), no panel open:** `contentColumn` is 1810pt;
-    ///   `cellsRegion` is 1683pt; eight cells' unclamped share is `(1683 − 42) / 8` ≈ 205pt. A 160pt
-    ///   ceiling is nowhere near that: 8×160 + 42 = 1322pt leaves **~361pt dead to the right** of the
-    ///   strip — the exact top-end failure ("cell area drops... to a size never seen on device," the
-    ///   opposite direction) this task exists to prevent, on this reading of the target.
+    /// **If the target scaling ever changes, re-derive this constant — do not assume 33pt of slack
+    /// still holds.** At "More Space" scaling (2056pt logical) the SAME arithmetic gives ≈205pt
+    /// unclamped, and a 160pt ceiling would leave ~361pt dead to the right of the strip instead —
+    /// the top-end failure this task exists to prevent, on that reading. The operator does not run
+    /// that scaling today, which is the only reason 160 is a close-to-exact fit rather than a
+    /// generous one.
     ///
-    /// With a panel open at its default 280pt, the range narrows either way (≈128pt at 1728,
-    /// ≈169pt→clamped-to-160 at 2056), so the panel-open case does not discriminate between the two
-    /// readings. **Smoke leg 45 (Task 8) is where this gets tuned on the real device against the
-    /// real scaling** — if it reads as leaving a large display underfilled, `maxCellWidth` is the one
-    /// number to move, and the 2056pt arithmetic above is the starting point for a higher value.
+    /// **Smoke leg 45 (Task 8) is still the on-device confirmation step** — the arithmetic above is
+    /// now grounded in the operator's stated real resolution, not a screenshot estimate, but the
+    /// strip has not yet been SEEN rendering at full window width live.
     ///
     /// **Secondary, and worth keeping separate from the width arithmetic above:** the operator's
     /// actual complaint was HEIGHT ("I can see us **shrinking** this bar a lot"), and this ceiling
     /// was chosen to maximise WIDTH fill — at 160, the row pitch (`maxCellWidth * 9/16 +
-    /// slotStripCellSpacing` = 96pt) is only ~17% below the ~116pt row height the operator actually
-    /// rejected. The strip cannot structurally repeat that specific failure (both the monitor row
-    /// and this strip are `.fixedSize(vertical: true)`; a taller strip takes space from the flexible
-    /// deck strips below it, not from the monitors), but nothing in this suite bounds the strip's
-    /// resulting HEIGHT at any window width — the axis that was actually rejected on device.
+    /// slotStripCellSpacing` = 96pt) is a real fraction of the row height the operator actually
+    /// rejected, even setting the exact rejected number aside. The strip cannot structurally repeat
+    /// that specific failure (both the monitor row and this strip are `.fixedSize(vertical: true)`;
+    /// a taller strip takes space from the flexible deck strips below it, not from the monitors),
+    /// but nothing in this suite bounds the strip's resulting HEIGHT at any window width — the axis
+    /// that was actually rejected on device.
     static let maxCellWidth: CGFloat = 160
 
     // MARK: Slot strip rows (task 7R, revised task 4C)
@@ -328,30 +331,42 @@ struct InstrumentSurface<Panel: View, Monitors: View, Slots: View, Strips: View,
             //
             // `.onAppear`/`.onChange`, NOT `.preference`/`.onPreferenceChange`.
             //
-            // **Corrected, fix round 1 (F2): the original version of this comment overgeneralised.**
-            // It claimed "a `ScrollView` present ANYWHERE in the rendered tree" breaks ANY unrelated
-            // `PreferenceKey`. That is false, and refuted inside this same commit:
-            // `SlotBankStripView`'s `DrawnCellWidthKey`/`DrawnRowHeightKey` are ordinary
-            // `PreferenceKey`s, reported from `SlotBankStripView.body`'s own top level — whose
-            // subtree CONTAINS the cells `ScrollView` — and they resolve correctly. A proposed fix
-            // (loop `layoutSubtreeIfNeeded()` to a fixed point, since two fixed passes originally
-            // under-settled a DIFFERENT case — see `SurfaceRenderHarness.preferenceValue`'s own doc
-            // comment) was retried directly against this exact measurement, up to 60 settle passes:
-            // it still measured 0 at every window width. So the failure is not "any `ScrollView`
-            // anywhere," and it is not merely "needs more settle passes" either.
+            // **Corrected, fix round 1 (F2): the original version of this comment overgeneralised —
+            // stated as a rule about SwiftUI, when it should have been stated as what was observed in
+            // this specific reproduction.** It claimed "a `ScrollView` present ANYWHERE in the
+            // rendered tree" breaks ANY unrelated `PreferenceKey`. `SlotBankStripView`'s
+            // `DrawnCellWidthKey`/`DrawnRowHeightKey` are ordinary `PreferenceKey`s, reported from
+            // `SlotBankStripView.body`'s own top level — whose subtree CONTAINS the cells
+            // `ScrollView` — and they resolve correctly, which the rule as originally stated cannot
+            // explain.
             //
-            // **What is actually, repeatedly confirmed:** a `PreferenceKey` whose value is
-            // established by a `.background(GeometryReader)` measuring something and then bubbling
-            // that value UP THROUGH an ancestor that wraps a `ScrollView`-containing descendant — or
-            // reported from WITHIN the `ScrollView`'s own content (confirmed again, independently, by
-            // `SlotBankStripView.renderedCellWidth`'s own investigation, fix round 1, F1) — did not
-            // reach an external `.onPreferenceChange` listener in this harness, at any settle-loop
-            // length tried. A `PreferenceKey` whose value has no such link (`DrawnCellWidthKey`,
-            // sourced from an `@Environment` value; `SurfaceWidthKey`, this `HStack`'s own ambient-
-            // proposal-driven size, read directly from outside with nothing measured across a
-            // `ScrollView` boundary) resolves fine. `.onChange(of:)` is an imperative side effect at
-            // the `GeometryReader` itself, not a value bubbling through `PreferenceKey`'s `reduce`,
-            // and it reported correctly in every configuration tried, including this one.
+            // A specific alternative was then proposed and TESTED, not just considered: that the
+            // original 0-result was an under-settled harness (two fixed `layoutSubtreeIfNeeded()`
+            // passes had separately been confirmed to under-settle a DIFFERENT case — see
+            // `SurfaceRenderHarness.preferenceValue`'s own doc comment), and a longer fixed-point
+            // settle loop would resolve it. Retried directly against this exact measurement (restored
+            // the `PreferenceKey` route here, read through `SurfaceRenderHarness.preferenceValue`)
+            // at the loop's normal 10-pass cap, then again with the cap temporarily raised to 60: BOTH
+            // runs still measured 0 at every window width tested. That specific alternative did not
+            // hold in this reproduction either.
+            //
+            // **What was actually, repeatedly OBSERVED, in two independent reproductions in this same
+            // task (this measurement, and `SlotBankStripView.renderedCellWidth`'s own investigation,
+            // fix round 1 F1) — stated as what was seen, not asserted as a settled fact about how
+            // SwiftUI's `PreferenceKey` system works in general:** a `PreferenceKey` value established
+            // by a `.background(GeometryReader)` measuring something and then bubbling that value UP
+            // THROUGH an ancestor that wraps a `ScrollView`-containing descendant, or reported from
+            // WITHIN the `ScrollView`'s own content, did not reach an external `.onPreferenceChange`
+            // listener in this harness, in either reproduction, at any settle-loop length tried up to
+            // 60 passes. A `PreferenceKey` whose value has no such link (`DrawnCellWidthKey`, sourced
+            // from an `@Environment` value; `SurfaceWidthKey`, this `HStack`'s own ambient-proposal-
+            // driven size, read directly from outside with nothing measured across a `ScrollView`
+            // boundary) resolved fine in every configuration tried. `.onChange(of:)` is an imperative
+            // side effect at the `GeometryReader` itself, not a value bubbling through `PreferenceKey`'s
+            // `reduce`, and it reported correctly everywhere the `.preference` route did not. Neither
+            // the original blanket claim nor the "just needs more passes" alternative survived direct
+            // retesting; this is the narrower claim that did, and it is offered as evidence from a
+            // specific reproduction for the next person to judge, not as a general SwiftUI rule.
             .background(
                 GeometryReader { proxy in
                     Color.clear

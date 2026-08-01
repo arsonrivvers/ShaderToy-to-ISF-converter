@@ -369,20 +369,24 @@ final class SurfaceGeometryTests: XCTestCase {
     /// retried against BOTH original failures with up to 60 settle passes: both stayed at 0. Neither
     /// claim survived re-verification.
     ///
-    /// **What is actually, repeatedly confirmed, across two independent investigations in this same
+    /// **What was actually, repeatedly OBSERVED, across two independent reproductions in this same
     /// task (`InstrumentSurface`'s content-column measurement, and `SlotBankStripView.renderedCellWidth`,
-    /// fix round 1 F1):** a `PreferenceKey` value established by measuring something and bubbling it
-    /// UP THROUGH a `ScrollView` boundary — either reported from WITHIN the `ScrollView`'s own
-    /// content, or from an ancestor wrapping a descendant that contains one — does not reach an
-    /// external `.onPreferenceChange` listener in this harness, at any settle-loop length tried. A
-    /// `PreferenceKey` whose value has no such link resolves fine, `ScrollView` present in the same
-    /// tree or not. `SlotBankStripView` and `InstrumentSurface` both route their `ScrollView`-crossing
-    /// measurements through `.onAppear`/`.onChange` (an imperative side effect, not a value bubbling
-    /// through `reduce`) for exactly this reason — see `InstrumentSurface.body`'s doc comment, at the
-    /// content-column measurement, for the fullest account. `DrawnCellWidthKey`/`DrawnRowHeightKey`
+    /// fix round 1 F1) — recorded here as what these SPECIFIC reproductions showed, not asserted as a
+    /// settled rule about how SwiftUI's `PreferenceKey` system works in general:** a `PreferenceKey`
+    /// value established by measuring something and bubbling it UP THROUGH a `ScrollView` boundary —
+    /// either reported from WITHIN the `ScrollView`'s own content, or from an ancestor wrapping a
+    /// descendant that contains one — did not reach an external `.onPreferenceChange` listener in
+    /// this harness, in either reproduction, at any settle-loop length tried (up to 60 passes). A
+    /// `PreferenceKey` whose value has no such link resolved fine in every case tried, `ScrollView`
+    /// present in the same tree or not. `SlotBankStripView` and `InstrumentSurface` both route their
+    /// `ScrollView`-crossing measurements through `.onAppear`/`.onChange` (an imperative side effect,
+    /// not a value bubbling through `reduce`) for exactly this reason — see `InstrumentSurface.body`'s
+    /// doc comment, at the content-column measurement, for the fullest account, including the
+    /// original overgeneralised claim and the "just needs more settle passes" alternative, both
+    /// stated there alongside what actually held up under retest. `DrawnCellWidthKey`/`DrawnRowHeightKey`
     /// (used by `measuredCellWidth`/`measuredRowPitch` below) remain ordinary `PreferenceKey`s and
-    /// still work correctly, because what they report was already computed by `.onChange` upstream —
-    /// they never need to cross the `ScrollView` boundary themselves.
+    /// still resolved correctly in every reproduction, because what they report was already computed
+    /// by `.onChange` upstream — they never needed to cross the `ScrollView` boundary themselves.
 
     // MARK: Cell clamp (task 4C)
 
