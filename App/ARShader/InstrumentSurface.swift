@@ -141,57 +141,57 @@ enum SurfaceMetrics {
             + slotStripGapWidth * slotStripGapCount + dividerWidth
     }
 
-    /// A cell's fixed HEIGHT — the driving constant (task 4, addition 1, fix-round-2). Width is
-    /// derived from it at the 16:9 ratio the thumbnail enforces, never the other way around: see
-    /// `minCellWidth`.
+    /// The cell's legibility and hit-target floor (task 3). Below this the 9pt monospaced name is
+    /// unreadable and, at ~31.1pt against a 32pt floor, hit areas overlapped badly enough that an
+    /// edge click fired the NEIGHBOURING slot (phase 3b) — the one surface whose entire safety
+    /// property is that a click cannot destroy anything. Absolute, never a percentage: macOS text
+    /// scales with the user's system setting, not with the window.
     ///
-    /// 54pt reuses the value phase 3c (task 3) already vetted as the legibility floor for a 16:9
-    /// thumbnail (96pt wide × 9/16 = 54pt tall) — that floor was always meant to be the cell's
-    /// actual size, not just a lower bound; fix-round-2 makes production actually reach it, by
-    /// driving sizing from an explicit height instead of a `.frame(minWidth:, maxWidth: .infinity)`
-    /// + `.aspectRatio(.fit)` pair whose WIDTH the ambient container's proposal could stretch (a
-    /// real window did stretch it, to roughly an eighth of the available width per cell, and two
-    /// rows rivaled the monitor strip above them in height — operator screenshot, 2026-08-01).
+    /// An independent literal again (task 4C), not derived from a height constant — task 4 briefly
+    /// made width the derived quantity (`slotCellHeight * 16/9`) because it made height the single
+    /// exact size every cell reached. Task 4C reopens the width axis into a range
+    /// (`minCellWidth`...`maxCellWidth`), so there is no longer one exact height to derive width
+    /// from — height instead follows whichever width is DRAWN, via the 16:9 `.aspectRatio` already
+    /// on `SlotCell`'s content. This value remains what every other call site (the eight-cell fit
+    /// gate, the anti-overlap gate) has always reasoned about it as: a floor a cell must never
+    /// render narrower than.
+    static let minCellWidth: CGFloat = 96
+
+    /// The cell's growth ceiling (task 4C). Without one, task 3's `.frame(minWidth: 96, maxWidth:
+    /// .infinity)` let `.aspectRatio(16/9)` turn window width into row HEIGHT — ~207pt cells, ~116pt
+    /// rows — and the operator rejected it on device ("I can see us shrinking this bar a lot").
+    /// Task 4 swung to the opposite extreme, an exact `.frame(width: 96, height: 54)` that never
+    /// moved at all, which review flagged as "cell area drops ~4.6x in one step to a size never
+    /// seen on device." `.frame(minWidth:maxWidth:)` is `clamp()`; a floor with no ceiling, or an
+    /// exact size with neither, are both a clamp missing one of its three values.
     ///
-    /// **The fix rests on `.frame(width:height:)`'s documented semantics, not on a test that
-    /// reproduces the screenshot.**
-    /// `SurfaceGeometryTests.testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`
-    /// could NOT be made to distinguish the old, buggy modifier chain from this one: mutated back to
-    /// `.frame(minWidth:, maxWidth: .infinity)` + `.aspectRatio(.fit)` — the exact code that shipped
-    /// the operator's screenshot — the render harness (`SurfaceRenderHarness`, a single
-    /// `NSHostingView.layoutSubtreeIfNeeded()` pass) still measured cells pinned at the floor, even
-    /// rendering the REAL `SlotBankStripView` inside a real `InstrumentSurface`. So the harness
-    /// cannot reproduce whatever the operator's live, interactively-resized window did — this is a
-    /// known category gap (SwiftUI `ScrollView` content sizing can behave differently across a real
-    /// resize than a single offscreen layout pass), not something this fix-round could close.
-    /// `.frame(width:height:)` is used anyway because its size-reporting behaviour is documented and
-    /// unconditional — it does not depend on what any ancestor proposes, full stop — unlike the old
-    /// `minWidth`/`maxWidth: .infinity` + `.aspectRatio(.fit)` pair, which is proposal-dependent by
-    /// design. That is a stronger basis than an empirical measurement this harness cannot make.
-    /// **Still, this specific fix has not been confirmed on-device against the original screenshot
-    /// and should be treated as STAGED, not CONFIRMED, until an operator sees the strip full-width
-    /// in a live window.**
-    static let slotCellHeight: CGFloat = 54
+    /// **160 chosen against the 16" MacBook Pro target (1728pt logical, default scaling), not left
+    /// as the brief's bare suggestion.** With no panel open — the widest the cells region ever
+    /// gets — `contentColumn` at 1728 is 1482pt (1728 − rail 44 − dividers 2 − mixer 200);
+    /// `cellsRegion` is 1482 − `slotStripLeadingChromeWidth` (127) = 1355pt. Eight cells' natural,
+    /// unclamped share of that is `(1355 − spacing×7) / 8` ≈ 164pt. A 160pt ceiling lands just
+    /// under that: eight cells at 160 plus seven 6pt gaps is 1322pt, 33pt inside the 1355pt
+    /// available — the strip fills almost the full row on the target machine with no panel open,
+    /// and does not need to scroll to do it. Push the ceiling past ~164 and cells would only ever
+    /// reach it by scrolling on the very hardware this was picked for, defeating the point of a
+    /// ceiling meant to stop growth before it eats the surface. With a panel open at its default
+    /// 280pt, the same arithmetic gives ≈128pt per cell — comfortably inside the range, growing
+    /// less because there is less room, exactly the intended behaviour.
+    static let maxCellWidth: CGFloat = 160
 
-    /// A cell's fixed WIDTH, derived from `slotCellHeight` at the 16:9 ratio the thumbnail enforces
-    /// — not an independent literal, so the two can never drift out of the ratio the frame below
-    /// advertises. Still named `minCellWidth` (not `slotCellWidth`): the value is the same 96pt
-    /// legibility floor phase 3c established, and every other call site (the eight-cell fit gate,
-    /// the anti-overlap gate) reasons about it as a floor a cell must never render narrower than —
-    /// which remains true now that it is also the cell's exact, always-reached width.
-    static var minCellWidth: CGFloat { slotCellHeight * 16.0 / 9.0 }
-
-    // MARK: Slot strip rows (task 7R)
-
-    /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `slotCellHeight` plus
-    /// the spacing between rows (`slotStripCellSpacing`, 6pt). Derived, not independently reasoned
-    /// about — task 4's fix-round-2 found the OLD derivation (floor width × 9/16, on the claim that
-    /// `.aspectRatio(.fit)` resolves to the floor "regardless of window width") did not hold in
-    /// production even though it held in the isolated test harness that first "confirmed" it. Now
-    /// that cell height is an explicit constant rather than something inferred from a width-floor
-    /// assumption, this can just add the row spacing to it directly — no second, wider case to
-    /// reason about, because there is no window-width dependency left at all.
-    static var slotStripRowHeight: CGFloat { slotCellHeight + slotStripCellSpacing }
+    // MARK: Slot strip rows (task 7R, revised task 4C)
+    //
+    // `slotStripRowHeight` used to live here as a constant (`slotCellHeight + slotStripCellSpacing`)
+    // — task 4's fix-round-2 found that even that formula did not hold in production, because the
+    // "cell width is pinned regardless of window" premise it rested on did not survive contact with
+    // a real, interactively-resized window (see `SurfaceGeometryTests`'s extensive account). Task 4C
+    // makes cell width a genuine range rather than a single value, so a constant row height is not
+    // just fragile now, it is categorically wrong — the resize drag divides by it, and dividing by a
+    // number that no longer matches the DRAWN pitch desyncs the drag from what it is dragging (task
+    // 4 found the drag reading 60 against a real ~122pt pitch from exactly this kind of drift).
+    // `SlotBankStripView.slotStripRowHeight` is now an instance property computed from `cellWidth`,
+    // the SAME clamped value every cell in the strip actually draws at (see that property's doc
+    // comment in `SlotBankStripView.swift`), not a constant anywhere in this enum.
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the
@@ -225,6 +225,13 @@ struct InstrumentSurface<Panel: View, Monitors: View, Slots: View, Strips: View,
     /// the real window rather than an assumed one. Zero until the first preference lands, which the
     /// drag handler treats as "unknown" rather than as a zero-width window.
     @State private var surfaceWidth: CGFloat = 0
+
+    /// The content column's (monitors/slots/strips) own resolved width, republished to
+    /// `SlotBankStripView` via `@Environment(\.slotBankContentColumnWidth)` — see the `.onAppear`/
+    /// `.onChange` measurement below (in `body`) for why this is fed imperatively rather than via a
+    /// `PreferenceKey` like `surfaceWidth` above. Zero until the first measurement lands, same
+    /// "unknown" convention as `surfaceWidth`.
+    @State private var contentColumnWidth: CGFloat = 0
 
     // No monitor-height floor: the strip is content-sized, so its height comes from the tiles'
     // aspect ratio and nothing below it can squeeze it. A floor existed while the row was
@@ -292,6 +299,34 @@ struct InstrumentSurface<Panel: View, Monitors: View, Slots: View, Strips: View,
                     .frame(maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity)
+            // Measured HERE, on the content column itself — not by `SlotBankStripView` measuring
+            // itself from inside `slots()`. Republished to the slot strip via `.environment`, below.
+            //
+            // `.onAppear`/`.onChange`, NOT `.preference`/`.onPreferenceChange`. A `PreferenceKey`
+            // was tried first (`ContentColumnWidthKey`, matching `SurfaceWidthKey`'s own established
+            // pattern immediately below) and measured 0 at every window width tested, in EVERY
+            // placement tried — including this exact one, with nothing resembling a `ScrollView`
+            // anywhere above it. A controlled test isolated the cause: with `slots()` swapped for a
+            // trivial `Color` stub (no `ScrollView` anywhere in the tree), the SAME `PreferenceKey`
+            // wiring correctly reported 2314pt; with the real `SlotBankStripView` (which contains a
+            // `ScrollView`, required by "always scrolls below the floor"), it reported 0, every time.
+            // Whatever the exact mechanism, a `ScrollView` present ANYWHERE in the rendered tree
+            // prevented an UNRELATED `PreferenceKey`, reported from a completely different branch,
+            // from reaching its `.onPreferenceChange` listener — evidently specific to this project's
+            // `NSHostingView.layoutSubtreeIfNeeded()`-driven test harness, since `SurfaceWidthKey`
+            // (below) has shipped and worked via the identical pattern for phases with no `ScrollView`
+            // in the tree. `.onChange(of:)` is an imperative side effect at the `GeometryReader`
+            // itself, not a value bubbling through ancestors via `PreferenceKey`'s `reduce`
+            // mechanism, and it reported correctly in every configuration tested, including with the
+            // real `ScrollView`-containing `SlotBankStripView` in place.
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { contentColumnWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { newValue in contentColumnWidth = newValue }
+                }
+            )
+            .environment(\.slotBankContentColumnWidth, contentColumnWidth)
 
             Divider()
             mixer()

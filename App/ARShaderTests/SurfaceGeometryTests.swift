@@ -334,78 +334,117 @@ final class SurfaceGeometryTests: XCTestCase {
                                  + "lower it so the next regression is caught at the tighter bound.")
     }
 
-    /// Fix-round-2, task 4, addition 1; rewritten again fix-round-1 (F1). Two prior versions of this
-    /// test both asserted "cells are pinned at the floor" and both passed for the wrong reason.
-    /// v1 (`testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth`, fix-round-1 task 3) gave the
-    /// `ScrollView` its own directly-set `.frame(width:)` — not faithful to production, where it is
-    /// a flexible sibling in an `HStack`. v2 (this test's previous body) fixed that nesting but
-    /// still built its OWN `Color.blue.frame(width: SurfaceMetrics.minCellWidth, height:
-    /// SurfaceMetrics.slotCellHeight)` stand-in and compared the result to the SAME constants it was
-    /// built from — a tautology. Reverting `SlotBankStripView`'s real cell frame to
-    /// `.frame(minWidth:, maxWidth: .infinity)`, or deleting the frame modifier outright, left v2
-    /// green (F1 review finding).
+    /// **Retired, task 4C.** This slot held
+    /// `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth` (fix-round-2, task 4,
+    /// addition 1; rewritten fix-round-1, F1), which asserted the strip's ideal width is IDENTICAL
+    /// at a narrow and a wide window — "cells are pinned regardless of window width." That was
+    /// exactly right for what task 4 shipped (an exact, forever-fixed cell size) and is exactly
+    /// WRONG for what task 4C ships: cell width is now a genuine range, and the whole point of this
+    /// task is that it stops being pinned — it grows with the window, up to a ceiling. Deleted
+    /// rather than retargeted: a "must not move" assertion cannot be repaired into a "must grow, up
+    /// to a point" one without inverting its own claim, and `testTheCellGrowsWithTheWindowUpToItsCeiling`
+    /// (below) already covers the new invariant, reusing the SAME production-coupled construction
+    /// technique this test introduced (a real `SlotBankStripView` inside a real `InstrumentSurface`,
+    /// not a stand-in).
     ///
-    /// **This version measures the REAL `SlotBankStripView`, not a stand-in, embedded in a real
-    /// `InstrumentSurface`.** `.fixedSize(horizontal: true, vertical: false)` forces it to report
-    /// its own IDEAL width (chrome + the cells row's natural width) instead of whatever a window's
-    /// ambient proposal would proposal it to. If the cells' sizing chain is removed, or reverted to
-    /// something that lets width follow an ambient proposal instead of reporting a fixed ideal, the
-    /// measured total moves — unlike v2, which could not detect either mutation.
+    /// One thing this test's own doc comment established is worth carrying forward rather than
+    /// losing with it: `.fixedSize(horizontal: true, vertical: false)`, used to force a view to
+    /// report its own IDEAL width, was measured NOT to reproduce a real, interactively-resized
+    /// window's proposal-driven layout in this harness (`SurfaceRenderHarness`, a single
+    /// `NSHostingView.layoutSubtreeIfNeeded()` pass) — mutation testing back then found it could not
+    /// distinguish the fixed-cell fix from the pre-fix buggy chain either way. `measuredCellWidth`/
+    /// `measuredRowPitch` (below) deliberately do NOT use `.fixedSize` for exactly this reason: task
+    /// 4C needs the REAL, proposal-driven width a window actually gives the strip, which `.fixedSize`
+    /// structurally cannot supply.
     ///
-    /// **Honesty about what this does and does not prove (unchanged from v2, still true here):**
-    /// mutation testing found NEITHER version can distinguish the actual old, buggy modifier chain
-    /// from the fix, inside this harness. Reverting the REAL `SlotBankStripView`'s cell frame to the
-    /// old `.aspectRatio(.fit) + .frame(minWidth:, maxWidth: .infinity)` chain, rendered inside a
-    /// real `InstrumentSurface` at real window widths, still measured the total pinned here — the
-    /// render harness (`SurfaceRenderHarness`, a single `NSHostingView.layoutSubtreeIfNeeded()`
-    /// pass) evidently does not reproduce whatever a live, interactively-resized window did to
-    /// produce the operator's screenshot. So this test does not prove the screenshot bug is fixed;
-    /// it proves the fix's mechanism is what it claims to be, AND — unlike v2 — that it is coupled
-    /// to production: deleting or genuinely breaking the sizing chain (not just reverting to the old
-    /// proposal-dependent one, which this harness can't distinguish either way) fails it. Treat the
-    /// underlying fix as STAGED, not CONFIRMED, until an operator sees the strip at full window
-    /// width live.
-    func testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth() throws {
-        let space = "slotBankStripWidthDiag"
-        func surface(instrument: Instrument, layout: SurfaceLayout) -> some View {
-            InstrumentSurface(layout: layout) {
-                Color.gray
-            } monitors: {
-                Color.blue.frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
-            } slots: {
-                SlotBankStripView(instrument: instrument, layout: layout)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .measured("strip", in: space)
-            } strips: {
-                Color.green.frame(minWidth: SurfaceMetrics.stripsMinWidth, minHeight: 300)
-            } mixer: {
-                Color.red.frame(width: SurfaceMetrics.mixerWidth)
-            }
-            .coordinateSpace(name: space)
+    /// **A second, harder-won harness lesson from THIS task, worth recording for the next one:**
+    /// `PreferenceKey`/`.onPreferenceChange` — the mechanism `.measured(_:in:)` and every geometry
+    /// gate above rely on — was found to silently report 0 for ANY key, from ANY branch of the tree,
+    /// the instant a `ScrollView` exists ANYWHERE in that same tree, in this specific
+    /// `NSHostingView.layoutSubtreeIfNeeded()`-driven harness. Confirmed with a controlled A/B: the
+    /// identical `PreferenceKey` wiring reported correctly with `slots()` swapped for a trivial
+    /// `Color` stub, and reported 0 with the real `ScrollView`-containing `SlotBankStripView` — same
+    /// harness, same window sizes, only the presence of a `ScrollView` differed. `SlotBankStripView`
+    /// and `InstrumentSurface` route the cell-width measurement through `.onAppear`/`.onChange`
+    /// (an imperative side effect, not a `PreferenceKey` value bubbling through `reduce`) for exactly
+    /// this reason — see `InstrumentSurface`'s content-column measurement (in `body`) for the full
+    /// account. `DrawnCellWidthKey`/`DrawnRowHeightKey` (used by `measuredCellWidth`/
+    /// `measuredRowPitch` below) are still ordinary `PreferenceKey`s and still work correctly: they
+    /// are reported ONCE, at `SlotBankStripView`'s own top level, from a value already computed by
+    /// `.onChange` upstream — never from inside the `ScrollView` itself, which is the specific
+    /// configuration that failed.
+
+    // MARK: Cell clamp (task 4C)
+
+    /// Builds the same real-`SlotBankStripView`-inside-real-`InstrumentSurface` arrangement
+    /// `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth` uses, reused rather than
+    /// duplicated so `measuredCellWidth`/`measuredRowPitch` below share one construction path. No
+    /// panel open — the widest the cells region ever gets at a given window width — matching
+    /// `testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen`'s own scenario.
+    private func slotBankSurface(instrument: Instrument, layout: SurfaceLayout) -> some View {
+        InstrumentSurface(layout: layout) {
+            Color.gray
+        } monitors: {
+            Color.blue.frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
+        } slots: {
+            SlotBankStripView(instrument: instrument, layout: layout)
+        } strips: {
+            Color.green.frame(minWidth: SurfaceMetrics.stripsMinWidth, minHeight: 300)
+        } mixer: {
+            Color.red.frame(width: SurfaceMetrics.mixerWidth)
         }
+    }
 
-        let narrow = SurfaceRenderHarness.frames(
-            surface(instrument: Instrument(), layout: SurfaceLayout()),
-            size: CGSize(width: SurfaceMetrics.minWindowWidth, height: SurfaceMetrics.minWindowHeight))
-        let wide = SurfaceRenderHarness.frames(
-            surface(instrument: Instrument(), layout: SurfaceLayout()),
-            size: CGSize(width: 2400, height: 1200))
+    /// The clamped width every `SlotCell` in the strip is actually drawn at, read from
+    /// `DrawnCellWidthKey` — reported by the REAL `SlotBankStripView`, not a stand-in. Deliberately
+    /// NOT `.fixedSize`: that asks a view for its IDEAL size, an unconstrained query that decouples
+    /// the result from the real, window-width-driven proposal this is meant to observe — the same
+    /// reason `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`'s `.fixedSize`-based
+    /// technique cannot be reused here.
+    private func measuredCellWidth(windowWidth: CGFloat) -> CGFloat {
+        SurfaceRenderHarness.preferenceValue(
+            slotBankSurface(instrument: Instrument(), layout: SurfaceLayout()),
+            key: DrawnCellWidthKey.self,
+            size: CGSize(width: windowWidth, height: SurfaceMetrics.minWindowHeight))
+    }
 
-        let narrowWidth = try XCTUnwrap(narrow["strip"], "harness reported no frames").width
-        let wideWidth = try XCTUnwrap(wide["strip"], "harness reported no frames").width
+    /// The row pitch `SlotBankStripView` itself hands its resize drag, read from
+    /// `DrawnRowHeightKey` — reported independently of `DrawnCellWidthKey` (see that key's doc
+    /// comment) so a reader can catch the two falling out of sync.
+    private func measuredRowPitch(windowWidth: CGFloat) -> CGFloat {
+        SurfaceRenderHarness.preferenceValue(
+            slotBankSurface(instrument: Instrument(), layout: SurfaceLayout()),
+            key: DrawnRowHeightKey.self,
+            size: CGSize(width: windowWidth, height: SurfaceMetrics.minWindowHeight))
+    }
 
-        let cellsRowWidth = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.perRow)
-            + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.perRow - 1)
-        let expectedTotal = SurfaceMetrics.slotStripLeadingChromeWidth + cellsRowWidth
+    /// The cell grows with the window, and STOPS. Task 3 shipped a floor with infinite growth and
+    /// the operator rejected the result on device; task 4 shipped an exact size and the reviewer
+    /// flagged that it is tiny on a large display. Both extremes are wrong; this is the range.
+    func testTheCellGrowsWithTheWindowUpToItsCeiling() throws {
+        let narrow = measuredCellWidth(windowWidth: SurfaceMetrics.minWindowWidth)
+        let wide   = measuredCellWidth(windowWidth: 2560)
 
-        XCTAssertEqual(narrowWidth, expectedTotal, accuracy: 1,
-                       "The real SlotBankStripView's ideal width should be chrome + the eight-cell "
-                       + "row's natural width — got \(narrowWidth), expected \(expectedTotal).")
-        XCTAssertEqual(wideWidth, expectedTotal, accuracy: 1,
-                       "…and must not move with window width. narrow=\(narrowWidth) "
-                       + "wide=\(wideWidth) — a real difference here means the strip's ideal width "
-                       + "somehow depends on the window, which should be structurally impossible "
-                       + "given .fixedSize(horizontal: true).")
+        XCTAssertEqual(narrow, SurfaceMetrics.minCellWidth, accuracy: 0.5,
+                       "At the window minimum the cell sits on its legibility/hit-target floor")
+        XCTAssertGreaterThan(wide, narrow,
+                             "A wider window must give a bigger cell — a fixed cell wastes a "
+                             + "large display, which is what task 4 shipped")
+        XCTAssertLessThanOrEqual(wide, SurfaceMetrics.maxCellWidth,
+                                 "…but never past the ceiling, or the strip eats the monitors "
+                                 + "again — the defect the operator reported on device")
+    }
+
+    /// The row height must follow the DRAWN cell, not a constant, or the resize drag desyncs from
+    /// what it is dragging. Task 4 found the drag reading 60 against a real ~122pt pitch.
+    func testTheRowHeightTracksTheDrawnCell() throws {
+        for windowWidth in [SurfaceMetrics.minWindowWidth, 1600, 2560] as [CGFloat] {
+            let cell = measuredCellWidth(windowWidth: windowWidth)
+            let row  = measuredRowPitch(windowWidth: windowWidth)
+            XCTAssertEqual(row, cell * 9.0 / 16.0 + SurfaceMetrics.slotStripCellSpacing,
+                           accuracy: 0.5,
+                           "row pitch must equal the drawn cell's height plus the row gap")
+        }
     }
 
     /// The ceiling has to leave the default panel intact at the minimum window, or the app ships a

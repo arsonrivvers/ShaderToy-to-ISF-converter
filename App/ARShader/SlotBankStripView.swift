@@ -1,6 +1,55 @@
 import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
+/// Carries the SAME clamped cell width every `SlotCell` in the strip is actually drawn at
+/// (`SlotBankStripView.cellWidth`) up through the view tree. Task 4C makes cell width a range
+/// (`SurfaceMetrics.minCellWidth`...`maxCellWidth`) rather than one fixed value, so a test — or
+/// any future reader — needs a way to observe what got drawn instead of assuming a constant.
+///
+/// Not `private`: `SurfaceGeometryTests` taps this preference externally, wrapping the real
+/// `SlotBankStripView` inside a real `InstrumentSurface` at real window widths, WITHOUT reaching
+/// into `SlotCell` (which stays `private`) or `SlotBankStripView`'s own `@State` — a `.preference`
+/// reported from inside a view keeps bubbling up through every ancestor's `.onPreferenceChange`,
+/// including the test's own, which is what makes external observation possible at all.
+struct DrawnCellWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Carries the row pitch `SlotBankStripView` itself hands to the resize drag. Reported separately
+/// from `DrawnCellWidthKey` rather than re-derived by a reader from the cell width alone, so a test
+/// observing both catches the row height being frozen back to a constant even though the cell width
+/// preference keeps moving — see `DrawnCellWidthKey`'s doc comment for why external observation
+/// works without touching `SlotCell`.
+struct DrawnRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The content column's width, handed DOWN from `InstrumentSurface` via `@Environment` rather than
+/// measured by `SlotBankStripView` itself. This replaced a `PreferenceKey`-based self-measurement
+/// (a `.background(GeometryReader)` reporting upward from inside this view) that turned out to be
+/// unreliable in exactly this tree shape: even attached to `body`'s own outer `VStack` — nowhere
+/// near the cells `ScrollView` — the reported value never left 0 in extensive testing (including a
+/// direct print inside the `GeometryReader` closure and inside the `.onPreferenceChange` callback,
+/// both of which fired, but with a size that measured zero). Whatever the specific cause, self-
+/// measurement from inside a view whose sibling-in-spirit content lives behind a `ScrollView`
+/// proved fragile enough not to trust. `@Environment` is the opposite direction (parent hands a
+/// value DOWN) and needs no `GeometryReader`/`PreferenceKey` round trip at all —
+/// `InstrumentSurface` already knows this width because it is the one proposing it.
+private struct SlotBankContentColumnWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// See `SlotBankContentColumnWidthKey`'s doc comment. Zero means "not yet measured," the same
+    /// "unknown" convention `InstrumentSurface.surfaceWidth` and `.panelLeadingEdge` already use.
+    var slotBankContentColumnWidth: CGFloat {
+        get { self[SlotBankContentColumnWidthKey.self] }
+        set { self[SlotBankContentColumnWidthKey.self] = newValue }
+    }
+}
+
 /// The slot bank: a RECALL TO destination picker, and one row of eight cells — always visible
 /// directly under the monitors, never a panel to open mid-set.
 ///
@@ -24,6 +73,10 @@ struct SlotBankStripView: View {
     let instrument: Instrument
     @ObservedObject private var bank: SlotBank
     @ObservedObject var layout: SurfaceLayout
+
+    /// See `SlotBankContentColumnWidthKey`'s doc comment for why this is handed down rather than
+    /// self-measured.
+    @Environment(\.slotBankContentColumnWidth) private var contentColumnWidth: CGFloat
 
     /// Where a recall WRITES. Two answers, because a slot holds a shader and shaders go on decks —
     /// "they will always be shaders not fx". Typed as `DeckID` rather than `LibraryTarget` so the
@@ -60,6 +113,15 @@ struct SlotBankStripView: View {
     /// mtime), so this in-memory copy is the only surviving one.
     @State private var thumbnails: [URL: Image] = [:]
 
+    /// The resize drag's snap-to-whole-rows arithmetic divides by this. Derived from `cellWidth` —
+    /// the SAME clamped value every cell is actually drawn at (see `cellWidth`'s doc comment) — not
+    /// a constant. A constant desyncs the drag from what it is dragging once cell width is a range
+    /// instead of one fixed value (task 4C); task 4 already found the drag reading 60 against a
+    /// real ~122pt pitch from exactly this kind of drift.
+    private var slotStripRowHeight: CGFloat {
+        cellWidth * 9.0 / 16.0 + SurfaceMetrics.slotStripCellSpacing
+    }
+
     init(instrument: Instrument, layout: SurfaceLayout) {
         self.instrument = instrument
         self.bank = instrument.slotBank
@@ -88,6 +150,13 @@ struct SlotBankStripView: View {
                 content
             }
         }
+        // Reports the SAME `cellWidth` every cell is actually drawn at, and the row pitch computed
+        // from it (`slotStripRowHeight`), as two independent preferences — not one derived from the
+        // other by whatever reads them — so a mutation that freezes `slotStripRowHeight` back to a
+        // constant shows up as a mismatch against `DrawnCellWidthKey`, which keeps moving with the
+        // window. See `DrawnCellWidthKey`'s and `DrawnRowHeightKey`'s doc comments.
+        .preference(key: DrawnCellWidthKey.self, value: cellWidth)
+        .preference(key: DrawnRowHeightKey.self, value: slotStripRowHeight)
         // Keyed on `bank.slots`, not fired once: fix-round-1 (F2). `bank.slots` is `@Published`
         // and `Preset` is `Equatable`, so SwiftUI restarts this task — cancelling whatever sweep
         // was still in flight — every time a capture or clear changes the array, not just at
@@ -189,15 +258,32 @@ struct SlotBankStripView: View {
             // content's ideal height rather than the greedy full-window height it reports when
             // unconstrained.
             //
-            // Cells are pinned with an EXACT `.frame(width:height:)` below (fix-round-2, task 4
-            // addition 1), not `.frame(minWidth:, maxWidth: .infinity)`. The min/max form let each
-            // cell's width follow whatever the ambient HStack/ScrollView proposal happened to be —
-            // in the test harness that resolved to the floor, as documented, but a real window
-            // proposed each cell roughly an eighth of the available width, and two rows of
-            // stretched cells rivaled the monitor strip above them in height (operator, with
-            // screenshot, 2026-08-01). An exact `.frame(width:height:)` reports that size to its
-            // parent regardless of what is proposed, so the cell can no longer inherit stray width
-            // from whatever container it sits inside — see `SurfaceMetrics.slotCellHeight`.
+            // **Task 4C reopens width into a clamped RANGE** (`SurfaceMetrics.minCellWidth`...
+            // `maxCellWidth`) instead of task 4's single exact size — a floor with no ceiling (task
+            // 3) and an exact size with neither (task 4) were both wrong; this is the third value
+            // `.frame(minWidth:maxWidth:)` needs to actually be `clamp()`.
+            //
+            // The clamp is computed in Swift (`cellWidth`, below) rather than left to a bare
+            // `.frame(minWidth: .minCellWidth, maxWidth: .maxCellWidth)` on each cell: a horizontal
+            // `ScrollView` proposes its CONTENT an effectively unconstrained width along the scroll
+            // axis — that is the mechanism that lets content overflow into scrolling at all — so a
+            // native min/max frame applied INSIDE the ScrollView's content never sees the window; it
+            // always resolves toward its own maximum, regardless of actual window width.
+            //
+            // **The width this clamp needs comes from `@Environment(\.slotBankContentColumnWidth)`,
+            // not from self-measurement.** Self-measuring this strip — a `.background(GeometryReader)`
+            // reporting a `PreferenceKey` upward, in several placements (a `Color.clear` sibling of
+            // the `ScrollView` inside this `HStack`; this `HStack`'s own resolved width; even
+            // `body`'s outer `VStack`, nowhere near the `ScrollView`) — measured 0 at every window
+            // width tested, including 2560pt, in every placement tried, even though a diagnostic
+            // print confirmed the `GeometryReader` closures and the `onPreferenceChange` callback DID
+            // fire. Whatever the exact cause, self-measurement proved unreliable in this specific
+            // tree shape (a `ScrollView` present anywhere in the strip). `InstrumentSurface` already
+            // knows the content column's width — it is the one proposing it — so it hands that value
+            // DOWN via `@Environment` instead, which needs no `GeometryReader`/`PreferenceKey` round
+            // trip. `cellWidth` then subtracts the KNOWN fixed chrome
+            // (`SurfaceMetrics.slotStripLeadingChromeWidth`) from that to recover the region the
+            // cells actually have to share.
             ScrollView(.horizontal, showsIndicators: true) {
                 // One VStack of rows inside a SINGLE horizontal ScrollView, not one ScrollView per
                 // row — separate scroll views could drift out of sync and a wide bank would show
@@ -219,15 +305,33 @@ struct SlotBankStripView: View {
                                          onRecall: { recall(index) },
                                          onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
-                                    .frame(width: SurfaceMetrics.minCellWidth,
-                                           height: SurfaceMetrics.slotCellHeight)
+                                    .frame(width: cellWidth, height: cellWidth * 9.0 / 16.0)
                             }
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(SurfaceMetrics.slotStripPadding)
+    }
+
+    /// The single clamped cell width every cell in the strip draws at, and the one `DrawnCellWidthKey`
+    /// reports. `SlotBank.perRow` cells share whatever's left of `contentColumnWidth` (handed down
+    /// via `@Environment` — see `SlotBankContentColumnWidthKey`'s doc comment) after the known fixed
+    /// chrome (`SurfaceMetrics.slotStripLeadingChromeWidth` — padding, RECALL TO, gaps, the divider)
+    /// and the gaps between cells; that even split is then bounded to
+    /// `SurfaceMetrics.minCellWidth`...`maxCellWidth` — `clamp()`, spelled out by hand for the
+    /// reason in `content`'s doc comment. `contentColumnWidth` is 0 until `InstrumentSurface`'s own
+    /// first layout pass lands; treated as "unknown" here, same as everywhere else in this file, so
+    /// the first frame draws at the floor rather than at a zero-derived one.
+    private var cellWidth: CGFloat {
+        let cellsRegionWidth = contentColumnWidth - SurfaceMetrics.slotStripLeadingChromeWidth
+        guard cellsRegionWidth > 0 else { return SurfaceMetrics.minCellWidth }
+        let count = CGFloat(SlotBank.perRow)
+        let idealCellWidth = (cellsRegionWidth - SurfaceMetrics.slotStripCellSpacing * (count - 1))
+            / count
+        return min(max(idealCellWidth, SurfaceMetrics.minCellWidth), SurfaceMetrics.maxCellWidth)
     }
 
     /// A drag on the strip's top edge that snaps to whole rows — reads like the panel divider the
@@ -269,7 +373,7 @@ struct SlotBankStripView: View {
                         // downward by one row per `slotStripRowHeight` of travel — the same
                         // "handle stands in for the boundary it moves" feel as the panel divider.
                         let deltaRows = Int(
-                            (-value.translation.height / SurfaceMetrics.slotStripRowHeight)
+                            (-value.translation.height / slotStripRowHeight)
                                 .rounded())
                         layout.setBankRows((dragStartRows ?? layout.bankRows) + deltaRows)
                     }

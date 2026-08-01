@@ -34,6 +34,15 @@ private final class FrameBox: @unchecked Sendable {
     var frames: [String: CGRect] = [:]
 }
 
+/// Mutable capture box for `SurfaceRenderHarness.preferenceValue`, generic over any `PreferenceKey`.
+/// Same file-scope-class-not-nested-in-a-generic-function constraint as `FrameBox`, and the same
+/// `@unchecked Sendable` reasoning: every access happens on the main actor, synchronously, inside
+/// `onPreferenceChange`'s callback.
+private final class PreferenceBox<Value>: @unchecked Sendable {
+    var value: Value
+    init(_ value: Value) { self.value = value }
+}
+
 /// Renders a SwiftUI view into a real laid-out AppKit view tree and returns what the layout did.
 ///
 /// Why this exists: every defect that reached the operator for three sessions was invisible to
@@ -64,6 +73,49 @@ enum SurfaceRenderHarness {
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         host.layoutSubtreeIfNeeded()
         return box.frames
+    }
+
+    /// Host `view`, lay it out at `size`, and return the final value reported through `key` —
+    /// generalised from `frames(_:size:)`'s `MeasuredFramesKey`-only capture so a caller can read
+    /// ANY `PreferenceKey` a production view reports, not only the test-only measurement one.
+    ///
+    /// Needed for task 4C's cell-width and row-pitch gates: those read `DrawnCellWidthKey` and
+    /// `DrawnRowHeightKey`, both reported by the REAL `SlotBankStripView` (not a stub), WITHOUT
+    /// wrapping it in `.fixedSize` — `.fixedSize` asks a view for its IDEAL size, an unconstrained
+    /// query that decouples the result from the actual window width being tested, which is exactly
+    /// the axis these two gates need to observe.
+    ///
+    /// **Loops to a fixed point rather than laying out twice.** `SlotBankStripView`'s cell width is
+    /// itself fed by a `@State` var written from a DIFFERENT preference
+    /// (`CellsRegionWidthKey`) that only resolves after the FIRST layout pass — so the value this
+    /// function reports depends on a SECOND pass having already happened, and `DrawnCellWidthKey`
+    /// (fed by the cell width computed from THAT) needs a pass after that again. Two fixed
+    /// `layoutSubtreeIfNeeded()` calls (`frames(_:size:)`'s technique) measured `DrawnCellWidthKey`
+    /// stuck at the floor at every window width, including 2560pt — not a real result, an
+    /// under-settled harness. Looping until the reported value stops changing (capped, so a
+    /// genuinely unstable preference chain fails loudly instead of hanging) is what actually
+    /// reaches what production converges to.
+    static func preferenceValue<V: View, K: PreferenceKey>(
+        _ view: V, key: K.Type, size: CGSize
+    ) -> K.Value where K.Value: Equatable {
+        let box = PreferenceBox<K.Value>(K.defaultValue)
+
+        let instrumented = view
+            .frame(width: size.width, height: size.height)
+            .onPreferenceChange(K.self) { box.value = $0 }
+
+        let host = NSHostingView(rootView: instrumented)
+        host.frame = CGRect(origin: .zero, size: size)
+
+        var previous: K.Value?
+        for _ in 0..<10 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            host.layoutSubtreeIfNeeded()
+            if let previous, previous == box.value { break }
+            previous = box.value
+        }
+        return box.value
     }
 
     static func png<V: View>(_ view: V, size: CGSize) -> Data? {
