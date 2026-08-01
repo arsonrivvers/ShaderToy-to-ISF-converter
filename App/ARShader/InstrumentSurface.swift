@@ -99,21 +99,23 @@ enum SurfaceMetrics {
             + slotStripGapWidth * slotStripGapCount + dividerWidth
     }
 
-    /// A cell's own floor: `SlotCell`'s horizontal padding (6pt × 2 = 12pt), its index-number
-    /// frame (14pt), and the 6pt spacing between the index and the name = 32pt before a single
-    /// glyph of the shader's name is drawn. 56pt leaves room for a few characters of an 11pt
-    /// monospaced name before the row starts scrolling. Below the 32pt floor,
-    /// adjacent cells' `.contentShape(Rectangle())` hit areas overlap and an edge click can fire
-    /// the WRONG slot — the exact defect this constant exists to prevent.
-    static let minCellWidth: CGFloat = 56
+    /// A cell's own floor. 56pt (phase 3b/7R) was sized for a bare index-and-name row; phase 3c
+    /// (task 3) gave the cell a 16:9 thumbnail instead, and a 16:9 image at 56pt wide is 31pt
+    /// tall — unreadable as a still, let alone as a contact-sheet look the operator recognises at
+    /// a glance. 96pt keeps the thumbnail legible (54pt tall at the floor) while the cell's
+    /// `.contentShape(Rectangle())` still never drops below a size where adjacent cells' hit areas
+    /// could overlap — the defect this constant has existed to prevent since 7R.
+    static let minCellWidth: CGFloat = 96
 
     // MARK: Slot strip rows (task 7R)
 
     /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `SlotCell`'s own
-    /// `minHeight: 28` plus the spacing between rows. Not asserted by any layout gate — a drag
-    /// that snaps a few points early or late is a feel issue, not a correctness one; the
-    /// correctness invariant is that `bankRows` never touches `SlotBank`, which is tested directly.
-    static let slotStripRowHeight: CGFloat = 34
+    /// floor height — `minCellWidth` at the 16:9 aspect ratio the thumbnail enforces (96 × 9/16 =
+    /// 54pt) — plus the spacing between rows (`slotStripCellSpacing`, 6pt) = 60. Not asserted by
+    /// any layout gate — a drag that snaps a few points early or late is a feel issue, not a
+    /// correctness one; the correctness invariant is that `bankRows` never touches `SlotBank`,
+    /// which is tested directly.
+    static let slotStripRowHeight: CGFloat = 60
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the

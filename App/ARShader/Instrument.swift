@@ -22,6 +22,10 @@ final class Instrument: ObservableObject {
     let surfaceLayout: SurfaceLayout
     /// The slot bank, restored from the last launch, persisting itself on every write.
     let slotBank: SlotBank
+    /// Stills for the slot bank (and, later, the library). One instance for the whole session —
+    /// owned here rather than by a view because this already owns the library, the decks and the
+    /// renderer, and the disk cache is a process-wide concern, not a per-view one.
+    let thumbnailService: ThumbnailService
 
     /// Fired after a load has compiled and any snapshot has been applied. Test seam only — the app
     /// has no use for it, but the compile is asynchronous and a test otherwise has nothing to await.
@@ -64,6 +68,23 @@ final class Instrument: ObservableObject {
         renderer.onElementStats = { map in
             Task { @MainActor in elements.gpuMs = map }
         }
+        // Guarded like every other disk-backed store in this app (ThumbnailService's own I6
+        // precedent): a missing Application Support directory must not crash a live instrument
+        // over a contact-sheet nicety. Falls back to the temp directory, which — like any directory
+        // ThumbnailCache itself fails to create — degrades the service to render-only-no-cache
+        // rather than trap on the force-unwrap the interface's own `.first!` implied.
+        let thumbnailsDirectory = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            .map { $0.appendingPathComponent("ARShader/Thumbnails") }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("ARShader/Thumbnails")
+        let thumbnailService = ThumbnailService(cacheDirectory: thumbnailsDirectory)
+        self.thumbnailService = thumbnailService
+        // Swept once at launch, never during a set — eviction is disk I/O the operator did not ask
+        // for at the worst possible moment (ThumbnailService.sweepCache's own doc comment).
+        Task { await thumbnailService.sweepCache() }
+
+        // Every stored property must be set before a closure captures `self` — this is why the
+        // block above comes first, not after.
         self.slotBank.onChange = { [weak self] in
             guard let self else { return }
             bankStore.save(self.slotBank.slots)
