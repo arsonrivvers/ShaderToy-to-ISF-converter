@@ -31,6 +31,7 @@
 
 - `App/Persystence/ProductIdentity.swift`: one source of truth for public names, window titles, descriptor, and compatibility identifiers.
 - `App/PersystenceTests/ProductIdentityTests.swift`: exact product-language contract tests.
+- `docs/reports/persystence-identity-baseline.md`: pre-migration signing identity, installed-app, and real preference-state evidence.
 
 ### Renamed paths
 
@@ -60,6 +61,7 @@
 **Files:**
 - Create: `App/ARShader/ProductIdentity.swift`
 - Create: `App/ARShaderTests/ProductIdentityTests.swift`
+- Create: `docs/reports/persystence-identity-baseline.md`
 - Modify: `App/ARShader/SurfaceLayoutStore.swift`
 - Modify: `App/ARShaderTests/SurfaceLayoutStoreTests.swift`
 
@@ -79,7 +81,47 @@ git stash list
 
 Expected: `.worktrees/m2-slot-bank` is absent or its branch has already been merged, the only pre-existing working-tree modification is the operator-owned prior-art dossier edit, and no unexplained stash exists. Stop and reconcile if those conditions are false.
 
-- [ ] **Step 2: Add failing identity contract tests**
+- [ ] **Step 2: Capture the installed app's signed-identity baseline**
+
+If `~/Applications/ARShader.app` exists, run:
+
+```bash
+mkdir -p /tmp/persystence-identity-baseline
+codesign -dr - "$HOME/Applications/ARShader.app" 2>&1 \
+  | tee /tmp/persystence-identity-baseline/designated-requirement.txt
+codesign -dvv "$HOME/Applications/ARShader.app" 2>&1 \
+  | tee /tmp/persystence-identity-baseline/codesign-details.txt
+plutil -p "$HOME/Applications/ARShader.app/Contents/Info.plist" \
+  | tee /tmp/persystence-identity-baseline/info-plist.txt
+```
+
+If it does not exist, build and stage the current master version with `./scripts/run-instrument.sh`, then run the three commands. Record the exact designated requirement, `Identifier`, `TeamIdentifier`, bundle identifier, executable name, and app path in `docs/reports/persystence-identity-baseline.md`.
+
+- [ ] **Step 3: Snapshot the real legacy layout before first renamed launch**
+
+Run:
+
+```bash
+swift -e 'import Foundation
+let suite = "com.arsonrivvers.ARShader"
+let key = "ARShader.surfaceArrangement"
+let defaults = UserDefaults(suiteName: suite)!
+guard let data = defaults.data(forKey: key) else {
+  print("LEGACY_LAYOUT_ABSENT")
+  exit(0)
+}
+try data.write(to: URL(fileURLWithPath: "/tmp/persystence-identity-baseline/layout.json"))
+print(String(data: data, encoding: .utf8) ?? "LEGACY_LAYOUT_NON_UTF8")'
+shasum -a 256 /tmp/persystence-identity-baseline/layout.json
+swift -e 'import Foundation
+let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/persystence-identity-baseline/layout.json"))
+_ = try JSONSerialization.jsonObject(with: data)
+print("VALID_JSON")'
+```
+
+Record whether the real key was present. If present, record its SHA-256 and decoded JSON in the baseline report. If absent, record that fact and state that the controlled XCTest fixture, rather than nonexistent operator data, is the preservation proof.
+
+- [ ] **Step 4: Add failing identity contract tests**
 
 Create `App/ARShaderTests/ProductIdentityTests.swift`:
 
@@ -104,7 +146,7 @@ final class ProductIdentityTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Add failing preference-migration tests**
+- [ ] **Step 5: Add failing preference-migration tests**
 
 Add these tests to `App/ARShaderTests/SurfaceLayoutStoreTests.swift`:
 
@@ -143,7 +185,7 @@ func testCorruptLegacyDataFallsBackWithoutWritingTheNewKey() throws {
 }
 ```
 
-- [ ] **Step 4: Run the focused tests and verify they fail for the intended reasons**
+- [ ] **Step 6: Run the focused tests and verify they fail for the intended reasons**
 
 Run:
 
@@ -158,7 +200,7 @@ xcodebuild -project TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: FAIL because `ProductIdentity` and `SurfaceLayoutStore.legacyKey` do not exist.
 
-- [ ] **Step 5: Implement the identity authority**
+- [ ] **Step 7: Implement the identity authority**
 
 Create `App/ARShader/ProductIdentity.swift`:
 
@@ -178,7 +220,7 @@ enum ProductIdentity {
 }
 ```
 
-- [ ] **Step 6: Implement one-time preference migration**
+- [ ] **Step 8: Implement one-time preference migration**
 
 Replace `SurfaceLayoutStore`'s key and `load()` implementation with:
 
@@ -204,19 +246,20 @@ func load() -> Arrangement {
 
 Keep `save(_:)` unchanged except that it now writes through `Self.key`.
 
-- [ ] **Step 7: Run the focused tests**
+- [ ] **Step 9: Run the focused tests**
 
 Repeat the Task 1 Step 4 command.
 
 Expected: PASS for `ProductIdentityTests` and `SurfaceLayoutStoreTests`.
 
-- [ ] **Step 8: Commit Task 1**
+- [ ] **Step 10: Commit Task 1**
 
 ```bash
 git add App/ARShader/ProductIdentity.swift \
   App/ARShader/SurfaceLayoutStore.swift \
   App/ARShaderTests/ProductIdentityTests.swift \
-  App/ARShaderTests/SurfaceLayoutStoreTests.swift
+  App/ARShaderTests/SurfaceLayoutStoreTests.swift \
+  docs/reports/persystence-identity-baseline.md
 git commit -m "feat(identity): establish the PERSYSTENCE product contract"
 ```
 
@@ -469,15 +512,20 @@ Run:
 ```bash
 plutil -p "$HOME/Applications/Persystence.app/Contents/Info.plist"
 codesign -dvv "$HOME/Applications/Persystence.app" 2>&1
+codesign -dr - "$HOME/Applications/Persystence.app" 2>&1 \
+  | tee /tmp/persystence-identity-baseline/persystence-designated-requirement.txt
 strings "$HOME/Applications/Persystence.app/Contents/MacOS/Persystence.debug.dylib" \
   | rg -n 'PERSYSTENCE|PER·SYS·TENCE|Visual Memory Apparatus|ARShader'
+diff -u /tmp/persystence-identity-baseline/designated-requirement.txt \
+  /tmp/persystence-identity-baseline/persystence-designated-requirement.txt
 ```
 
 Expected:
 
 - `CFBundleName` and `CFBundleDisplayName` are `PERSYSTENCE`.
 - `CFBundleIdentifier` remains `com.arsonrivvers.ARShader`.
-- the signed identifier is unchanged;
+- the old and new designated requirements are byte-identical;
+- `Identifier` and `TeamIdentifier` match the values recorded in the baseline report;
 - the debug dylib contains the new product strings;
 - any remaining `ARShader` string is either the explicit compatibility identifier/key or a source comment, not visible UI copy.
 
@@ -527,7 +575,30 @@ In the two named modulation documents, introduce the product once as:
 PERSYSTENCE (then ARShader)
 ```
 
-Use `PERSYSTENCE` thereafter for product concepts. Keep literal filenames, target names, and code identifiers accurate to the task in which they existed. Do not rewrite completed implementation plans or reports to simulate a history that did not happen.
+Use `PERSYSTENCE` thereafter for product concepts. In the still-unimplemented modulation plan,
+replace every operational reference so it remains executable after Task 2:
+
+```text
+App/ARShader/           → App/Persystence/
+App/ARShaderTests/      → App/PersystenceTests/
+ARShader                → Persystence          (scheme and application target only)
+ARShaderTests           → PersystenceTests     (test target only)
+scripts/run-instrument.sh → scripts/run-persystence.sh
+ARShader.app            → Persystence.app
+```
+
+Do not mechanically replace historical prose, the compatibility bundle identifiers, or
+`ARShader.surfaceArrangement`. Keep completed implementation plans and reports unchanged so they
+do not simulate a history that did not happen.
+
+After editing the forward modulation plan, run:
+
+```bash
+rg -n 'App/ARShader|App/ARShaderTests|scheme ARShader|ARShaderTests|run-instrument|ARShader\.app' \
+  docs/superpowers/plans/2026-08-01-arshader-modulation-expression-layer.md
+```
+
+Expected: zero hits. This is an executable-reference sweep, not a product-prose sweep.
 
 - [ ] **Step 3: Add an explicit rename note to the migration plan's eventual completion record**
 
@@ -631,11 +702,14 @@ Record PASS/FAIL and evidence for each:
 2. The control window title displays `PERSYSTENCE`.
 3. The output window title displays `PERSYSTENCE — Output`.
 4. Existing surface arrangement is restored after relaunch.
-5. A changed arrangement survives a second relaunch under the new key.
-6. Camera input opens without an unexpected new permission prompt; if macOS prompts because prior permission was absent, record that distinction.
-7. Blackout still clears the program output to opaque black.
-8. Output open, close, floating, and external-display routing retain their previous behavior where hardware is available.
-9. `~/Applications/ARShader.app` remains untouched during verification.
+5. If the baseline report recorded real legacy layout data, the restored arrangement matches its
+   decoded values; the new key contains the same JSON bytes and the legacy key is absent. If no
+   real legacy data existed, the controlled migration XCTest is the recorded proof instead.
+6. A changed arrangement survives a second relaunch under the new key.
+7. Camera input opens without an unexpected new permission prompt; if macOS prompts because prior permission was absent, record that distinction.
+8. Blackout still clears the program output to opaque black.
+9. Output open, close, floating, and external-display routing retain their previous behavior where hardware is available.
+10. `~/Applications/ARShader.app` remains untouched during verification.
 
 - [ ] **Step 4: Manually run the native Mechanic checklist**
 
@@ -675,7 +749,27 @@ Write `docs/reports/live-smoke-persystence-identity-migration.md` with:
 - remaining compatibility anchors;
 - explicit statement that REMNANCE is reserved but not implemented.
 
-- [ ] **Step 7: Run the final exhaustive live-surface sweep**
+- [ ] **Step 7: Recoverably retire the legacy installed application**
+
+Only after every preceding smoke leg passes, run:
+
+```bash
+archive="$HOME/Applications/.persystence-migration-archive"
+mkdir -p "$archive"
+touch "$archive/.metadata_never_index"
+if [ -d "$HOME/Applications/ARShader.app" ]; then
+  mv "$HOME/Applications/ARShader.app" "$archive/ARShader-pre-persystence.app"
+fi
+test -d "$HOME/Applications/Persystence.app"
+test ! -e "$HOME/Applications/ARShader.app"
+test -d "$archive/ARShader-pre-persystence.app"
+```
+
+Expected: `Persystence.app` is the only visible canonical application in `~/Applications` and the
+old signed app remains recoverable in a hidden, non-indexed migration archive. Record the archive
+path in the smoke report. Do not remove the archive in this migration.
+
+- [ ] **Step 8: Run the final exhaustive live-surface sweep**
 
 Run:
 
@@ -685,7 +779,7 @@ rg -n 'ARShader|AR_Shader' App/Persystence App/PersystenceTests scripts/run-pers
 
 Expected: only the four allowed compatibility categories from Task 4 Step 4. Paste the actual command and result count into the completion summary.
 
-- [ ] **Step 8: Commit verification evidence and any fixes**
+- [ ] **Step 9: Commit verification evidence and any fixes**
 
 ```bash
 git add docs/reports/live-smoke-persystence-identity-migration.md
