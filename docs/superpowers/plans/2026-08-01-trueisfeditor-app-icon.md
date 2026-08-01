@@ -51,7 +51,7 @@
 - Create: `App/TrueISFEditor/Assets.xcassets/Contents.json`
 - Create: `App/TrueISFEditor/Assets.xcassets/AppIcon.appiconset/Contents.json`
 - Create: `App/TrueISFEditor/Assets.xcassets/AppIcon.appiconset/*.png`
-- Modify: `project.yml`
+- Modify: `App/project.yml`
 
 **Interfaces:**
 - Consumes: the user-selected 1024 × 1024 master from Task 1
