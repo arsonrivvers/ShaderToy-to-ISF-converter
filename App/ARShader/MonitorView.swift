@@ -209,7 +209,7 @@ struct MonitorTile: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            dropDestinationIfDeck(
+            draggableIfCapturable(dropDestinationIfDeck(
                 MonitorViewport(instrument: instrument, source: source,
                                 isFrozen: isFrozen, isOff: isOff, drivesClock: drivesClock)
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
@@ -257,12 +257,46 @@ struct MonitorTile: View {
                         .strokeBorder(isDropTargeted ? Color.accentColor : Color.clear,
                                       lineWidth: 2)
                 )
-            )
+            ))
             HStack(spacing: 6) {
                 Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button).controlSize(.small)
                 Toggle("Off", isOn: $isOff).toggleStyle(.button).controlSize(.small)
             }
             .font(.system(size: 11))
+        }
+    }
+
+    /// What a deck tile's drag would carry, or nil when the tile is not a legal drag source.
+    ///
+    /// Pulled out of `draggableIfCapturable` as a plain, `View`-free function for the same reason
+    /// `ShaderDrag.accepts` has no SwiftUI import: a mutation of the ONE line that matters here —
+    /// which `snapshot` actually goes into the payload — must be reachable by a test with no view
+    /// in play. Left inline inside `draggableIfCapturable`, that line is a `.draggable(_:)`
+    /// modifier argument SwiftUI gives no way to read back, which is exactly the "tests that
+    /// cannot fail" trap this phase has hit three times before; this is the second half of Task 6
+    /// Step 5, not restructuring beyond the task.
+    ///
+    /// Deck tiles ONLY — never PROGRAM: `Instrument.currentPreset(of:)` takes a `DeckID`, and
+    /// there is no such thing as the master's shader. The program feed is a composite of two
+    /// decks and an FX chain; a "look" of it is not a `Preset`, and `currentPreset` is not widened
+    /// to pretend otherwise.
+    static func dragPayload(for source: MonitorSource, instrument: Instrument) -> ShaderDrag? {
+        guard case .deck(let id) = source, let preset = instrument.currentPreset(of: id) else {
+            return nil
+        }
+        return ShaderDrag(source: .deck(id), url: preset.shaderURL, snapshot: preset.snapshot)
+    }
+
+    /// Gates the `.draggable` modifier itself, rather than always attaching one with a sentinel
+    /// payload for the empty case — a sentinel would still let the drag START (and read like a
+    /// legitimate one to the operator) only to be rejected wherever it lands. An empty deck simply
+    /// is not a drag source.
+    @ViewBuilder
+    private func draggableIfCapturable<V: View>(_ view: V) -> some View {
+        if let payload = Self.dragPayload(for: source, instrument: instrument) {
+            view.draggable(payload)
+        } else {
+            view
         }
     }
 

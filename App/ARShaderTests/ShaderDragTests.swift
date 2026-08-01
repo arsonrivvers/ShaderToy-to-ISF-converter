@@ -116,13 +116,27 @@ final class ShaderDragTests: XCTestCase {
         instrument.onLoadSettledForTesting = nil
         instrument.deck(.one).unit.params.set("speed", .float(0.42))
 
-        // Exactly what `MonitorTile.draggableIfCapturable` builds for a loaded deck.
-        let preset = try XCTUnwrap(instrument.currentPreset(of: .one))
-        let payload = ShaderDrag(source: .deck(.one), url: preset.shaderURL,
-                                 snapshot: preset.snapshot)
+        // The ACTUAL production call site, not a reconstruction of it: `MonitorTile.body` builds
+        // its `.draggable` payload by calling this exact static function. A test that instead
+        // rebuilt a `ShaderDrag` by hand here would pass under the Step 5 mutation regardless of
+        // what `dragPayload` does — the trap `dragPayload` was extracted out of
+        // `draggableIfCapturable` to close (see that function's doc comment).
+        let payload = try XCTUnwrap(MonitorTile.dragPayload(for: .deck(.one), instrument: instrument))
 
         XCTAssertNotNil(payload.snapshot, "a deck monitor drag must carry the dialled values")
         XCTAssertEqual(payload.snapshot?.params["speed"], .float(0.42),
                        "the carried snapshot must reflect what is dialled NOW, not header defaults")
+    }
+
+    /// The gate half of `dragPayload`: an empty deck must not be a drag source at all (no sentinel
+    /// payload that starts a drag only to be rejected wherever it lands).
+    func testMonitorDragPayloadIsNilForAnEmptyDeck() {
+        XCTAssertNil(MonitorTile.dragPayload(for: .deck(.one), instrument: Instrument()))
+    }
+
+    /// PROGRAM is never a drag source: `currentPreset(of:)` takes a `DeckID`, and the master
+    /// composite has no shader of its own to hand back.
+    func testMonitorDragPayloadIsNilForProgram() {
+        XCTAssertNil(MonitorTile.dragPayload(for: .master, instrument: Instrument()))
     }
 }
