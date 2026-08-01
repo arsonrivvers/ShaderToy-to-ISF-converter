@@ -12,6 +12,7 @@ final class InstrumentRendererTests: XCTestCase {
 
     func testMasterIsFixedAt1920x1080() throws {
         let (renderer, _, _) = try makeRenderer()
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         renderer.renderFrame()
         // rawMasterTexture, not programTexture: this measures the texture, not the blackout gate.
         let tex = try XCTUnwrap(renderer.rawMasterTexture())

@@ -391,10 +391,9 @@ struct InstrumentView: View {
                        caption: "rasterising",
                        help: "What live decks AND the program composite actually rasterise at. "
                            + "With output closed these panes are the only thing looking, and they "
-                           + "are tiny — so dropping this is free GPU at no visible cost. While "
-                           + "projecting it also softens the projected image, which is what the "
-                           + "warning is for.",
-                       warning: projectingUpscaled ? "PROJECTING BELOW 100%" : nil,
+                           + "are tiny — so dropping this is free GPU at no visible cost. The "
+                           + "projector is never affected: opening it pins this chain to full "
+                           + "size regardless of what this reads.",
                        apply: { instrument.renderer.previewScale = $0 })
 
             scaleField(title: "CUE SCALE",
@@ -410,7 +409,6 @@ struct InstrumentView: View {
                            + "you have faded out. This reallocates nothing and never touches the "
                            + "projected image, so it is safe to drop very low. It is also the only "
                            + "saving still available while you ARE projecting.",
-                       warning: nil,
                        apply: { instrument.renderer.cueRenderScale = $0 })
         }
         .onAppear { syncResolutionFields() }
@@ -426,7 +424,6 @@ struct InstrumentView: View {
                             resolved: RenderSize,
                             caption: String,
                             help: String,
-                            warning: String?,
                             apply: @escaping (RenderScale) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -461,20 +458,8 @@ struct InstrumentView: View {
             Text("→ \(caption) \(resolved.label)")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-            if let warning {
-                Text(warning)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.orange)
-            }
         }
         .help(help)
-    }
-
-    /// The scale is manual and never snaps back on its own, so the surface says when that is
-    /// costing sharpness on a wall rather than only on a 340px tile.
-    private var projectingUpscaled: Bool {
-        OutputSharpness.isProjectingUpscaled(destination: output.destination,
-                                             scale: instrument.renderer.previewScale)
     }
 
     private func syncResolutionFields() {

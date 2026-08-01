@@ -320,6 +320,7 @@ final class FrameGraphTests: XCTestCase {
     func testRenderScaleResizesTheMaster() throws {
         renderer.outputResolution = RenderSize(width: 1920, height: 1080)
         renderer.previewScale = RenderScale(percent: 50)
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         renderer.renderFrame()
         let tex = try XCTUnwrap(renderer.rawMasterTexture())
         XCTAssertEqual(tex.width, 960)
@@ -332,6 +333,7 @@ final class FrameGraphTests: XCTestCase {
         try load(.one, "solid_red")
         mixer.crossfadePosition = 0             // deck 1 LIVE at full opacity
         renderer.previewScale = RenderScale(percent: 25)
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         renderer.renderFrame()
         // Assert on the RASTER size, not the owned texture: the owned texture is the same size
         // either way, so reading deckTexture alone would pass even if the scale never reached the
@@ -348,6 +350,7 @@ final class FrameGraphTests: XCTestCase {
         mixer.crossfadePosition = 0          // deck 1 live, deck 2 cued
         renderer.previewScale = RenderScale(percent: 100)
         renderer.cueRenderScale = RenderScale(percent: 25)
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         renderer.renderFrame()
         XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920,
                        "the live deck pays full price")
@@ -393,6 +396,7 @@ final class FrameGraphTests: XCTestCase {
         mixer.crossfadePosition = 0          // deck 1 live, deck 2 cued
         renderer.previewScale = RenderScale(percent: 25)
         renderer.cueRenderScale = RenderScale(percent: 50)
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         renderer.renderFrame()
         let live = try XCTUnwrap(renderer.deckRasterSize(.one)).width
         let cued = try XCTUnwrap(renderer.deckRasterSize(.two)).width
@@ -405,6 +409,7 @@ final class FrameGraphTests: XCTestCase {
         try load(.one, "solid_red")
         mixer.crossfadePosition = 0
         renderer.previewScale = RenderScale(percent: 50)
+        renderer.isProgramLive = false      // output closed: PREVIEW SCALE governs the live chain
         let rgb = try renderAndRead()
         XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
     }
@@ -415,6 +420,62 @@ final class FrameGraphTests: XCTestCase {
         renderer.previewScale = renderer.previewScale
         XCTAssertTrue(try XCTUnwrap(renderer.rawMasterTexture()) === before,
                       "A no-op set must not reallocate — the UI binds to this and writes freely")
+    }
+
+    // MARK: The preview/program split (phase 3c task 2)
+
+    func testWithOutputLiveALiveDeckIgnoresPreviewScale() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0                     // deck 1 LIVE
+        renderer.previewScale = RenderScale(percent: 25)
+        renderer.isProgramLive = true                   // the projector is open
+        renderer.renderFrame()
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920,
+                       "With the projector open, a live deck rasterises full size whatever "
+                       + "PREVIEW SCALE says — the operator's rule is that the projector is "
+                       + "never affected, ever.")
+    }
+
+    func testWithOutputLiveTheMasterIsFullSizeAtAnyPreviewScale() throws {
+        renderer.outputResolution = RenderSize(width: 1920, height: 1080)
+        renderer.previewScale = RenderScale(percent: 25)
+        renderer.isProgramLive = true
+        renderer.renderFrame()
+        let tex = try XCTUnwrap(renderer.rawMasterTexture())
+        XCTAssertEqual(tex.width, 1920)
+        XCTAssertEqual(tex.height, 1080,
+                       "The master is pinned WITH the decks, on the same condition — a pinned "
+                       + "master over scaled decks would composite an upscale every frame.")
+    }
+
+    func testOpeningTheOutputDoesNotCostTheCueSaving() throws {
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        mixer.crossfadePosition = 0                     // deck 1 live, deck 2 cued
+        renderer.previewScale = RenderScale(percent: 100)
+        renderer.cueRenderScale = RenderScale(percent: 25)
+        renderer.isProgramLive = true
+        renderer.renderFrame()
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920,
+                       "the live deck pays full price")
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.two)).width, 480,
+                       "the cued deck is not on the projector, so opening it must not make the "
+                       + "cued deck full size too")
+    }
+
+    func testClosingTheOutputRestoresPreviewScale() throws {
+        try load(.one, "solid_red")
+        mixer.crossfadePosition = 0
+        renderer.previewScale = RenderScale(percent: 25)
+        renderer.isProgramLive = true
+        renderer.renderFrame()
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 1920)
+
+        renderer.isProgramLive = false                  // projector closed again
+        renderer.renderFrame()
+        XCTAssertEqual(try XCTUnwrap(renderer.deckRasterSize(.one)).width, 480,
+                       "Closing the output must give the saving back — this is not a one-way "
+                       + "latch, and the operator closes the projector constantly while building.")
     }
 
     func testAFadedOutDeckDoesNotDarkenTheOtherOne() throws {

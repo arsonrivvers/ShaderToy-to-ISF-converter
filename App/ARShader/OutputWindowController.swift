@@ -39,6 +39,10 @@ final class OutputWindowController: NSObject, ObservableObject {
 
     func setDestination(_ destination: OutputDestination) {
         self.destination = destination
+        // The renderer has no knowledge of OutputDestination and must not gain any — it needs one
+        // bit, not a concept. Setting it here rather than in applyDestination's branches keeps it
+        // beside the published value it mirrors, so the two can never disagree.
+        instrument.renderer.isProgramLive = destination != .off
         applyDestination()
     }
 

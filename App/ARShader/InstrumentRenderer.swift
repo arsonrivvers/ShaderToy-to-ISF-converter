@@ -149,6 +149,7 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// It is also the only saving still available while the projector is open, since the preview
     /// scale cannot drop below full output resolution without softening the projection.
     private var cueScale: RenderScale = .defaultCue
+    private var programLive = false
     private var stats = RenderStatsAccumulator()
     private var statsWereLive = false
     /// Per-element GPU metering. **On by default** — the operator asked for a permanent per-tile
@@ -268,6 +269,26 @@ final class InstrumentRenderer: @unchecked Sendable {
         set { lock.lock(); cueScale = newValue; lock.unlock() }
     }
 
+    /// Whether the program feed is actually going somewhere — the output window is open on a screen
+    /// or floating. Set from the main actor by `OutputWindowController`; read under the lock during
+    /// the frame.
+    ///
+    /// This is the ONLY thing that lifts `previewScale` off the live chain. The operator's rule is
+    /// that the projector is never affected by a preview control, ever; while nothing is projected
+    /// there is no image to protect and the saving is free. Pinning the master on the SAME
+    /// condition as the decks (rather than unconditionally) is what stops a scaled deck being
+    /// composited into a full-size target every frame while output is closed.
+    var isProgramLive: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return programLive }
+        set {
+            lock.lock()
+            guard newValue != programLive else { lock.unlock(); return }
+            programLive = newValue
+            reallocateMastersLocked()
+            lock.unlock()
+        }
+    }
+
     /// Per-element GPU metering. See `meteringEnabled` for what turning it on costs.
     var isMeteringEnabled: Bool {
         get { lock.lock(); defer { lock.unlock() }; return meteringEnabled }
@@ -285,8 +306,8 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// across mismatched targets, and the failure would look like a corrupted image rather than
     /// an error.
     private func reallocateMastersLocked() {
-        let fresh = Self.makeMasterPair(device: device,
-                                        resolution: renderScale.applied(to: masterResolution))
+        let live = programLive ? masterResolution : renderScale.applied(to: masterResolution)
+        let fresh = Self.makeMasterPair(device: device, resolution: live)
         if fresh.count == 2 {
             masters = fresh
             masterIndex = 0
@@ -368,7 +389,11 @@ final class InstrumentRenderer: @unchecked Sendable {
         let metering = meteringEnabled
         let deckList = decks
         let outRes = masterResolution
-        let liveRes = renderScale.applied(to: outRes)
+        // The whole preview/program split, in one expression. With the projector open the live
+        // chain ignores PREVIEW SCALE entirely; with it closed, PREVIEW SCALE governs exactly as
+        // it always has. Deck rasterisation, cue size, master FX and the master pair's own
+        // allocation all derive from this, so there is no second rule that can drift out of sync.
+        let liveRes = programLive ? outRes : renderScale.applied(to: outRes)
         // Cue is a fraction of the LIVE render, not of the output. Applied to the output it could
         // exceed the live size — preview 25% with cue 50% rasterised a faded-out deck at 960px
         // against the live deck's 480, so the deck nobody can see cost four times the pixels of

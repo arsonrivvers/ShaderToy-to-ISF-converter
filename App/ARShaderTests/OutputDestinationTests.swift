@@ -17,18 +17,22 @@ final class OutputDestinationTests: XCTestCase {
             destination: .off, scale: RenderScale(percent: 10)))
     }
 
-    func testProjectingBelowFullScaleIsFlagged() {
-        // The scale is manual and never snaps back on its own (operator's call, 2026-07-30), so
-        // walking on stage still at a rehearsal value has to be visible.
-        XCTAssertTrue(OutputSharpness.isProjectingUpscaled(
-            destination: .screen(id: "2"), scale: RenderScale(percent: 25)))
-        XCTAssertTrue(OutputSharpness.isProjectingUpscaled(
-            destination: .floating, scale: RenderScale(percent: 99)))
-    }
-
     func testProjectingAtFullScaleIsNotFlagged() {
         XCTAssertFalse(OutputSharpness.isProjectingUpscaled(
             destination: .screen(id: "2"), scale: .full))
+    }
+
+    /// Phase 3c: a preview control can no longer reach the projector, so this must hold for EVERY
+    /// combination rather than only the ones a UI happens to produce today.
+    func testProjectingAnUpscaleIsUnreachable() {
+        let destinations: [OutputDestination] = [.off, .floating, .screen(id: "1")]
+        for destination in destinations {
+            for scale in RenderScale.presets {
+                XCTAssertFalse(
+                    OutputSharpness.isProjectingUpscaled(destination: destination, scale: scale),
+                    "\(destination) at \(scale.percent)% must not be an upscale")
+            }
+        }
     }
 
     func testOffIsClosedNoMatterWhatIsPluggedIn() {

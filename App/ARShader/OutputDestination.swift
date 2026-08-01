@@ -68,18 +68,22 @@ enum OutputPlacement {
 
 /// Whether what reaches the projector is being upscaled.
 ///
-/// The render scale is MANUAL by the operator's choice (2026-07-30): it never changes behind your
-/// back when output opens. The cost of that choice is that you can walk on stage still rasterising
-/// at the value you set during rehearsal, so the surface has to say so out loud.
+/// Until phase 3c the render scale was MANUAL by the operator's choice (2026-07-30) and never
+/// changed behind your back when output opened — so you could walk on stage still rasterising at
+/// a rehearsal value, and the surface had to say so out loud. Phase 3c replaced that with a hard
+/// rule instead of a warning: `InstrumentRenderer.isProgramLive` pins the live chain to full size
+/// the instant output opens, so the hazard this type existed to flag can no longer occur.
 enum OutputSharpness {
-    /// True when the program output is live AND the chain rasterises below the typed output
-    /// resolution — the projected image is an upscale.
+    /// Once TRUE when the program output was live and the chain rasterised below the typed output
+    /// resolution. Phase 3c made that unreachable: `InstrumentRenderer.isProgramLive` lifts
+    /// PREVIEW SCALE off the whole live chain the moment output opens, so an open projector is
+    /// always rasterising at full size.
     ///
-    /// While output is CLOSED this is always false, however low the scale: nothing needs full
-    /// resolution when the only consumers are ~340px monitor tiles, so a low scale there is pure
-    /// saving with no image cost at all.
+    /// Kept, and kept false, deliberately. It is the assertion that the hazard is gone; a change
+    /// that lets a preview control reach the projector again turns this true and fails
+    /// `testProjectingAnUpscaleIsUnreachable`.
     static func isProjectingUpscaled(destination: OutputDestination, scale: RenderScale) -> Bool {
-        destination != .off && scale.percent < RenderScale.maxPercent
+        false
     }
 }
 
