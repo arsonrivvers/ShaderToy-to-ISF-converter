@@ -14,20 +14,92 @@ import SwiftUI
 /// from; RECALL TO is where a recall WRITES to. Leaving RECALL TO on a stale value such as `MST FX`
 /// would make recall additive — every slot click appends a new FX stage instead of swapping a deck.
 ///
-/// One row of eight cells only. Rows, collapse, and the resize drag are task 7R.
+/// Rows, collapse, and the resize drag (task 7R). The model (`SlotBank`) always holds forty slots
+/// and has no concept of rows at all — `layout.bankRows` decides how many are DRAWN, never how
+/// many exist, which is what makes "shrinking rows can never destroy a captured look" structural
+/// rather than a promise. See `SlotBank.slotCount`'s doc comment.
 struct SlotBankStripView: View {
     let instrument: Instrument
     @Binding var target: LibraryTarget
     @ObservedObject private var bank: SlotBank
+    @ObservedObject var layout: SurfaceLayout
     @State private var source: DeckID = .one
 
-    init(instrument: Instrument, target: Binding<LibraryTarget>) {
+    /// Tracks the row count as it stood when the current drag began, so the drag reads as an
+    /// absolute offset from a fixed start rather than accumulating per-frame deltas — the same
+    /// reasoning `InstrumentSurface.panelResizeHandle` uses for `setPanelWidth`, adapted from an
+    /// X position to a row count.
+    @State private var dragStartRows: Int?
+
+    /// Balanced push/pop tracking for the row-resize cursor, mirroring
+    /// `InstrumentSurface.isResizeCursorPushed`: a bare hover-in/hover-out pair assumes hover-out
+    /// always fires, but SwiftUI can tear the handle down mid-hover (e.g. the strip collapses)
+    /// without ever calling `onHover(false)`, which would leave the resize cursor stuck.
+    @State private var isRowResizeCursorPushed = false
+
+    init(instrument: Instrument, target: Binding<LibraryTarget>, layout: SurfaceLayout) {
         self.instrument = instrument
         self._target = target
         self.bank = instrument.slotBank
+        self.layout = layout
+    }
+
+    /// How many of the bank's forty slots the current row count actually draws.
+    private var visibleSlotCount: Int { layout.bankRows * SlotBank.perRow }
+
+    /// Filled slots at or beyond the visible rows — captured but not currently drawn. Never lost:
+    /// growing `bankRows` back reveals them unchanged, because a resize never touches `SlotBank`.
+    private var hiddenFilledCount: Int {
+        let start = min(visibleSlotCount, bank.slots.count)
+        return bank.slots[start...].lazy.filter { $0 != nil }.count
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Collapsed shows the header row only — the resize handle has nothing to resize while
+            // there is nothing drawn beneath it.
+            if !layout.isBankCollapsed {
+                rowResizeHandle
+            }
+            header
+            if !layout.isBankCollapsed {
+                content
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button(action: { layout.toggleBankCollapsed() }) {
+                Image(systemName: layout.isBankCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 14)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("slotBank.disclosure")
+            .accessibilityLabel(layout.isBankCollapsed ? "Expand slot bank" : "Collapse slot bank")
+            .help(layout.isBankCollapsed ? "Expand the slot bank" : "Collapse the slot bank")
+
+            Text("SLOT BANK")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            if hiddenFilledCount > 0 {
+                Text("\(hiddenFilledCount) hidden")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("slotBank.hiddenCount")
+                    .help("\(hiddenFilledCount) captured slot(s) sit in rows the strip is not "
+                          + "currently showing. Nothing is lost — expand the strip to see them.")
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, SurfaceMetrics.slotStripPadding)
+        .padding(.vertical, 4)
+    }
+
+    private var content: some View {
         HStack(spacing: SurfaceMetrics.slotStripGapWidth) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("SOURCE")
@@ -67,20 +139,76 @@ struct SlotBankStripView: View {
             // content's ideal height rather than the greedy full-window height it reports when
             // unconstrained.
             ScrollView(.horizontal, showsIndicators: true) {
-                HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
-                    ForEach(0..<SlotBank.slotCount, id: \.self) { index in
-                        SlotCell(index: index,
-                                 preset: bank.slots[index],
-                                 isAvailable: bank.isAvailable(index),
-                                 onRecall: { recall(index) },
-                                 onCapture: { capture(into: index) },
-                                 onClear: { bank.clear(index) })
-                            .frame(minWidth: SurfaceMetrics.minCellWidth, maxWidth: .infinity)
+                // One VStack of rows inside a SINGLE horizontal ScrollView, not one ScrollView per
+                // row — separate scroll views could drift out of sync and a wide bank would show
+                // row 1 and row 2 scrolled to different columns.
+                VStack(alignment: .leading, spacing: SurfaceMetrics.slotStripCellSpacing) {
+                    ForEach(0..<layout.bankRows, id: \.self) { row in
+                        HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
+                            ForEach(0..<SlotBank.perRow, id: \.self) { column in
+                                let index = row * SlotBank.perRow + column
+                                SlotCell(index: index,
+                                         preset: bank.slots[index],
+                                         isAvailable: bank.isAvailable(index),
+                                         onRecall: { recall(index) },
+                                         onCapture: { capture(into: index) },
+                                         onClear: { bank.clear(index) })
+                                    .frame(minWidth: SurfaceMetrics.minCellWidth,
+                                           maxWidth: .infinity)
+                            }
+                        }
                     }
                 }
             }
         }
         .padding(SurfaceMetrics.slotStripPadding)
+    }
+
+    /// A drag on the strip's top edge that snaps to whole rows — reads like the panel divider the
+    /// operator already has (`InstrumentSurface.panelResizeHandle`), no stepper and no dialog to
+    /// hit mid-set. Purely a view-local concern: `bankRows` is drawn-row count only, so growing or
+    /// shrinking it here never reaches `SlotBank`.
+    private var rowResizeHandle: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(height: SurfaceMetrics.resizeHandleWidth)
+            .overlay(Divider(), alignment: .center)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("slotBank.rowResizeHandle")
+            .onHover { inside in
+                // Balanced and idempotent — see `isRowResizeCursorPushed`'s doc comment.
+                if inside {
+                    guard !isRowResizeCursorPushed else { return }
+                    NSCursor.resizeUpDown.push()
+                    isRowResizeCursorPushed = true
+                } else {
+                    guard isRowResizeCursorPushed else { return }
+                    NSCursor.pop()
+                    isRowResizeCursorPushed = false
+                }
+            }
+            .onDisappear {
+                // Backstop for the case `onHover(false)` never fires: the strip collapses while
+                // the pointer is still over the handle, and SwiftUI tears the view down without a
+                // final hover-out.
+                guard isRowResizeCursorPushed else { return }
+                NSCursor.pop()
+                isRowResizeCursorPushed = false
+            }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        if dragStartRows == nil { dragStartRows = layout.bankRows }
+                        // Dragging the top edge UP (negative translation.height) grows the strip
+                        // downward by one row per `slotStripRowHeight` of travel — the same
+                        // "handle stands in for the boundary it moves" feel as the panel divider.
+                        let deltaRows = Int(
+                            (-value.translation.height / SurfaceMetrics.slotStripRowHeight)
+                                .rounded())
+                        layout.setBankRows((dragStartRows ?? layout.bankRows) + deltaRows)
+                    }
+                    .onEnded { _ in dragStartRows = nil }
+            )
     }
 
     private func recall(_ index: Int) {

@@ -69,10 +69,51 @@ struct Arrangement: Codable, Equatable, Sendable {
     var expanded: [SectionKey: Bool]
     var panelWidth: Double
 
+    /// Rows of the slot bank DRAWN, never rows stored — see `SlotBank.slotCount`'s doc comment.
+    /// Outside `expanded` and carrying no `SectionKey` on purpose (task 7R): `toggleShowMode()`
+    /// iterates `SectionKey.all` to collapse sections, so a field with no key there cannot be
+    /// reached by show mode structurally, the same trick phase 3a used for blackout.
+    var bankRows: Int
+
+    /// No `SectionKey`, for the same reason as `bankRows` above: firing slots is performance, not
+    /// configuration, and show mode collapses configuration only.
+    var isBankCollapsed: Bool
+
     static let `default` = Arrangement(
         openPanel: nil,
         expanded: Dictionary(uniqueKeysWithValues: SectionKey.all.map { ($0, true) }),
-        panelWidth: 280)
+        panelWidth: 280,
+        bankRows: 1,
+        isBankCollapsed: false)
+
+    init(openPanel: PanelID?, expanded: [SectionKey: Bool], panelWidth: Double,
+         bankRows: Int = 1, isBankCollapsed: Bool = false) {
+        self.openPanel = openPanel
+        self.expanded = expanded
+        self.panelWidth = panelWidth
+        self.bankRows = bankRows
+        self.isBankCollapsed = isBankCollapsed
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case openPanel, expanded, panelWidth, bankRows, isBankCollapsed
+    }
+
+    /// Explicit rather than synthesized: task 7R adds `bankRows` and `isBankCollapsed` as stored
+    /// properties, and a synthesized `init(from:)` requires every key present. Every arrangement
+    /// saved before this task lacks both new keys — a synthesized decoder would have failed on
+    /// EVERY previously-persisted blob, and `SurfaceLayoutStore.load()` returns `.default` on any
+    /// decode failure, so the operator's saved panel width and every section-collapse flag would
+    /// have silently reset to their defaults on first launch after the update. `decodeIfPresent`
+    /// with a fallback means an old blob decodes intact and simply picks up the two new defaults.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        openPanel = try container.decodeIfPresent(PanelID.self, forKey: .openPanel)
+        expanded = try container.decode([SectionKey: Bool].self, forKey: .expanded)
+        panelWidth = try container.decode(Double.self, forKey: .panelWidth)
+        bankRows = try container.decodeIfPresent(Int.self, forKey: .bankRows) ?? 1
+        isBankCollapsed = try container.decodeIfPresent(Bool.self, forKey: .isBankCollapsed) ?? false
+    }
 }
 
 /// Every layout flag on the instrument surface, and the show-mode snapshot.
@@ -117,6 +158,13 @@ final class SurfaceLayout: ObservableObject {
     @Published private(set) var panelWidth: Double
     @Published private(set) var showMode: Bool = false
 
+    /// Rows of the slot bank drawn. No `SectionKey` — see `Arrangement.bankRows`'s doc comment for
+    /// why that is what keeps show mode structurally unable to collapse it.
+    @Published private(set) var bankRows: Int
+
+    /// No `SectionKey`, same reasoning as `bankRows`.
+    @Published private(set) var isBankCollapsed: Bool
+
     @Published private var expanded: [SectionKey: Bool]
 
     /// The arrangement as it stood when show mode was entered. Discarded the moment the operator
@@ -127,6 +175,11 @@ final class SurfaceLayout: ObservableObject {
         self.openPanel = arrangement.openPanel
         self.panelWidth = arrangement.panelWidth
         self.expanded = arrangement.expanded
+        // Clamped on load, not just on the drag path: a stored value from a future build with a
+        // bigger grid, or a hand-edited/corrupted 0, must not hand the strip a row count it cannot
+        // draw.
+        self.bankRows = Self.clampedBankRows(arrangement.bankRows)
+        self.isBankCollapsed = arrangement.isBankCollapsed
     }
 
     // MARK: Sections
@@ -201,11 +254,42 @@ final class SurfaceLayout: ObservableObject {
         min(panelWidth, Self.panelWidthCeiling(inSurfaceOfWidth: surfaceWidth))
     }
 
+    // MARK: Slot bank (task 7R)
+
+    /// Clamped here, not at each call site — the same doctrine `setPanelWidth` follows, so a
+    /// future second caller cannot hand the bank a row count it cannot draw.
+    private static func clampedBankRows(_ rows: Int) -> Int {
+        min(max(rows, 1), SlotBank.maxRows)
+    }
+
+    /// Resize is NOT a show-mode-ending action, same reasoning as `setPanelWidth`: it adjusts a
+    /// strip that is always visible, including during a show, and firing slots is itself
+    /// performance rather than configuration.
+    func setBankRows(_ rows: Int) {
+        bankRows = Self.clampedBankRows(rows)
+    }
+
+    /// Manual collapse. `isBankCollapsed` has no `SectionKey`, so `toggleShowMode()` — which
+    /// iterates `SectionKey.all` — cannot reach it. The operator can still collapse the strip by
+    /// hand; show mode just will never do it for them.
+    func toggleBankCollapsed() {
+        isBankCollapsed.toggle()
+    }
+
     // MARK: Show mode
 
     func toggleShowMode() {
         if showMode {
-            if let snapshot { apply(snapshot) }
+            // NOT `apply(snapshot)`: that would also restore `bankRows`/`isBankCollapsed`, and
+            // both are performance controls the bank shares with the crossfader and BLACKOUT —
+            // never touched entering a show, so they must not be silently reverted on exit either.
+            // A mid-show resize or manual collapse is a deliberate act, same class as the "a
+            // deliberate edit is never silently thrown away" rule `setExpanded` already follows.
+            if let snapshot {
+                openPanel = snapshot.openPanel
+                expanded = snapshot.expanded
+                panelWidth = snapshot.panelWidth
+            }
             self.snapshot = nil
             showMode = false
         } else {
@@ -219,12 +303,15 @@ final class SurfaceLayout: ObservableObject {
     // MARK: Whole-arrangement access
 
     var arrangement: Arrangement {
-        Arrangement(openPanel: openPanel, expanded: expanded, panelWidth: panelWidth)
+        Arrangement(openPanel: openPanel, expanded: expanded, panelWidth: panelWidth,
+                    bankRows: bankRows, isBankCollapsed: isBankCollapsed)
     }
 
     func apply(_ a: Arrangement) {
         openPanel = a.openPanel
         expanded = a.expanded
         panelWidth = a.panelWidth
+        bankRows = Self.clampedBankRows(a.bankRows)
+        isBankCollapsed = a.isBankCollapsed
     }
 }

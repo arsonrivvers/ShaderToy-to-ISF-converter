@@ -11,9 +11,17 @@ import Foundation
 /// the deck is `Instrument.currentPreset(of:)`'s job; this type only stores what it is handed.
 @MainActor
 final class SlotBank: ObservableObject {
-    /// One row of an APC40 MkII. The full 8x5 grid is a change of this constant plus a layout,
-    /// never a change of model.
-    static let slotCount = 8
+    /// The full grid, always. `bankRows` on `Arrangement` (task 7R) decides how many of these are
+    /// DRAWN — never how many exist. That is what makes "shrinking rows can never destroy a
+    /// captured look" structural rather than a promise: there is no code path from a resize to
+    /// this model, because this model has no concept of rows at all.
+    static let slotCount = perRow * maxRows
+
+    /// One row of an APC40 MkII.
+    static let perRow = 8
+
+    /// The most rows the strip can be resized to.
+    static let maxRows = 5
 
     @Published private(set) var slots: [Preset?]
 

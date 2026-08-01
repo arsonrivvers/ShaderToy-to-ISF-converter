@@ -223,4 +223,122 @@ final class SurfaceLayoutTests: XCTestCase {
             .masterFX,
         ]), "Performance controls are not collapsible and must never appear here")
     }
+
+    // MARK: Task 7R — slot bank rows and collapse
+
+    private func preset(_ path: String = "/tmp/a.fs") -> Preset {
+        Preset.capturing(url: URL(fileURLWithPath: path), snapshot: ParamSnapshot(params: [:]))
+    }
+
+    /// The structural invariant the whole design turns on: a resize touches `Arrangement`, never
+    /// `SlotBank`. There is no code path from `setBankRows` to the model, so this should be
+    /// impossible to fail without someone deliberately wiring resize into the bank.
+    func testShrinkingRowsHidesPresetsButNeverDestroysThem() {
+        let bank = SlotBank()
+        let layout = SurfaceLayout()
+        layout.setBankRows(2)
+        bank.capture(preset(), into: 15)   // row 2 (indices 8...15)
+
+        layout.setBankRows(1)
+        XCTAssertNotNil(bank.slots[15], "A resize must never reach the model")
+
+        layout.setBankRows(2)
+        XCTAssertNotNil(bank.slots[15], "…and growing back reveals it unchanged")
+    }
+
+    /// `isBankCollapsed` has no `SectionKey`, so `toggleShowMode()` — which iterates
+    /// `SectionKey.all` — cannot reach it. Firing slots is performance, the same category as the
+    /// crossfader and BLACKOUT, which show mode already leaves alone.
+    func testShowModeCannotCollapseTheBank() {
+        let layout = SurfaceLayout()
+        XCTAssertFalse(layout.isBankCollapsed)
+        layout.toggleShowMode()
+        XCTAssertTrue(layout.showMode)
+        XCTAssertFalse(layout.isBankCollapsed,
+                       "Firing slots is performance; show mode collapses configuration only")
+    }
+
+    /// The other half of "show mode never touches the bank": a deliberate resize or manual
+    /// collapse made WHILE in show mode must survive exiting show mode, exactly like a mid-show
+    /// crossfader move would. Restoring `bankRows`/`isBankCollapsed` from the pre-show snapshot on
+    /// exit would silently discard that deliberate act — the same failure class `setExpanded`'s
+    /// "a deliberate edit is never silently thrown away" rule exists to prevent, just for a field
+    /// with no `SectionKey` to trip that rule's own machinery.
+    func testResizingOrCollapsingTheBankDuringAShowSurvivesExitingIt() {
+        let layout = SurfaceLayout()
+        layout.setBankRows(1)
+        layout.toggleShowMode()
+
+        layout.setBankRows(3)
+        layout.toggleBankCollapsed()
+
+        layout.toggleShowMode()   // exit
+        XCTAssertFalse(layout.showMode)
+        XCTAssertEqual(layout.bankRows, 3, "A mid-show resize must not be reverted on exit")
+        XCTAssertTrue(layout.isBankCollapsed, "A mid-show collapse must not be reverted on exit")
+    }
+
+    /// `bankRows` clamps at both ends — a MIDI pad or a corrupt/future-build value can hand it
+    /// anything.
+    func testBankRowsClampsToItsBounds() {
+        let layout = SurfaceLayout()
+
+        layout.setBankRows(0)
+        XCTAssertEqual(layout.bankRows, 1, "Below the floor pins to one row")
+
+        layout.setBankRows(99)
+        XCTAssertEqual(layout.bankRows, SlotBank.maxRows, "Above the ceiling pins to maxRows")
+
+        layout.setBankRows(3)
+        XCTAssertEqual(layout.bankRows, 3, "Inside the bounds the request is honoured exactly")
+    }
+
+    /// A stored value outside `1...maxRows` — a hand-edited file, or a bank from a future build
+    /// with a bigger grid — must normalise at load, not just at the drag call site.
+    func testAStoredBankRowsOutOfRangeNormalisesOnLoad() {
+        var tooFew = Arrangement.default
+        tooFew.bankRows = 0
+        XCTAssertEqual(SurfaceLayout(tooFew).bankRows, 1)
+
+        var tooMany = Arrangement.default
+        tooMany.bankRows = 99
+        XCTAssertEqual(SurfaceLayout(tooMany).bankRows, SlotBank.maxRows)
+    }
+
+    /// Invariant 3, extended: the two new fields round-trip through the same JSON encoding every
+    /// other `Arrangement` field already does.
+    func testArrangementRoundTripsTheBankFields() throws {
+        var arrangement = Arrangement.default
+        arrangement.bankRows = 4
+        arrangement.isBankCollapsed = true
+
+        let data = try JSONEncoder().encode(arrangement)
+        let decoded = try JSONDecoder().decode(Arrangement.self, from: data)
+
+        XCTAssertEqual(decoded, arrangement)
+    }
+
+    /// THE persistence trap this task exists to close. `Arrangement` used to rely on Swift's
+    /// synthesized `Codable`, and adding two stored properties to a synthesized decoder would have
+    /// made every blob saved before this task fail to decode outright — `SurfaceLayoutStore.load()`
+    /// returns `.default` on any decode failure, so the operator's saved panel width and every
+    /// section-collapse flag would have silently reset on first launch. Hand-built JSON containing
+    /// only the three original keys must still decode, keeping the old fields intact and picking up
+    /// defaults for the two new ones.
+    func testAnArrangementSavedBeforeThisTaskStillDecodes() throws {
+        let oldSchemaJSON = """
+        {
+          "openPanel": "settings",
+          "expanded": [],
+          "panelWidth": 331
+        }
+        """
+        let decoded = try JSONDecoder().decode(Arrangement.self, from: Data(oldSchemaJSON.utf8))
+
+        XCTAssertEqual(decoded.openPanel, .settings, "The old openPanel value survives")
+        XCTAssertEqual(decoded.panelWidth, 331, "The old panelWidth value survives")
+        XCTAssertTrue(decoded.expanded.isEmpty, "The old (empty) expanded value survives")
+        XCTAssertEqual(decoded.bankRows, 1, "A blob with no bankRows key takes the default")
+        XCTAssertFalse(decoded.isBankCollapsed, "A blob with no isBankCollapsed key takes the default")
+    }
 }

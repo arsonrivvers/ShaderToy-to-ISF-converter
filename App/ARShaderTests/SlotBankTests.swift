@@ -106,4 +106,28 @@ final class SlotBankTests: XCTestCase {
         XCTAssertEqual(changes, 0, "Firing a slot must not rewrite the bank to disk mid-set")
         bank.onChange = nil
     }
+
+    // MARK: Task 7R — the model has no concept of rows at all
+
+    /// `slotCount` is derived from `perRow * maxRows`, not an independent literal — if either
+    /// constant changes, `slotCount` moves with it rather than silently drifting out of sync.
+    func testSlotCountIsExactlyPerRowTimesMaxRows() {
+        XCTAssertEqual(SlotBank.slotCount, SlotBank.perRow * SlotBank.maxRows)
+        XCTAssertEqual(SlotBank.perRow, 8)
+        XCTAssertEqual(SlotBank.maxRows, 5)
+    }
+
+    /// The bank has no idea what a "row" is. Capturing into an index that would sit in row 5 (the
+    /// last row a 5-row strip can draw) must work exactly like any other index — there is no
+    /// row-aware validation anywhere in this type for a resize to accidentally trip.
+    func testCaptureAndRecallWorkAcrossTheFullSlotRangeIncludingTheLastRow() throws {
+        let bank = SlotBank()
+        let lastIndex = SlotBank.slotCount - 1
+        bank.capture(Preset.capturing(url: try realFileURL(),
+                                      snapshot: ParamSnapshot(params: ["speed": .float(0.42)])),
+                     into: lastIndex)
+        let got = try XCTUnwrap(bank.recall(lastIndex))
+        XCTAssertEqual(got.snapshot.params["speed"], .float(0.42),
+                       "The last slot in the full grid behaves identically to any other slot")
+    }
 }

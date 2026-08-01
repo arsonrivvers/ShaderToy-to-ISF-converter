@@ -235,21 +235,26 @@ final class SurfaceGeometryTests: XCTestCase {
                        + "SurfaceMetrics. One of them changed without the other.")
     }
 
-    /// Fix-round-1, task 6R. Eight cells must fit without scrolling in the COMMON case — the app
-    /// at its declared minimum width with no panel open. With a panel open the strip may scroll;
-    /// that is a visible, recoverable degradation (the `ScrollView` in `SlotBankStripView`). What
-    /// must never happen is cells narrower than their own floor, which overlaps their hit areas
-    /// and lets an edge click fire the neighbouring slot — the defect this test exists to catch
-    /// before it reaches the rendered surface. Pure arithmetic, no rendering needed, same shape as
+    /// Fix-round-1, task 6R. Eight cells — one drawn row (`SlotBank.perRow`) — must fit without
+    /// scrolling in the COMMON case — the app at its declared minimum width with no panel open.
+    /// With a panel open the strip may scroll; that is a visible, recoverable degradation (the
+    /// `ScrollView` in `SlotBankStripView`). What must never happen is cells narrower than their
+    /// own floor, which overlaps their hit areas and lets an edge click fire the neighbouring slot
+    /// — the defect this test exists to catch before it reaches the rendered surface. Pure
+    /// arithmetic, no rendering needed, same shape as
     /// `testTheReservedWidthMatchesTheRegionsItClaimsToCover` above.
+    ///
+    /// Uses `SlotBank.perRow`, not `SlotBank.slotCount` — task 7R grew the model to 40 slots
+    /// (`perRow * maxRows`) with no concept of rows, but a single DRAWN row is still eight cells
+    /// wide, and that is what this fit check is about.
     func testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen() {
         let contentColumn = SurfaceMetrics.minWindowWidth
             - PanelRailView.width
             - SurfaceMetrics.dividerWidth * SurfaceMetrics.dividerCount
             - SurfaceMetrics.mixerWidth
         let cellsRegion = contentColumn - SurfaceMetrics.slotStripLeadingChromeWidth
-        let needed = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.slotCount)
-            + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.slotCount - 1)
+        let needed = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.perRow)
+            + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.perRow - 1)
         XCTAssertGreaterThanOrEqual(cellsRegion, needed,
                                     "The slot strip does not fit its own eight cells at the "
                                     + "window minimum. Raise minWindowWidth or shrink the chrome.")

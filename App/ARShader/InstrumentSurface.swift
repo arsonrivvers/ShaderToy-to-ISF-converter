@@ -106,6 +106,14 @@ enum SurfaceMetrics {
     /// adjacent cells' `.contentShape(Rectangle())` hit areas overlap and an edge click can fire
     /// the WRONG slot — the exact defect this constant exists to prevent.
     static let minCellWidth: CGFloat = 56
+
+    // MARK: Slot strip rows (task 7R)
+
+    /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `SlotCell`'s own
+    /// `minHeight: 28` plus the spacing between rows. Not asserted by any layout gate — a drag
+    /// that snaps a few points early or late is a feel issue, not a correctness one; the
+    /// correctness invariant is that `bankRows` never touches `SlotBank`, which is tested directly.
+    static let slotStripRowHeight: CGFloat = 34
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the

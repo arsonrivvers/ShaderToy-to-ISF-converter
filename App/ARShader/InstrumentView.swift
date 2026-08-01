@@ -173,7 +173,7 @@ struct InstrumentView: View {
         } monitors: {
             monitors
         } slots: {
-            SlotBankStripView(instrument: instrument, target: $libraryTarget)
+            SlotBankStripView(instrument: instrument, target: $libraryTarget, layout: layout)
         } strips: {
             deckStrips
         } mixer: {
