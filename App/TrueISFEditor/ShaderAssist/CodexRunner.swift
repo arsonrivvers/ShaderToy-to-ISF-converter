@@ -105,14 +105,15 @@ final class CodexRunner: AssistProvider, AssistDetailedProvider {
             }
             emit(.timedOut)
             exits.flush(emit: emit)
-            if assembler.observedSuccessfulResult {
-                do {
-                    let result = try Self.resolve(assembler, processExitSucceeded: false)
+            do {
+                let result = try Self.resolve(assembler, processExitSucceeded: false)
+                if assembler.observedSuccessfulResult {
                     onRawLine("⏱️ Timed out during teardown, but the completed answer was salvaged.")
                     return result
-                } catch AssistAssemblyError.noAuthoritativeResponse {
-                    // A completion marker without a complete agent message is not salvageable.
                 }
+            } catch AssistAssemblyError.noAuthoritativeResponse {
+                // An incomplete response remains a timeout. Provider failures thrown by resolve
+                // retain precedence even when no successful completion was observed.
             }
             throw AssistRunError.timedOut(partialStdout: partial)
         }

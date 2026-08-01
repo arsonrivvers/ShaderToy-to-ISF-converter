@@ -211,6 +211,34 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         catch { XCTFail("wrong error \(error)") }
     }
 
+    func testTimeoutWithErrorResultSurfacesProviderFailure() async {
+        let partial = #"{"type":"result","is_error":true,"result":"provider rejected it"}"#
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: "m")
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "provider rejected it")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
+    func testTimeoutWithEmptySuccessfulResultButNoAssistantStillThrows() async {
+        let partial = #"{"type":"result","is_error":false,"result":""}"#
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: "m")
+            XCTFail("expected timeout")
+        } catch AssistRunError.timedOut {
+            // Successful completion evidence alone cannot manufacture a response.
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
     func testResultEventExtractorIgnoresAssistantText() {
         XCTAssertNil(ClaudeCodeRunner.resultEvent(fromStreamJSON:
             "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"AB\"}]}}"))
@@ -425,6 +453,29 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         func cancel() { release.signal() }
     }
 
+    final class LateExitTimingOutProcess: ProcessLifecycleReporting, @unchecked Sendable {
+        private let lock = NSLock()
+        private let releaseExit = DispatchSemaphore(value: 0)
+        private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
+
+        func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
+            lock.lock(); lifecycleHandler = handler; lock.unlock()
+        }
+
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            lock.lock(); let handler = lifecycleHandler; lock.unlock()
+            handler?(.started(pid: 44))
+            DispatchQueue.global().async { [releaseExit] in
+                releaseExit.wait()
+                handler?(.exited(status: 15))
+            }
+            throw AssistRunError.timedOut(partialStdout: "")
+        }
+
+        func allowLateExit() { releaseExit.signal() }
+    }
+
     func testDetailedTimeoutPrecedesObservedProcessExit() async throws {
         let runner = ClaudeCodeRunner(
             binary: URL(fileURLWithPath: "/x/claude"), process: { LifecycleTimingOutProcess() }
@@ -469,6 +520,37 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         let cancelled = try XCTUnwrap(events.events.firstIndex(of: .cancelled))
         let exited = try XCTUnwrap(events.events.firstIndex(of: .processExited(15)))
         XCTAssertLessThan(cancelled, exited)
+    }
+
+    func testDetailedTimeoutDeliversExitThatArrivesAfterEarlyFlushExactlyOnce() async throws {
+        let process = LateExitTimingOutProcess()
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"), process: { process }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Claude runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        do {
+            _ = try await detailed.runDetailed(
+                prompt: "P", system: "S", model: nil, timeout: 1,
+                onEvent: { events.append($0) }, onRawLine: { _ in }
+            )
+            XCTFail("expected timeout")
+        } catch AssistRunError.timedOut {
+            // Release the lifecycle exit only after the timeout catch has requested an early flush.
+        } catch {
+            return XCTFail("wrong error \(error)")
+        }
+
+        process.allowLateExit()
+        for _ in 0..<300 where !events.events.contains(.processExited(15)) {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let timedOut = try XCTUnwrap(events.events.firstIndex(of: .timedOut))
+        let exited = try XCTUnwrap(events.events.firstIndex(of: .processExited(15)))
+        XCTAssertLessThan(timedOut, exited)
+        XCTAssertEqual(events.events.filter { $0 == .processExited(15) }.count, 1)
     }
 
     /// M6: cancelling the surrounding Task must terminate the CLI (proc.cancel()) and surface as a

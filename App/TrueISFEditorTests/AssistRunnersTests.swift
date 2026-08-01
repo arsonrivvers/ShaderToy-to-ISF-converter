@@ -111,6 +111,34 @@ final class CodexRunnerTests: XCTestCase {
         catch { XCTFail("wrong error \(error)") }
     }
 
+    func testCodexTimeoutWithErrorEventSurfacesProviderFailure() async {
+        let partial = #"{"type":"error","message":"usage limit reached"}"#
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: nil)
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "usage limit reached")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
+    func testCodexTimeoutWithTurnFailedEventSurfacesProviderFailure() async {
+        let partial = #"{"type":"turn.failed","error":{"message":"quota exhausted"}}"#
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: nil)
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "quota exhausted")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
     func testCodexDefaultModelOmitsDashM() async throws {
         let fake = ClaudeCodeRunnerTests.FakeProcess(
             stdout: #"{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}"#,

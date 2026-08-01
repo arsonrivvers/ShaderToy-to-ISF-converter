@@ -59,7 +59,8 @@ final class OnceFlag: @unchecked Sendable {
 final class ProcessExitEventBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var exitStatus: Int32?
-    private var didFlush = false
+    private var flushRequested = false
+    private var didEmitExit = false
 
     func capture(
         _ event: ProcessLifecycleEvent,
@@ -69,14 +70,20 @@ final class ProcessExitEventBuffer: @unchecked Sendable {
         case let .started(pid):
             emit(.processStarted(pid: pid))
         case let .exited(status):
-            lock.lock(); exitStatus = status; lock.unlock()
+            lock.lock()
+            exitStatus = status
+            let shouldEmit = flushRequested && !didEmitExit
+            if shouldEmit { didEmitExit = true }
+            lock.unlock()
+            if shouldEmit { emit(.processExited(status)) }
         }
     }
 
     func flush(emit: @escaping @Sendable (AssistRunEvent) -> Void) {
         lock.lock()
-        guard !didFlush, let status = exitStatus else { lock.unlock(); return }
-        didFlush = true
+        flushRequested = true
+        guard !didEmitExit, let status = exitStatus else { lock.unlock(); return }
+        didEmitExit = true
         lock.unlock()
         emit(.processExited(status))
     }
@@ -243,14 +250,15 @@ final class ClaudeCodeRunner: AssistProvider, AssistDetailedProvider {
             }
             emit(.timedOut)
             exits.flush(emit: emit)
-            if assembler.observedSuccessfulResult {
-                do {
-                    let result = try Self.resolve(assembler, processExitSucceeded: false)
+            do {
+                let result = try Self.resolve(assembler, processExitSucceeded: false)
+                if assembler.observedSuccessfulResult {
                     onRawLine("⏱️ Timed out during teardown, but the completed answer was salvaged.")
                     return result
-                } catch AssistAssemblyError.noAuthoritativeResponse {
-                    // A success marker without complete response text is not salvageable.
                 }
+            } catch AssistAssemblyError.noAuthoritativeResponse {
+                // An incomplete response — including empty success without authoritative text —
+                // remains a timeout. Provider failures thrown by resolve retain precedence.
             }
             throw AssistRunError.timedOut(partialStdout: partial)
         }
