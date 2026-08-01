@@ -244,10 +244,9 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// three ~340px monitor tiles, so nothing needs full resolution and dropping this is free GPU
     /// with no visible cost. Measured 2026-07-30: 99.4 ms at 100%, 5.8 ms at 25%.
     ///
-    /// It is NOT preview-only, and the name would be a lie if that went unsaid: while the projector
-    /// is open this scales the projected image too. The scale is manual by the operator's choice
-    /// and never snaps back on its own, so `OutputSharpness.isProjectingUpscaled` drives a visible
-    /// warning for exactly that case.
+    /// It IS preview-only, despite governing the whole live chain: `isProgramLive` lifts this off
+    /// the chain the instant output opens, so the projector is never affected by this control,
+    /// ever. That is the operator's rule, not a convenience — see `isProgramLive`.
     ///
     /// Reallocates the master pair (and, on the next frame, each deck's owned texture) — rare and
     /// operator-driven, never in a frame.
