@@ -15,6 +15,8 @@ struct AssistResponseAssembler: Sendable {
     func resolve(processExitSucceeded: Bool) throws -> AssistRunResult {
         try accumulator.resolve(provider: provider, processExitSucceeded: processExitSucceeded)
     }
+
+    var observedSuccessfulResult: Bool { accumulator.didObserveSuccessfulResult }
 }
 
 /// Owns mutable stream state independently from the main actor because process output arrives on a
@@ -33,6 +35,12 @@ private final class AssistRunAccumulator: @unchecked Sendable {
     private var resultText: String?
     private var receivedBytes = 0
     private var eventCount = 0
+
+    var didObserveSuccessfulResult: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return observedSuccessfulResult
+    }
 
     func consume(_ event: AssistRunEvent) {
         lock.lock()

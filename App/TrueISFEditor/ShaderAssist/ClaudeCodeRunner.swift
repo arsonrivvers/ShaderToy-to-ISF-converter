@@ -17,6 +17,15 @@ extension ProcessRunning {
     func cancel() {}
 }
 
+enum ProcessLifecycleEvent: Sendable, Equatable {
+    case started(pid: Int32)
+    case exited(status: Int32)
+}
+
+protocol ProcessLifecycleReporting: ProcessRunning {
+    func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void)
+}
+
 /// Maps a non-zero CLI exit to an AssistRunError (auth vs generic failure).
 enum AssistErrorMapper {
     /// Known CLI sign-in phrasings only — a bare substring like "auth" also matched "author" in
@@ -34,7 +43,7 @@ enum AssistErrorMapper {
 }
 
 /// Once-only latch for the teardown grace timer (armed from the pipe-reader thread).
-private final class OnceFlag: @unchecked Sendable {
+final class OnceFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var isSet = false
     func trySet() -> Bool {
@@ -45,8 +54,36 @@ private final class OnceFlag: @unchecked Sendable {
     }
 }
 
+/// Process exit can race the runner's timeout/cancellation catch. Buffer only the exit so the
+/// terminal cause is delivered first; process start remains live and immediate.
+final class ProcessExitEventBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var exitStatus: Int32?
+    private var didFlush = false
+
+    func capture(
+        _ event: ProcessLifecycleEvent,
+        emit: @escaping @Sendable (AssistRunEvent) -> Void
+    ) {
+        switch event {
+        case let .started(pid):
+            emit(.processStarted(pid: pid))
+        case let .exited(status):
+            lock.lock(); exitStatus = status; lock.unlock()
+        }
+    }
+
+    func flush(emit: @escaping @Sendable (AssistRunEvent) -> Void) {
+        lock.lock()
+        guard !didFlush, let status = exitStatus else { lock.unlock(); return }
+        didFlush = true
+        lock.unlock()
+        emit(.processExited(status))
+    }
+}
+
 @MainActor
-final class ClaudeCodeRunner: AssistProvider {
+final class ClaudeCodeRunner: AssistProvider, AssistDetailedProvider {
     private let binary: URL?
     private let makeProcess: () -> ProcessRunning
     private let versionOutput: (@Sendable () -> String?)?
@@ -100,6 +137,30 @@ final class ClaudeCodeRunner: AssistProvider {
 
     func run(prompt: String, system: String, model: String?, timeout: TimeInterval = 180,
              onEvent: @escaping @Sendable (String) -> Void = { _ in }) async throws -> String {
+        let result = try await runDetailed(
+            prompt: prompt,
+            system: system,
+            model: model,
+            timeout: timeout,
+            onEvent: { _ in },
+            onRawLine: { line in
+                let type = Self.envelopeType(from: line)
+                if let legacy = AssistProviderCompatibilityAdapter.legacyRawLine(line, envelopeType: type) {
+                    onEvent(legacy)
+                }
+            }
+        )
+        return AssistProviderCompatibilityAdapter.text(from: result)
+    }
+
+    func runDetailed(
+        prompt: String,
+        system: String,
+        model: String?,
+        timeout: TimeInterval = 180,
+        onEvent: @escaping @Sendable (AssistRunEvent) -> Void,
+        onRawLine: @escaping @Sendable (String) -> Void
+    ) async throws -> AssistRunResult {
         guard let binary else { throw AssistRunError.binaryNotFound }
         // stream-json gives line-by-line events for the live terminal; --verbose is required with it.
         // SECURITY (CSO CRITICAL-1): the shader source is untrusted (opened from the web/others) and
@@ -119,7 +180,7 @@ final class ClaudeCodeRunner: AssistProvider {
         // stronger and keeps single-turn answer semantics.
         // These are pinned here so the app's safety never depends on the host's settings.json
         // (which defaults to bypassPermissions). Verified: injection blocked, subscription auth intact.
-        var args = ["-p", "--output-format", "stream-json", "--verbose",
+        var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                     "--tools", "", "--disallowedTools", "LSP", "--allowedTools", "",
                     "--strict-mcp-config", "--disable-slash-commands"]
         if let model, !model.isEmpty { args += ["--model", model] }
@@ -132,21 +193,33 @@ final class ClaudeCodeRunner: AssistProvider {
             let v = await Task.detached(priority: .utility) { versionOutput() }.value
             if Self.isBelowVerifiedFloor(versionOutput: v) {
                 let m = Self.minVerifiedVersion
-                onEvent("⚠️ SECURITY: your `claude` CLI is older than v\(m.major).\(m.minor).\(m.patch), " +
-                        "where ShaderAssist's tool-restriction flags were verified. Tool-blocking may be " +
-                        "ineffective on this version — update the `claude` CLI.")
+                onRawLine("⚠️ SECURITY: your `claude` CLI is older than v\(m.major).\(m.minor).\(m.patch), " +
+                          "where ShaderAssist's tool-restriction flags were verified. Tool-blocking may be " +
+                          "ineffective on this version — update the `claude` CLI.")
             }
         }
         let proc = makeProcess()
+        let assembler = AssistResponseAssembler(provider: .claude)
+        let emit: @Sendable (AssistRunEvent) -> Void = { event in
+            assembler.consume(event)
+            onEvent(event)
+        }
+        let exits = ProcessExitEventBuffer()
+        let reportsLifecycle = proc is ProcessLifecycleReporting
+        if let lifecycle = proc as? ProcessLifecycleReporting {
+            lifecycle.setLifecycleHandler { event in exits.capture(event, emit: emit) }
+        }
         // Grace-kill: the stream-json `result` event IS protocol completion. Arm a short timer
         // when it streams; if the process outlives its own answer, terminate it — the completed
         // result is then returned via the rescue below. Firing after a clean exit is a no-op
         // (the process is already gone).
         let graceArmed = OnceFlag()
+        let cancellationReported = OnceFlag()
         let grace = teardownGrace
         let onLine: @Sendable (String) -> Void = { line in
-            onEvent(line)
-            if Self.resultEvent(fromStreamJSON: line) != nil, graceArmed.trySet() {
+            onRawLine(line)
+            if let event = Self.decodeEvent(from: line) { emit(event) }
+            if assembler.observedSuccessfulResult, graceArmed.trySet() {
                 DispatchQueue.global().asyncAfter(deadline: .now() + grace) { proc.cancel() }
             }
         }
@@ -158,27 +231,129 @@ final class ClaudeCodeRunner: AssistProvider {
                 try await Task.detached(priority: .userInitiated) {
                     try proc.run(executable: binary, args: args, timeout: timeout, onLine: onLine)
                 }.value
-            } onCancel: { proc.cancel() }
+            } onCancel: {
+                if cancellationReported.trySet() { emit(.cancelled) }
+                proc.cancel()
+            }
         }
         catch AssistRunError.timedOut(let partial) {
-            // Salvage: if the final `result` event already streamed, the run FINISHED — only process
-            // teardown outlived the timer. Return the completed answer instead of discarding it.
-            if !Task.isCancelled, let salvaged = Self.resultEvent(fromStreamJSON: partial) {
-                onEvent("⏱️ Timed out during teardown, but the completed answer was salvaged.")
-                return salvaged
+            if Task.isCancelled {
+                exits.flush(emit: emit)
+                throw CancellationError()
+            }
+            emit(.timedOut)
+            exits.flush(emit: emit)
+            if assembler.observedSuccessfulResult {
+                do {
+                    let result = try Self.resolve(assembler, processExitSucceeded: false)
+                    onRawLine("⏱️ Timed out during teardown, but the completed answer was salvaged.")
+                    return result
+                } catch AssistAssemblyError.noAuthoritativeResponse {
+                    // A success marker without complete response text is not salvageable.
+                }
             }
             throw AssistRunError.timedOut(partialStdout: partial)
         }
-        catch let e as AssistRunError { throw e }
-        catch { throw AssistRunError.processFailed("\(error)") }
+        catch let e as AssistRunError {
+            exits.flush(emit: emit)
+            if Task.isCancelled { throw CancellationError() }
+            throw e
+        }
+        catch {
+            exits.flush(emit: emit)
+            if Task.isCancelled { throw CancellationError() }
+            throw AssistRunError.processFailed("\(error)")
+        }
+        if reportsLifecycle {
+            exits.flush(emit: emit)
+        } else {
+            emit(.processExited(out.exitCode))
+        }
         // A cancel-terminated process exits non-zero; don't surface that as a real failure.
         if Task.isCancelled { throw CancellationError() }
-        // Rescue: a streamed (non-error) `result` event is the authoritative completion — accept
-        // it even on a non-zero exit (our own grace-kill above, or a CLI that crashes during
-        // teardown AFTER answering must not discard the finished answer).
-        if let result = Self.resultEvent(fromStreamJSON: out.stdout) { return result }
-        if out.exitCode != 0 { throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout) }
-        return Self.finalMessage(fromStreamJSON: out.stdout)
+        if assembler.observedSuccessfulResult {
+            return try Self.resolve(assembler, processExitSucceeded: false)
+        }
+        if out.exitCode != 0 {
+            do { return try Self.resolve(assembler, processExitSucceeded: false) }
+            catch AssistAssemblyError.noAuthoritativeResponse {
+                throw AssistErrorMapper.error(stderr: out.stderr, stdout: out.stdout)
+            }
+        }
+        return try Self.resolve(assembler, processExitSucceeded: true)
+    }
+
+    nonisolated static func envelopeType(from line: String) -> String? {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object["type"] as? String
+    }
+
+    nonisolated static func decodeEvent(from line: String) -> AssistRunEvent? {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = object["type"] as? String else { return nil }
+
+        switch type {
+        case "system":
+            let subtype = (object["subtype"] as? String) ?? ""
+            if subtype == "init" {
+                return .sessionStarted(id: (object["session_id"] as? String) ?? (object["id"] as? String))
+            }
+            let normalized = subtype.lowercased()
+            if normalized.contains("retry") || normalized.contains("rate_limit") || normalized.contains("rate-limit") {
+                let message = (object["message"] as? String) ?? subtype
+                return .apiRetry(attempt: object["attempt"] as? Int, message: message)
+            }
+
+        case "assistant":
+            guard let message = object["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else { return nil }
+            let blocks = content.enumerated().compactMap { index, block -> AssistTextBlock? in
+                guard (block["type"] as? String) == "text", let text = block["text"] as? String else {
+                    return nil
+                }
+                return AssistTextBlock(index: index, text: text)
+            }
+            let messageID = (message["id"] as? String) ?? (object["uuid"] as? String) ?? "assistant"
+            return .assistantMessage(
+                messageID: messageID,
+                stopReason: message["stop_reason"] as? String,
+                blocks: blocks
+            )
+
+        case "stream_event":
+            guard let event = object["event"] as? [String: Any],
+                  (event["type"] as? String) == "content_block_delta",
+                  let delta = event["delta"] as? [String: Any],
+                  let text = delta["text"] as? String else { return nil }
+            let messageID = (object["message_id"] as? String) ?? (event["message_id"] as? String)
+            return .textDelta(messageID: messageID, blockIndex: event["index"] as? Int ?? 0, text: text)
+
+        case "result":
+            let text = object["result"] as? String ?? ""
+            if object["is_error"] as? Bool == true {
+                return .errorResult(text.isEmpty ? "Claude reported an error." : text)
+            }
+            return .successfulResult(text)
+
+        default:
+            break
+        }
+        return nil
+    }
+
+    private static func resolve(
+        _ assembler: AssistResponseAssembler,
+        processExitSucceeded: Bool
+    ) throws -> AssistRunResult {
+        do {
+            return try assembler.resolve(processExitSucceeded: processExitSucceeded)
+        } catch let AssistAssemblyError.providerFailed(message) {
+            throw AssistRunError.processFailed(message)
+        }
     }
 
     /// The `result` event's text, ONLY if one is present — unlike `finalMessage`, no fallback to
@@ -242,7 +417,7 @@ enum BinaryLocator {
 }
 
 /// Real streaming Process implementation (not exercised in unit tests).
-final class RealProcess: ProcessRunning, @unchecked Sendable {
+final class RealProcess: ProcessLifecycleReporting, @unchecked Sendable {
     /// Lock-guarded so the bounded post-exit drain can snapshot while a reader thread (kept alive
     /// by an orphan holding the pipe) may still be appending.
     private final class Box: @unchecked Sendable {
@@ -258,6 +433,17 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
     private let liveLock = NSLock()
     private var liveProcess: Process?
     private var cancelled = false
+    private let lifecycleLock = NSLock()
+    private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
+
+    func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
+        lifecycleLock.lock(); lifecycleHandler = handler; lifecycleLock.unlock()
+    }
+
+    private func reportLifecycle(_ event: ProcessLifecycleEvent) {
+        lifecycleLock.lock(); let handler = lifecycleHandler; lifecycleLock.unlock()
+        handler?(event)
+    }
 
     func cancel() {
         liveLock.lock(); cancelled = true; let p = liveProcess; liveLock.unlock()
@@ -313,6 +499,7 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
         // terminate immediately after starting so it can't outlive the Stop.
         liveLock.lock(); liveProcess = p; let alreadyCancelled = cancelled; liveLock.unlock()
         try p.run()
+        reportLifecycle(.started(pid: p.processIdentifier))
         if alreadyCancelled { p.terminate() }
         defer { liveLock.lock(); liveProcess = nil; liveLock.unlock() }
 
@@ -341,7 +528,11 @@ final class RealProcess: ProcessRunning, @unchecked Sendable {
         q.async { errBox.set(errPipe.fileHandleForReading.readDataToEndOfFile()); group.leave() }
 
         let exited = DispatchSemaphore(value: 0)
-        DispatchQueue(label: "assist.wait").async { p.waitUntilExit(); exited.signal() }
+        DispatchQueue(label: "assist.wait").async { [self] in
+            p.waitUntilExit()
+            reportLifecycle(.exited(status: p.terminationStatus))
+            exited.signal()
+        }
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             // CSO MEDIUM-2: SIGTERM, brief grace, then SIGKILL so a wedged agent (or a child that
             // ignores SIGTERM) can't outlive the timeout still holding resources.

@@ -3,6 +3,48 @@ import ShadertoyISFKit
 
 @MainActor
 final class ShaderAssistViewModelTests: XCTestCase {
+    private func claudeRunner(response: String) throws -> ClaudeCodeRunner {
+        let assistantObject: [String: Any] = [
+            "type": "assistant",
+            "message": [
+                "id": "m1", "stop_reason": "end_turn",
+                "content": [["type": "text", "text": response]]
+            ]
+        ]
+        let assistantLine = String(
+            data: try JSONSerialization.data(withJSONObject: assistantObject), encoding: .utf8
+        )!
+        let resultObject: [String: Any] = [
+            "type": "result", "is_error": false, "result": response, "duration_ms": 1200.0,
+        ]
+        let resultLine = String(
+            data: try JSONSerialization.data(withJSONObject: resultObject), encoding: .utf8
+        )!
+        let stream = [
+            #"{"type":"system","subtype":"init","session_id":"s1","model":"sonnet"}"#,
+            #"{"type":"stream_event","event":{"type":"content_block_start","index":0}}"#,
+            #"{"type":"stream_event","message_id":"m1","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}}"#,
+            #"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            assistantLine,
+            resultLine,
+        ].joined(separator: "\n")
+        return ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { ClaudeCodeRunnerTests.FakeProcess(stdout: stream, exitCode: 0, stderr: "") }
+        )
+    }
+
+    private func assertLegacyTelemetry(
+        _ vm: ShaderAssistViewModel,
+        response: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(vm.eventCount, 3, file: file, line: line)
+        XCTAssertEqual(vm.transcript, ["session started · sonnet", response, "done in 1.2s"],
+                       file: file, line: line)
+    }
+
     func testEditMappingDerivesExpectedContains() {
         let src = "line one\n  vec4 c = texture2D(a, b);\nline three"
         let edit = AIEdit(fromLine: 2, toLine: 2, replacement: "  vec4 c = IMG_PIXEL(a, b);", rationale: "r")
@@ -23,6 +65,70 @@ final class ShaderAssistViewModelTests: XCTestCase {
         } else {
             XCTFail("expected suggestionGoals")
         }
+    }
+
+    func testClaudePartialMessagesPreserveQuickGoalsParsingAndLegacyTelemetry() async throws {
+        let response = #"{"goals":[{"id":"motion","title":"Add motion","detail":"Animate it","kind":"design","whyThisShader":"Static shader"}]}"#
+        let vm = ShaderAssistViewModel(providerOverride: try claudeRunner(response: response))
+        vm.requestSuggestionGoals(source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        guard case .suggestionGoals(let result) = vm.state else {
+            return XCTFail("expected suggestionGoals, got \(vm.state)")
+        }
+        XCTAssertEqual(result.goals.first?.id, "motion")
+        assertLegacyTelemetry(vm, response: response)
+    }
+
+    func testClaudePartialMessagesPreserveSuggestionsParsingAndLegacyTelemetry() async throws {
+        let response = #"{"goal":"Expose controls","ideas":[{"id":"speed","title":"Speed","detail":"Expose speed","kind":"make-interactive","lines":[3],"impact":"Playable"}]}"#
+        let vm = ShaderAssistViewModel(providerOverride: try claudeRunner(response: response))
+        vm.chooseSuggestionGoal("Expose controls", source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        guard case .suggestions(let result) = vm.state else {
+            return XCTFail("expected suggestions, got \(vm.state)")
+        }
+        XCTAssertEqual(result.ideas.first?.id, "speed")
+        XCTAssertEqual(vm.lastSuggestions, result)
+        assertLegacyTelemetry(vm, response: response)
+    }
+
+    func testClaudePartialMessagesPreserveRewriteParsingAndLegacyTelemetry() async throws {
+        let response = #"{"explanation":"Done","replacementSource":"/*{}*/\nvoid main(){ gl_FragColor = vec4(1.0); }","changedLines":[2]}"#
+        let vm = ShaderAssistViewModel(providerOverride: try claudeRunner(response: response))
+        let ideas = [AIIdea(id: "g1", title: "Add motion", detail: "animate it",
+                            kind: "design", lines: nil, impact: nil)]
+        vm.applySelectedGoals(ideas, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        guard case .applyPreview(let result) = vm.state else {
+            return XCTFail("expected applyPreview, got \(vm.state)")
+        }
+        XCTAssertEqual(result.explanation, "Done")
+        assertLegacyTelemetry(vm, response: response)
+    }
+
+    func testClaudePartialMessagesPreserveDiagnoseParsingAndLegacyTelemetry() async throws {
+        let response = #"{"explanation":"Fix it","edits":[{"fromLine":2,"toLine":2,"replacement":"void main(){}","rationale":"repair"}]}"#
+        let vm = ShaderAssistViewModel(providerOverride: try claudeRunner(response: response))
+        vm.run(.diagnoseAndFix, source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        guard case .fix(let result) = vm.state else {
+            return XCTFail("expected fix, got \(vm.state)")
+        }
+        XCTAssertEqual(result.explanation, "Fix it")
+        XCTAssertEqual(result.edits.first?.fromLine, 2)
+        assertLegacyTelemetry(vm, response: response)
+    }
+
+    func testClaudePartialMessagesPreserveResearchParsingAndLegacyTelemetry() async throws {
+        let response = #"{"goal":"analog decay","ideas":[{"id":"phosphor","title":"Phosphor lag","detail":"Decay","kind":"technique","lines":[12],"impact":"High"}]}"#
+        let vm = ShaderAssistViewModel(providerOverride: try claudeRunner(response: response))
+        vm.researchUpgrades(request: "analog decay", source: "/*{}*/\nvoid main(){}", diagnostics: [])
+        await settle()
+        guard case .suggestions(let result) = vm.state else {
+            return XCTFail("expected suggestions, got \(vm.state)")
+        }
+        XCTAssertEqual(result.ideas.first?.id, "phosphor")
+        assertLegacyTelemetry(vm, response: response)
     }
 
     func testChoosingGoalRunsScopedSuggestionsAndStoresFingerprint() async {
