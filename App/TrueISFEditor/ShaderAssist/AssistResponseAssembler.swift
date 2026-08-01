@@ -1,6 +1,6 @@
 import Foundation
 
-struct AssistResponseAssembler {
+struct AssistResponseAssembler: Sendable {
     let provider: AssistProviderIdentity
     private let accumulator = AssistRunAccumulator()
 
@@ -8,11 +8,11 @@ struct AssistResponseAssembler {
         self.provider = provider
     }
 
-    mutating func consume(_ event: AssistRunEvent) {
+    func consume(_ event: AssistRunEvent) {
         accumulator.consume(event)
     }
 
-    mutating func resolve(processExitSucceeded: Bool) throws -> AssistRunResult {
+    func resolve(processExitSucceeded: Bool) throws -> AssistRunResult {
         try accumulator.resolve(provider: provider, processExitSucceeded: processExitSucceeded)
     }
 }
@@ -26,8 +26,7 @@ private final class AssistRunAccumulator: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var deltasByMessageID: [String: [Int: String]] = [:]
-    private var completeAssistantsByMessageID: [String: CompleteAssistant] = [:]
+    private var deltaBytesByMessageID: [String: [Int: Int]] = [:]
     private var lastCompleteAssistant: CompleteAssistant?
     private var providerError: String?
     private var observedSuccessfulResult = false
@@ -40,23 +39,25 @@ private final class AssistRunAccumulator: @unchecked Sendable {
         defer { lock.unlock() }
 
         eventCount += 1
-        receivedBytes += event.payloadByteCount
-
         switch event {
         case let .textDelta(messageID, blockIndex, text):
-            let key = messageID ?? ""
-            var blocks = deltasByMessageID[key] ?? [:]
-            blocks[blockIndex, default: ""] += text
-            deltasByMessageID[key] = blocks
+            let byteCount = text.utf8.count
+            receivedBytes += byteCount
+            guard let messageID else { return }
+            var blocks = deltaBytesByMessageID[messageID] ?? [:]
+            blocks[blockIndex, default: 0] += byteCount
+            deltaBytesByMessageID[messageID] = blocks
 
         case let .assistantMessage(messageID, stopReason, blocks):
             let text = blocks
                 .sorted { $0.index < $1.index }
                 .map(\.text)
                 .joined()
+            let replacedDeltaBytes = deltaBytesByMessageID.removeValue(forKey: messageID)?
+                .values
+                .reduce(0) { $0 + $1 } ?? 0
+            receivedBytes += text.utf8.count - replacedDeltaBytes
             let assistant = CompleteAssistant(text: text, stopReason: stopReason)
-            completeAssistantsByMessageID[messageID] = assistant
-            deltasByMessageID.removeValue(forKey: messageID)
             lastCompleteAssistant = assistant
 
         case let .successfulResult(text):
@@ -122,20 +123,5 @@ private final class AssistRunAccumulator: @unchecked Sendable {
             receivedBytes: receivedBytes,
             eventCount: eventCount
         )
-    }
-}
-
-private extension AssistRunEvent {
-    var payloadByteCount: Int {
-        switch self {
-        case let .sessionStarted(id):
-            return id?.utf8.count ?? 0
-        case let .textDelta(_, _, text), let .apiRetry(_, text), let .successfulResult(text), let .errorResult(text):
-            return text.utf8.count
-        case let .assistantMessage(messageID, _, blocks):
-            return messageID.utf8.count + blocks.reduce(0) { $0 + $1.text.utf8.count }
-        case .processStarted, .thinking, .timedOut, .cancelled, .processExited:
-            return 0
-        }
     }
 }
