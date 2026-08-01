@@ -111,8 +111,18 @@ enum SurfaceMetrics {
 
     /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `SlotCell`'s own
     /// floor height — `minCellWidth` at the 16:9 aspect ratio the thumbnail enforces (96 × 9/16 =
-    /// 54pt) — plus the spacing between rows (`slotStripCellSpacing`, 6pt) = 60. Not asserted by
-    /// any layout gate — a drag that snaps a few points early or late is a feel issue, not a
+    /// 54pt) — plus the spacing between rows (`slotStripCellSpacing`, 6pt) = 60.
+    ///
+    /// Computed against the floor deliberately, not as an approximation of it: fix-round-1 (task
+    /// 3, F3) found the floor IS the cell's real width at every window size, not just the narrowest
+    /// one. `.fixedSize(vertical: true)` (which `InstrumentSurface` wraps the whole `slots()`
+    /// region in) makes the row report its own ideal height upward instead of receiving one from
+    /// outside, and combined with the `ScrollView(.horizontal)` cells sit in, `.aspectRatio(16/9,
+    /// .fit)` resolves to `minCellWidth` regardless of window width — cells do not expand at a
+    /// wide window (confirmed:
+    /// `SurfaceGeometryTests.testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth`). So there is
+    /// no second, wider case this constant also needs to satisfy. Not asserted by any layout gate
+    /// beyond that — a drag that snaps a few points early or late is a feel issue, not a
     /// correctness one; the correctness invariant is that `bankRows` never touches `SlotBank`,
     /// which is tested directly.
     static let slotStripRowHeight: CGFloat = 60

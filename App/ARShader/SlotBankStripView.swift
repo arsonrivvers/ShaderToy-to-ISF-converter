@@ -38,11 +38,20 @@ struct SlotBankStripView: View {
     @State private var isRowResizeCursorPushed = false
 
     /// Decoded once, here, when a request resolves — never in a cell's `body`, which re-evaluates
-    /// on every layout pass while the instrument is playing. Keyed by slot index and never cleared
-    /// once set, which is what makes an unavailable slot's "last-known thumbnail" possible: the
-    /// disk cache itself cannot serve one for a file that is currently unreadable (its key is the
-    /// file's own mtime), so the only surviving copy is whatever this dictionary already holds.
-    @State private var thumbnails: [Int: Image] = [:]
+    /// on every layout pass while the instrument is playing.
+    ///
+    /// **Keyed by the shader's URL, not the slot index (fix-round-1, C1).** An index is not a
+    /// stable identity: `SlotBank.clear` nils a slot and `SlotBank.capture` overwrites it, so an
+    /// index-keyed cache let a cleared or re-captured slot go on drawing the PREVIOUS shader's
+    /// still under the new preset's name — the operator fires the picture they see and gets
+    /// something else. Keying by URL means a cleared slot (preset nil) simply has no entry to look
+    /// up, and a freshly captured slot's new URL starts with none either, until its own request
+    /// resolves. It ALSO preserves the property the old doc comment was defending: an unavailable
+    /// preset keeps its URL, and this dictionary is never cleared once an entry is set, so the
+    /// "last-known thumbnail" of a slot whose file just went missing still resolves correctly — the
+    /// disk cache itself cannot serve one for an unreadable file (its key needs the file's own
+    /// mtime), so this in-memory copy is the only surviving one.
+    @State private var thumbnails: [URL: Image] = [:]
 
     init(instrument: Instrument, target: Binding<LibraryTarget>, layout: SurfaceLayout) {
         self.instrument = instrument
@@ -73,27 +82,36 @@ struct SlotBankStripView: View {
                 content
             }
         }
-        // On the outer VStack, not `content`: `content` is torn down and rebuilt every time the
-        // strip collapses, and re-running the whole sweep on every expand would be wasted work
-        // (harmless — `loadThumbnails` skips anything already in `thumbnails` — but pointless).
-        // The outer view persists for the life of the strip, so this fires once.
-        .task { await loadThumbnails() }
+        // Keyed on `bank.slots`, not fired once: fix-round-1 (F2). `bank.slots` is `@Published`
+        // and `Preset` is `Equatable`, so SwiftUI restarts this task — cancelling whatever sweep
+        // was still in flight — every time a capture or clear changes the array, not just at
+        // launch. That is safe, not wasteful: `loadThumbnails` only ever requests entries it does
+        // not already hold (keyed by URL now, see `thumbnails`' doc comment), so a restart re-asks
+        // for exactly the slots the OLD sweep had not yet resolved (including one a cancellation
+        // itself just un-resolved — `ThumbnailService` never persists a cancelled request, so it is
+        // simply retried) plus whatever the bank change just added. On the outer VStack, not
+        // `content`: `content` is torn down and rebuilt every time the strip collapses, and this
+        // must not restart on a mere collapse/expand.
+        .task(id: bank.slots) { await loadThumbnails() }
     }
 
-    /// Fills `thumbnails` from the disk-cached thumbnail service, one request per filled slot —
-    /// every slot in the model, not just the currently drawn rows, so expanding a collapsed row
-    /// reveals thumbnails already in hand rather than triggering a fresh sweep.
+    /// Fills `thumbnails` from the disk-cached thumbnail service, one request per filled slot whose
+    /// URL is not already resolved — every slot in the model, not just the currently drawn rows, so
+    /// expanding a collapsed row reveals thumbnails already in hand rather than triggering a fresh
+    /// sweep. Re-entrant by construction (see the `.task(id:)` call site's doc comment): a capture
+    /// or clear mid-sweep restarts this from a fresh loop over the CURRENT `bank.slots`, so a look
+    /// captured mid-set gets picked up rather than waiting for relaunch (fix-round-1, F2).
     ///
     /// `.batch`, never `.interactive`: cancelling these leaves permanently blank cells that only a
     /// resize or relaunch would fill (spec, "Two consumers, two concurrency policies") — the
     /// opposite of library hover, where a superseded request is wasted work worth dropping.
     private func loadThumbnails() async {
-        for (index, preset) in bank.slots.enumerated() {
-            guard let preset, thumbnails[index] == nil else { continue }
+        for preset in bank.slots {
+            guard let preset, thumbnails[preset.shaderURL] == nil else { continue }
             let result = await instrument.thumbnailService.thumbnail(
                 for: preset.shaderURL, priority: .batch)
             guard case .image(let data) = result, let decoded = NSImage(data: data) else { continue }
-            thumbnails[index] = Image(nsImage: decoded)
+            thumbnails[preset.shaderURL] = Image(nsImage: decoded)
         }
     }
 
@@ -186,11 +204,15 @@ struct SlotBankStripView: View {
                         HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
                             ForEach(0..<SlotBank.perRow, id: \.self) { column in
                                 let index = row * SlotBank.perRow + column
+                                let preset = bank.slots[index]
+                                // Looked up by the PRESET's own URL, not the index (C1) — see
+                                // `thumbnails`' doc comment for why an index-keyed lookup drew a
+                                // cleared or re-captured slot's PREVIOUS shader.
                                 SlotCell(index: index,
-                                         preset: bank.slots[index],
+                                         preset: preset,
                                          isAvailable: bank.isAvailable(index),
-                                         liveOn: liveDeck(for: bank.slots[index]),
-                                         thumbnail: thumbnails[index],
+                                         liveOn: liveDeck(for: preset),
+                                         thumbnail: preset.flatMap { thumbnails[$0.shaderURL] },
                                          onRecall: { recall(index) },
                                          onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
@@ -290,11 +312,18 @@ enum SlotCellState: Equatable {
         return .idle
     }
 
+    /// Fix-round-1 (F4): `.unavailable` now carries its own border, same as a live slot — the
+    /// state whose whole job is "the operator must never fire this and get nothing" cannot be the
+    /// one state with no border. Red rather than reusing deck B's orange: the original brief's
+    /// snippet assigned orange to BOTH `.live(.two)` and the unavailable glyph, so a warm-toned
+    /// still at 0.35 opacity with an orange glyph could misread as "playing on deck B" instead of
+    /// "broken." Red does not collide with either deck's live colour (cyan, orange).
     var borderColor: Color? {
         switch self {
-        case .live(.one): return .cyan
-        case .live(.two): return .orange
-        case .idle, .unavailable: return nil
+        case .live(.one):  return .cyan
+        case .live(.two):  return .orange
+        case .unavailable: return .red
+        case .idle:        return nil
         }
     }
 
@@ -345,15 +374,30 @@ private struct SlotCell: View {
                         .aspectRatio(16.0 / 9.0, contentMode: .fill)
                         .opacity(state.imageOpacity)
                 } else {
-                    Rectangle().fill(Color.white.opacity(preset == nil ? 0.03 : 0.08))
+                    // Fix-round-1 (F2): 0.03 vs the old 0.08 read as near-identical on a dark
+                    // surface, so a filled-but-not-yet-loaded cell (the ordinary state for the
+                    // first several seconds of a set, or right after a fresh capture) looked
+                    // exactly like an empty one. 0.22 makes "something is here, still loading" a
+                    // visibly distinct plate from "nothing captured."
+                    Rectangle().fill(Color.white.opacity(preset == nil ? 0.03 : 0.22))
                 }
 
                 if let badge = state.badge {
                     // A live badge is the deck letter; an unavailable badge is a warning glyph.
                     // They occupy the same corner deliberately — one slot of chrome, one meaning.
+                    //
+                    // Fix-round-1 (F4): the unavailable glyph used to draw with no background plate
+                    // at all, while the live badge got a solid capsule — "unavailable outranks
+                    // live" exists precisely so the operator never fires a dead slot, so it cannot
+                    // be the WORSE-lit of the two badges. Both now sit on an opaque plate in
+                    // `state.borderColor` (red for unavailable, never orange — see `borderColor`'s
+                    // doc comment), same contrast treatment, same corner.
                     Group {
                         if case .unavailable = state {
-                            Image(systemName: badge).foregroundStyle(.orange)
+                            Image(systemName: badge)
+                                .foregroundStyle(.white)
+                                .padding(4)
+                                .background(state.borderColor ?? .red, in: Circle())
                         } else {
                             Text(badge).foregroundStyle(.black)
                                 .padding(.horizontal, 4)

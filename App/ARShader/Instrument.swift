@@ -68,20 +68,41 @@ final class Instrument: ObservableObject {
         renderer.onElementStats = { map in
             Task { @MainActor in elements.gpuMs = map }
         }
-        // Guarded like every other disk-backed store in this app (ThumbnailService's own I6
-        // precedent): a missing Application Support directory must not crash a live instrument
-        // over a contact-sheet nicety. Falls back to the temp directory, which — like any directory
-        // ThumbnailCache itself fails to create — degrades the service to render-only-no-cache
-        // rather than trap on the force-unwrap the interface's own `.first!` implied.
-        let thumbnailsDirectory = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            .map { $0.appendingPathComponent("ARShader/Thumbnails") }
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("ARShader/Thumbnails")
+        // Isolated from the operator's REAL cache under XCTest (fix-round-1, F5) — the same defect
+        // class `bankStore` above already had to be fixed for. `Instrument()` is built many times
+        // across the suite, and before this fix EVERY one of them resolved the real
+        // `~/Library/Application Support/ARShader/Thumbnails`, created it (`ThumbnailCache.init`
+        // calls `createDirectory`), and fired a launch-time `sweepCache()` against it — so a test
+        // run above the 2,000-entry ceiling could evict the OPERATOR's real thumbnails. A fresh
+        // per-instance temp directory means no test run touches or shares that path; skipping the
+        // sweep under the harness means no test instrument's launch-time eviction runs at all.
+        let thumbnailsDirectory: URL
+        if TestHarness.isActive {
+            thumbnailsDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("ARShaderTests-Thumbnails-\(UUID().uuidString)")
+        } else {
+            // Guarded like every other disk-backed store in this app (ThumbnailService's own I6
+            // precedent): a missing Application Support directory must not crash a live instrument
+            // over a contact-sheet nicety. Falls back to the temp directory, which — like any
+            // directory ThumbnailCache itself fails to create — degrades the service to
+            // render-only-no-cache rather than trap on the force-unwrap the interface's own
+            // `.first!` implied.
+            thumbnailsDirectory = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                .map { $0.appendingPathComponent("ARShader/Thumbnails") }
+                ?? FileManager.default.temporaryDirectory
+                    .appendingPathComponent("ARShader/Thumbnails")
+        }
         let thumbnailService = ThumbnailService(cacheDirectory: thumbnailsDirectory)
         self.thumbnailService = thumbnailService
-        // Swept once at launch, never during a set — eviction is disk I/O the operator did not ask
-        // for at the worst possible moment (ThumbnailService.sweepCache's own doc comment).
-        Task { await thumbnailService.sweepCache() }
+        if !TestHarness.isActive {
+            // Swept once at launch, never during a set — eviction is disk I/O the operator did not
+            // ask for at the worst possible moment (ThumbnailService.sweepCache's own doc comment).
+            // Never under the harness: a per-instance temp directory never accumulates enough to
+            // need sweeping, and sweeping is exactly the operation that, against the real cache,
+            // was the actual damage this fix closes.
+            Task { await thumbnailService.sweepCache() }
+        }
 
         // Every stored property must be set before a closure captures `self` — this is why the
         // block above comes first, not after.

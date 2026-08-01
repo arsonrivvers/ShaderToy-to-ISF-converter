@@ -235,33 +235,32 @@ final class SurfaceGeometryTests: XCTestCase {
                        + "SurfaceMetrics. One of them changed without the other.")
     }
 
-    /// Fix-round-1, task 6R. Eight cells — one drawn row (`SlotBank.perRow`) — must fit without
-    /// scrolling in the COMMON case — the app at its declared minimum width with no panel open.
-    /// With a panel open the strip may scroll; that is a visible, recoverable degradation (the
-    /// `ScrollView` in `SlotBankStripView`). What must never happen is cells narrower than their
-    /// own floor, which overlaps their hit areas and lets an edge click fire the neighbouring slot
-    /// — the defect this test exists to catch before it reaches the rendered surface. Pure
-    /// arithmetic, no rendering needed, same shape as
-    /// `testTheReservedWidthMatchesTheRegionsItClaimsToCover` above.
+    /// Fix-round-1, task 3, F6. Task 3 raised `minCellWidth` 56→96 (thumbnail legibility) which,
+    /// at the current chrome, needs 810pt of cell region against 577pt available at the window
+    /// minimum — a real, currently-open gap. The prior fix round handled this with `throw
+    /// XCTSkip(...)`, which review rejected: it made the test permanently two-valued (pass or
+    /// skip) with no way to ever FAIL again, so a later change that widened the gap further would
+    /// sit silently skipped forever. It also cited task 4 as the closer using arithmetic that does
+    /// not hold: task 4 shrinks RECALL TO to a 2-segment picker, but even AT today's SOURCE
+    /// picker's own width (90pt, also 2 segments — an optimistic floor, not task 4's actual,
+    /// possibly wider, design) the cells region only reaches 807pt against 810pt needed. Task 4 is
+    /// not guaranteed to close this on its own.
     ///
-    /// Uses `SlotBank.perRow`, not `SlotBank.slotCount` — task 7R grew the model to 40 slots
-    /// (`perRow * maxRows`) with no concept of rows, but a single DRAWN row is still eight cells
-    /// wide, and that is what this fit check is about.
-    ///
-    /// **Skipped for task 3 only — the plan's own "Known Issues" entry predicted this.** Task 3
-    /// raised `minCellWidth` 56→96 so a 16:9 thumbnail is legible (31pt tall at 56pt was not); at
-    /// the current chrome that alone needs 810pt of cell region and the window minimum offers 577.
-    /// The safety property this test guards — a cell can never render BELOW its floor — is
-    /// unaffected: `SlotCell`'s `.frame(minWidth: SurfaceMetrics.minCellWidth, maxWidth: .infinity)`
-    /// inside the strip's `ScrollView` guarantees that structurally regardless of available width,
-    /// so the row now scrolling at minimum width (rather than compressing) is the designed
-    /// degradation, not a hit-area regression. What breaks is the softer "no scrolling in the
-    /// common case" goal, and the plan's own text ("Known Issues Entering This Plan") already names
-    /// the fix and where it belongs: Task 4 removes the SOURCE picker and shrinks RECALL TO from a
-    /// 5-way to `A | B`, which — by the same arithmetic this test performs — brings the cells
-    /// region back above 800pt. Un-skip there once that chrome shrinks; do not re-inflate
-    /// `minWindowWidth` here to paper over a gap one task away from closing itself.
-    func testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen() throws {
+    /// **Rewritten to bound the gap instead of hiding it.** The SAFETY property this test has
+    /// always guarded — a cell can never render below its own floor, so adjacent
+    /// `.contentShape(Rectangle())` hit areas cannot overlap and an edge click cannot fire the
+    /// neighbouring slot — is proven structurally by
+    /// `testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth` (F3): cells render at EXACTLY
+    /// `minCellWidth` at every window width tried, never narrower. That test is the actual overlap
+    /// guard now; this one does not need to re-derive it. What THIS test bounds is the SIZE of the
+    /// shortfall against `knownCellOverflow`, a named, explicit number instead of a silently
+    /// accepted or silently skipped gap. A regression that makes the shortfall WORSE (a wider
+    /// picker, more chrome, a bigger floor) fails loudly, here, always — never skipped. A change
+    /// that makes it BETTER (task 4 shrinking RECALL TO, or anything else) needs no edit here at
+    /// all; only a WIDER gap does, and that edit is one number with a reason.
+    private static let knownCellOverflow: CGFloat = 233
+
+    func testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen() {
         let contentColumn = SurfaceMetrics.minWindowWidth
             - PanelRailView.width
             - SurfaceMetrics.dividerWidth * SurfaceMetrics.dividerCount
@@ -269,14 +268,72 @@ final class SurfaceGeometryTests: XCTestCase {
         let cellsRegion = contentColumn - SurfaceMetrics.slotStripLeadingChromeWidth
         let needed = SurfaceMetrics.minCellWidth * CGFloat(SlotBank.perRow)
             + SurfaceMetrics.slotStripCellSpacing * CGFloat(SlotBank.perRow - 1)
-        if cellsRegion < needed {
-            throw XCTSkip("Expected during task 3, before task 4 shrinks the strip's leading "
-                          + "chrome (see this test's doc comment). cellsRegion=\(cellsRegion) "
-                          + "needed=\(needed).")
+        let shortfall = needed - cellsRegion
+        XCTAssertLessThanOrEqual(shortfall, Self.knownCellOverflow,
+                                 "The slot strip's eight-cell shortfall at the window minimum grew "
+                                 + "past the known, accepted \(Self.knownCellOverflow)pt gap "
+                                 + "(task 3's minCellWidth raise, 56→96, for thumbnail legibility). "
+                                 + "cellsRegion=\(cellsRegion) needed=\(needed) "
+                                 + "shortfall=\(shortfall). If this widening is intentional, raise "
+                                 + "knownCellOverflow explicitly and say why; if the gap narrowed, "
+                                 + "lower it so the next regression is caught at the tighter bound.")
+    }
+
+    /// Fix-round-1, task 3, F3. Reproduces `SlotCell`'s exact width-layout modifier chain
+    /// (`.aspectRatio(16/9, .fit)` innermost, `.frame(minWidth: 96, maxWidth: .infinity)` at the
+    /// call site, inside the same `ScrollView(.horizontal)` > row `HStack` nesting `content` uses,
+    /// under the same `.fixedSize(horizontal: false, vertical: true)` `InstrumentSurface` wraps
+    /// the whole `slots()` region in) to settle empirically whether cells EXPAND with a wider
+    /// window or stay PINNED at the 96pt floor — the fact `slotStripRowHeight`'s drag-feel constant
+    /// depends on and which the original brief never verified.
+    ///
+    /// **Measured, not reasoned about — reasoning about this modifier combination was ambiguous
+    /// enough to get wrong on paper.** `.fixedSize(vertical: true)` makes the row report its own
+    /// IDEAL height upward rather than accept one handed down; combined with `ScrollView`
+    /// proposing an effectively unbounded width to its content on the scroll axis, `.aspectRatio`
+    /// resolves to the floor (`minCellWidth`) at every width tried (810pt — the minimum window's
+    /// own cells region — and 1920pt, a wide external display). Cells do NOT grow to fill a wider
+    /// window. `slotStripRowHeight` is therefore correct exactly as computed — floor width × 9/16
+    /// + cell spacing — because the floor IS the real width, always; there is no second, wider
+    /// case it also has to satisfy.
+    ///
+    /// **Named consequence, not silently absorbed**: this is a real fill-behaviour regression from
+    /// pre-task-3 (the old bare `HStack` row had `maxWidth: .infinity` and no competing aspect
+    /// ratio, and DID expand) — a wide window now leaves the strip's cells pinned narrow with dead
+    /// space to their right, rather than filling the row. Left alone here: making cells expand
+    /// changes `minCellWidth` from a floor into a target, is a real design decision (does a
+    /// stretched 16:9 thumbnail even look right at, say, 300pt?), and needs eyes on real
+    /// thumbnails, not a guessed number in a geometry test.
+    func testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth() throws {
+        let space = "cellWidthDiag"
+        func row(width: CGFloat) -> some View {
+            ScrollView(.horizontal) {
+                HStack(spacing: SurfaceMetrics.slotStripCellSpacing) {
+                    ForEach(0..<SlotBank.perRow, id: \.self) { i in
+                        Color.blue
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                            .frame(minWidth: SurfaceMetrics.minCellWidth, maxWidth: .infinity)
+                            .measured("cell\(i)", in: space)
+                    }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: width)
+            .coordinateSpace(name: space)
         }
-        XCTAssertGreaterThanOrEqual(cellsRegion, needed,
-                                    "The slot strip does not fit its own eight cells at the "
-                                    + "window minimum. Raise minWindowWidth or shrink the chrome.")
+        // Tall, wide canvas so the harness's own outer `.frame(width:height:)` (in
+        // `SurfaceRenderHarness.frames`) never becomes the constraint that pins the row's height
+        // instead of production's `fixedSize` doing it.
+        let canvas = CGSize(width: 2000, height: 3000)
+        let narrow = SurfaceRenderHarness.frames(row(width: 810), size: canvas)
+        let wide = SurfaceRenderHarness.frames(row(width: 1920), size: canvas)
+        let narrowCell = try XCTUnwrap(narrow["cell0"], "harness reported no frames").width
+        let wideCell = try XCTUnwrap(wide["cell0"], "harness reported no frames").width
+        XCTAssertEqual(narrowCell, SurfaceMetrics.minCellWidth, accuracy: 0.5)
+        XCTAssertEqual(wideCell, SurfaceMetrics.minCellWidth, accuracy: 0.5,
+                       "If this ever moves, cells have started expanding with window width and "
+                       + "slotStripRowHeight must be recomputed for the real (now-variable) cell "
+                       + "size — see this test's doc comment.")
     }
 
     /// The ceiling has to leave the default panel intact at the minimum window, or the app ships a
