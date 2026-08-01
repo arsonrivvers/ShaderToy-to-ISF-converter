@@ -156,6 +156,12 @@ final class RemixResponseParserTests: XCTestCase {
         XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
     }
 
+    func test_extractCandidate_treatsWhitespaceAfterABackslashAsTheEndOfAPreprocessorDirective() {
+        let source = shader("void main() {\n#define CLOSE \\   \n}")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
     func test_extractCandidate_skipsMalformedRawHeaderBeforeLaterValidRawISF() {
         let valid = shader("void main() { gl_FragColor = vec4(1.0); }")
         let response = "/*{not json}*/\nvoid main() {}\n\(valid)"
@@ -181,11 +187,64 @@ final class RemixResponseParserTests: XCTestCase {
         XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
     }
 
+    func test_extractCandidate_keepsValidJSONBlockCommentsInsideAValidShaderBody() {
+        let source = shader("""
+        void main() {
+            /* {"debug": true} */
+            gl_FragColor = vec4(1.0);
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_keepsVersionedHeaderCommentsInsideAMainBody() {
+        let source = shader("""
+        void main() {
+            /*{ "ISFVSN": "2.0" }*/
+            gl_FragColor = vec4(1.0);
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_acceptsAHeaderDescriptionContainingABlockCommentMarker() {
+        let source = """
+        /*{ "ISFVSN": "2.0", "DESCRIPTION": "look /* inward" }*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_rejectsClosedMainFollowedByAnUnterminatedBlockComment() {
+        let source = shader("void main() { gl_FragColor = vec4(1.0); }\n/* trailing shader comment")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
     func test_extractCandidate_skipsAnUnterminatedMalformedRawOpenerBeforeLaterValidRawISF() {
         let valid = shader("void main() { gl_FragColor = vec4(1.0); }")
         let response = "/*{ malformed header\n\(valid)"
 
         XCTAssertEqual(RemixResponseParser.extractCandidate(response), .success(valid))
+    }
+
+    func test_extractCandidate_stopsAtTheNextVersionedRawISFResponse() {
+        let first = shader("void main() { gl_FragColor = vec4(1.0); }")
+        let second = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate("\(first)\n\(second)"), .success(first))
+    }
+
+    func test_extractCandidate_keepsVersionlessParsedHeadersAsCompatibilityCandidates() {
+        let source = """
+        /*{ "DESCRIPTION": "legacy output" }*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
     }
 
     func test_extractCandidate_keepsEmbeddedBackticksInShaderComments() {

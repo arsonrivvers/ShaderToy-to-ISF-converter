@@ -63,24 +63,19 @@ enum RemixResponseParser {
         }
 
         var errors: [RemixResponseError] = []
-        let validHeaders = headers.compactMap(\.headerRange)
-        let firstValidHeader = validHeaders.first
-        var validHeaderIndex = 0
+        let hardBoundaries = headers.compactMap { header in
+            header.isContractHeader ? header.headerRange : nil
+        }
         for header in headers {
             guard let headerRange = header.headerRange else {
-                // A malformed marker after a valid header is part of that candidate's shader body,
-                // not evidence of a second response. This avoids misclassifying legal comments such
-                // as `/* { debug note } */` while retaining malformed-first diagnostics.
-                if firstValidHeader.map({ header.location < $0.lowerBound }) ?? true {
-                    errors.append(.invalidHeader(malformedHeaderMessage))
-                }
+                errors.append(.invalidHeader(malformedHeaderMessage))
                 continue
             }
 
-            let end = validHeaderIndex + 1 < validHeaders.count
-                ? validHeaders[validHeaderIndex + 1].lowerBound
-                : text.endIndex
-            validHeaderIndex += 1
+            let end = hardBoundaries.first(where: {
+                $0.lowerBound > headerRange.lowerBound
+                    && isTopLevelBoundary($0.lowerBound, in: text, after: headerRange.upperBound)
+            })?.lowerBound ?? text.endIndex
             let source = String(text[headerRange.lowerBound..<end])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -101,7 +96,9 @@ enum RemixResponseParser {
 
     private static func hasCompleteShaderBody(_ source: String) -> Bool {
         guard let headerRange = ISFHeader.blockRange(in: source) else { return false }
-        let tokens = glslTokens(in: source[headerRange.upperBound...])
+        let scan = glslScan(in: source[headerRange.upperBound...])
+        guard scan.isComplete else { return false }
+        let tokens = scan.tokens
 
         for index in tokens.indices {
             guard tokens[index] == .identifier("void"),
@@ -181,6 +178,7 @@ enum RemixResponseParser {
     private struct HeaderCandidate {
         let location: String.Index
         let headerRange: Range<String.Index>?
+        let isContractHeader: Bool
     }
 
     private struct FenceRegions {
@@ -238,25 +236,15 @@ enum RemixResponseParser {
 
         while let opening = text.range(of: "/*", range: cursor..<text.endIndex) {
             let bodyStart = opening.upperBound
-            let nextOpening = text.range(of: "/*", range: bodyStart..<text.endIndex)
-            let closing = text.range(of: "*/", range: bodyStart..<text.endIndex)
-
-            if let nextOpening,
-               closing == nil || nextOpening.lowerBound < closing!.lowerBound {
-                if text[bodyStart..<nextOpening.lowerBound]
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .hasPrefix("{") {
-                    candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: nil))
-                }
-                cursor = nextOpening.lowerBound
-                continue
-            }
-
-            guard let closing else {
+            guard let closing = text.range(of: "*/", range: bodyStart..<text.endIndex) else {
                 if text[bodyStart...]
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .hasPrefix("{") {
-                    candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: nil))
+                    candidates.append(HeaderCandidate(
+                        location: opening.lowerBound,
+                        headerRange: nil,
+                        isContractHeader: false
+                    ))
                 }
                 break
             }
@@ -266,10 +254,24 @@ enum RemixResponseParser {
             if text[bodyStart..<closing.lowerBound]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .hasPrefix("{") {
-                let validRange = (try? ISFHeader.parse(comment)) == nil ? nil : range
-                candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: validRange))
+                if let parsedHeader = try? ISFHeader.parse(comment) {
+                    candidates.append(HeaderCandidate(
+                        location: opening.lowerBound,
+                        headerRange: range,
+                        isContractHeader: parsedHeader.extra["ISFVSN"] != nil
+                    ))
+                    cursor = closing.upperBound
+                    continue
+                }
+                candidates.append(HeaderCandidate(
+                    location: opening.lowerBound,
+                    headerRange: nil,
+                    isContractHeader: false
+                ))
             }
-            cursor = closing.upperBound
+            // A malformed opener may contain a later real header before the next `*/`.
+            // Advance only past this opener so that later candidates are discovered independently.
+            cursor = opening.upperBound
         }
         return candidates
     }
@@ -289,7 +291,12 @@ enum RemixResponseParser {
         case symbol(Character)
     }
 
-    private static func glslTokens(in text: Substring) -> [GLSLToken] {
+    private struct GLSLScan {
+        let tokens: [GLSLToken]
+        let isComplete: Bool
+    }
+
+    private static func glslScan(in text: Substring) -> GLSLScan {
         var tokens: [GLSLToken] = []
         var cursor = text.startIndex
 
@@ -305,7 +312,7 @@ enum RemixResponseParser {
             if character == "/", next < text.endIndex, text[next] == "*" {
                 let commentStart = text.index(after: next)
                 guard let closing = text.range(of: "*/", range: commentStart..<text.endIndex) else {
-                    break
+                    return GLSLScan(tokens: tokens, isComplete: false)
                 }
                 cursor = closing.upperBound
                 continue
@@ -313,6 +320,7 @@ enum RemixResponseParser {
             if character == "\"" || character == "'" {
                 let quote = character
                 cursor = next
+                var closed = false
                 while cursor < text.endIndex {
                     if text[cursor] == "\\" {
                         cursor = text.index(after: cursor)
@@ -321,10 +329,14 @@ enum RemixResponseParser {
                         }
                     } else if text[cursor] == quote {
                         cursor = text.index(after: cursor)
+                        closed = true
                         break
                     } else {
                         cursor = text.index(after: cursor)
                     }
+                }
+                guard closed else {
+                    return GLSLScan(tokens: tokens, isComplete: false)
                 }
                 continue
             }
@@ -346,7 +358,7 @@ enum RemixResponseParser {
             }
             cursor = next
         }
-        return tokens
+        return GLSLScan(tokens: tokens, isComplete: true)
     }
 
     private static func afterPreprocessorDirective(in text: Substring, startingAt start: String.Index) -> String.Index {
@@ -354,12 +366,71 @@ enum RemixResponseParser {
 
         while true {
             let lineEnd = text.range(of: "\n", range: lineStart..<text.endIndex)?.lowerBound ?? text.endIndex
-            let lastNonWhitespace = text[lineStart..<lineEnd].last { !$0.isWhitespace }
-            guard lastNonWhitespace == "\\", lineEnd < text.endIndex else {
+            let continues = lineEnd > lineStart && text[text.index(before: lineEnd)] == "\\"
+            guard continues, lineEnd < text.endIndex else {
                 return lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
             }
             lineStart = text.index(after: lineEnd)
         }
+    }
+
+    private static func isTopLevelBoundary(
+        _ boundary: String.Index,
+        in text: String,
+        after start: String.Index
+    ) -> Bool {
+        var cursor = start
+        var braceDepth = 0
+
+        while cursor < boundary {
+            let character = text[cursor]
+            let next = text.index(after: cursor)
+
+            if character == "/", next < boundary, text[next] == "/" {
+                guard let newline = text.range(of: "\n", range: next..<boundary) else { return false }
+                cursor = text.index(after: newline.lowerBound)
+                continue
+            }
+            if character == "/", next < boundary, text[next] == "*" {
+                guard let closing = text.range(of: "*/", range: next..<boundary) else { return false }
+                cursor = closing.upperBound
+                continue
+            }
+            if character == "\"" || character == "'" {
+                let quote = character
+                cursor = next
+                var closed = false
+                while cursor < boundary {
+                    if text[cursor] == "\\" {
+                        cursor = text.index(after: cursor)
+                        if cursor < boundary {
+                            cursor = text.index(after: cursor)
+                        }
+                    } else if text[cursor] == quote {
+                        cursor = text.index(after: cursor)
+                        closed = true
+                        break
+                    } else {
+                        cursor = text.index(after: cursor)
+                    }
+                }
+                guard closed else { return false }
+                continue
+            }
+            if character == "#" {
+                let afterDirective = afterPreprocessorDirective(in: text[cursor...], startingAt: cursor)
+                guard afterDirective <= boundary else { return false }
+                cursor = afterDirective
+                continue
+            }
+            if character == "{" {
+                braceDepth += 1
+            } else if character == "}" {
+                braceDepth -= 1
+            }
+            cursor = next
+        }
+        return braceDepth == 0
     }
 
     private static func isIdentifierStart(_ character: Character) -> Bool {
