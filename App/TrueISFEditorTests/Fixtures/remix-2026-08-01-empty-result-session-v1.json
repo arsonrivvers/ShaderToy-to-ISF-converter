@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "currentBatch": [
+    {"id": "r1-0", "isfSource": ""},
+    {"id": "r1-1", "isfSource": ""},
+    {"id": "r1-2", "isfSource": ""},
+    {"id": "r1-3", "isfSource": ""},
+    {"id": "r1-4", "isfSource": ""}
+  ],
+  "transcript": [
+    "[r1-0] ```glsl\n/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }\n```",
+    "[r1-1] ```glsl\n/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-1\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }\n```",
+    "[r1-2] ```glsl\n/*{ \"ISFVSN\": \"2.0\" }*/",
+    "[r1-3] ```glsl\n/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-3\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }\n```",
+    "[r1-4] ```glsl\n/*{ \"ISFVSN\": \"2.0\" }*/"
+  ]
+}

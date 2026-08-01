@@ -105,10 +105,13 @@ targets:
       - TrueISFEditor/Views/AssistProgressStrip.swift
       - path: TrueISFEditorTests/Fixtures/claude-empty-result-complete-assistant.jsonl
         buildPhase: resources
+      - path: TrueISFEditorTests/Fixtures/remix-2026-08-01-empty-result-session-v1.json
+        buildPhase: resources
       - TrueISFEditor/Remix/RemixNode.swift
       - TrueISFEditor/Remix/RemixDirectives.swift
       - TrueISFEditor/Remix/RemixPrompt.swift
       - TrueISFEditor/Remix/RemixResponseParser.swift
+      - TrueISFEditor/Remix/RemixLegacyRecovery.swift
       - TrueISFEditor/Remix/RemixGenerator.swift
       - TrueISFEditor/Remix/RemixLineage.swift
       - TrueISFEditor/Remix/RemixStudioModel.swift
