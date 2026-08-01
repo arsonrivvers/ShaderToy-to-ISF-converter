@@ -124,6 +124,18 @@ struct SlotBankStripView: View {
 
     static var recallTargets: [DeckID] { DeckID.allCases }
 
+    /// The slot a compatible drag is currently hovering, ACCEPTANCE-FILTERED — set only when
+    /// `ShaderDrag.accepts` would say yes for THIS slot's fill state and the live ⌥ state, not
+    /// merely when a drag of the right TYPE is hovering (task 5 brief, "must NOT fire for a
+    /// target that would reject"). Safe to compute without knowing the drag's `source`: for a
+    /// `.slot` destination, `accepts` reduces to the identical `!isSlotFilled || option` predicate
+    /// for both legal sources (library, deck) — see `ShaderDrag.accepts`.
+    @State private var targetedSlot: Int?
+
+    /// A slot a drop just refused, driving a brief shake (see `SlotCell`'s `isRejected`). Cleared
+    /// after ~0.4s so the cue reads as "that didn't take" rather than a lingering error state.
+    @State private var rejectedSlot: Int?
+
     /// Tracks the row count as it stood when the current drag began, so the drag reads as an
     /// absolute offset from a fixed start rather than accumulating per-frame deltas — the same
     /// reasoning `InstrumentSurface.panelResizeHandle` uses for `setPanelWidth`, adapted from an
@@ -346,10 +358,51 @@ struct SlotBankStripView: View {
                                          isAvailable: bank.isAvailable(index),
                                          liveOn: liveDeck(for: preset),
                                          thumbnail: preset.flatMap { thumbnails[$0.shaderURL] },
+                                         isTargeted: targetedSlot == index,
+                                         isRejected: rejectedSlot == index,
                                          onRecall: { recall(index) },
                                          onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
                                     .frame(width: cellWidth, height: cellWidth * 9.0 / 16.0)
+                                    // The never-overwrite invariant restated for a gesture
+                                    // (`ShaderDrag.accepts`) — the single most important mutation
+                                    // proof in the phase: a mid-set drag must never silently
+                                    // replace a dialled-in look. Both legal drop sources (library,
+                                    // deck) reduce to the identical `!isSlotFilled || option`
+                                    // predicate for a `.slot` destination, so evaluating it here
+                                    // needs no knowledge of which source is actually dragging.
+                                    .dropDestination(for: ShaderDrag.self) { items, _ in
+                                        guard let drag = items.first,
+                                              ShaderDrag.accepts(
+                                                drag, on: .slot,
+                                                isSlotFilled: bank.slots[index] != nil,
+                                                withOption: NSEvent.modifierFlags.contains(.option))
+                                        else {
+                                            rejectedSlot = index      // drives the shake
+                                            Task {
+                                                try? await Task.sleep(for: .milliseconds(400))
+                                                if rejectedSlot == index { rejectedSlot = nil }
+                                            }
+                                            return false
+                                        }
+                                        bank.capture(Preset.capturing(url: drag.url,
+                                                                      snapshot: drag.snapshot
+                                                                        ?? ParamSnapshot(params: [:])),
+                                                     into: index)
+                                        return true
+                                    } isTargeted: { hovering in
+                                        guard hovering else {
+                                            if targetedSlot == index { targetedSlot = nil }
+                                            return
+                                        }
+                                        // Filtered, not the raw flag — see `targetedSlot`'s doc
+                                        // comment: highlighting a target that would reject the
+                                        // drop is worse than no highlight at all on a strip of
+                                        // eight visually identical cells.
+                                        let filled = bank.slots[index] != nil
+                                        let option = NSEvent.modifierFlags.contains(.option)
+                                        targetedSlot = (!filled || option) ? index : nil
+                                    }
                                     // The ONE gate that observes the RENDERED frame rather than the
                                     // computed property feeding it — writes `renderedCellWidth`,
                                     // republished at `body`'s outer level as `RenderedCellWidthKey`
@@ -458,18 +511,15 @@ struct SlotBankStripView: View {
         instrument.load(preset.shaderURL, onto: .deck(recallTarget), thenApply: preset.snapshot)
     }
 
-    /// The ONLY call site of `capture` in this view. Every gesture that reaches it — clicking an
-    /// empty cell, Replace in the context menu, and ⌥-click — is an explicit user act. A plain
-    /// click on a filled cell routes to `recall`, never here: losing a dialled-in look to a
-    /// one-cell mis-click is unrecoverable and would happen exactly once before the bank stopped
-    /// being trusted.
-    ///
-    /// **No-op between task 4 and task 6 (task 4 brief, ambiguity note 2).** Removing SOURCE (this
-    /// task) leaves no deck to capture FROM, and task 6 restores capture via a deck-monitor drag
-    /// rather than reinstating a picker — so there is deliberately no way to capture a look for one
-    /// review cycle; the two tasks land together. `SlotCell` itself is untouched (its empty-cell
-    /// click and Replace menu item still call this), so the gap is silent rather than surfaced by a
-    /// disabled control — accepted, not a stopgap fix.
+    /// **Permanently a no-op as of task 5.** Capture now happens exactly one way: dragging a
+    /// library shader or a deck monitor onto a cell, handled entirely inside the `ForEach`'s own
+    /// `.dropDestination` (it calls `bank.capture` directly — see "Never a second write path into
+    /// `SlotBank.capture`"). `SlotCell`'s empty-cell click still calls `onCapture()`, which still
+    /// reaches this method, because there is no longer anything a click COULD capture from — a
+    /// click, unlike a drag, carries no payload. Left wired rather than removed: ripping out
+    /// `SlotCell`'s click plumbing is a bigger change than this task's copy-accuracy mandate asks
+    /// for, and the cell's help text and context menu (fixed this task) no longer promise the
+    /// click does anything.
     private func capture(into index: Int) {}
 }
 
@@ -537,6 +587,11 @@ private struct SlotCell: View {
     let isAvailable: Bool
     let liveOn: DeckID?
     let thumbnail: Image?
+    /// A compatible AND acceptable drag is hovering this cell right now — see `targetedSlot`'s
+    /// doc comment for why this is already acceptance-filtered before it reaches here.
+    let isTargeted: Bool
+    /// A drop just landed here and was refused — drives the shake below.
+    let isRejected: Bool
     let onRecall: () -> Void
     let onCapture: () -> Void
     let onClear: () -> Void
@@ -608,23 +663,31 @@ private struct SlotCell: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 3)
                     .strokeBorder(state.borderColor ?? .clear, lineWidth: 2))
+            // Highlight ring for a drag hovering this cell that WOULD be accepted (see
+            // `targetedSlot`'s doc comment) — drawn as a second overlay so it never competes with
+            // `state.borderColor` for the same stroke.
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(isTargeted ? Color.accentColor : Color.clear, lineWidth: 2))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Left enabled even when unavailable: deliberately clearing a slot whose file is gone for
+        // good is legitimate. Replace no longer lives here (task 5) — dragging a deck or a
+        // library shader onto the cell, with ⌥ held, is the one way to replace a filled slot now.
         .contextMenu {
             if preset != nil {
-                // Disabled while the file is missing: a plain click is already a dead recall in
-                // that state (`SlotBank.recall` returns nil), and leaving Replace live invites
-                // destroying the entry the model deliberately preserves through a bad mount.
-                Button("Replace with SOURCE deck", action: onCapture)
-                    .disabled(!isAvailable)
-                // Left enabled even when unavailable: deliberately clearing a slot whose file is
-                // gone for good is legitimate.
                 Button("Clear slot", role: .destructive, action: onClear)
             }
         }
         .help(helpText)
         .accessibilityLabel(preset.map { "Slot \(index + 1), \($0.name)" } ?? "Slot \(index + 1), empty")
+        // A brief horizontal shake for a refused drop — "that didn't take", nothing that steals
+        // focus (task 5 brief, Step 7). No dialog, no alert: the operator is mid-set.
+        .offset(x: isRejected ? 5 : 0)
+        .animation(isRejected ? .easeInOut(duration: 0.06).repeatCount(5, autoreverses: true)
+                              : .default,
+                   value: isRejected)
     }
 
     /// Empty → capture (nothing can be lost). Filled + ⌥ → capture (the deliberate overwrite).
@@ -641,8 +704,12 @@ private struct SlotCell: View {
     }
 
     private var helpText: String {
-        guard let preset else { return "Click to capture the SOURCE deck into slot \(index + 1)" }
+        guard let preset else {
+            return "Drag a shader from the library, or a deck monitor, onto slot \(index + 1) "
+                + "to capture it"
+        }
         if !isAvailable { return "\(preset.name) — file not found" }
-        return "\(preset.name) — click to recall, ⌥-click to replace, right-click for more"
+        return "\(preset.name) — click to recall, ⌥-drag a shader or deck here to replace, "
+            + "right-click to clear"
     }
 }

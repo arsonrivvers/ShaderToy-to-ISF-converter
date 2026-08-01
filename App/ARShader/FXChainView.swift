@@ -1,3 +1,4 @@
+import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
 /// One FX chain: an ordered, unbounded stack of stages.
@@ -5,11 +6,29 @@ import SwiftUI
 /// Stage count is shown because it is a FACT the operator can act on. No per-chain milliseconds:
 /// cost inside a single command buffer cannot be honestly attributed to one chain, and a number
 /// the engine did not measure is not worth showing.
+///
+/// A drop target (task 5): a library drag onto this chain APPENDS a stage, through the same
+/// `Instrument.load(_:onto:thenApply:)` seam a library click used to reach. `target` names WHICH
+/// chain this is (`.deckFX(id)` or `.masterFX`) — `FXChainView` itself has no opinion, it is
+/// always exactly what the call site says.
 struct FXChainView: View {
     let title: String
+    let instrument: Instrument
+    /// Always `.deckFX` or `.masterFX` — never `.deck`. `LibraryTarget` is reused rather than a
+    /// narrower type because it is exactly what `Instrument.load` already takes.
+    let target: LibraryTarget
     @ObservedObject var chain: FXChain
     @ObservedObject var stats: RenderStatsModel
     @ObservedObject var library: LibraryModel
+    @State private var isTargeted = false
+
+    private var dragDestination: ShaderDrag.Destination {
+        switch target {
+        case .deck(let id):   return .deck(id)
+        case .deckFX(let id): return .deckFX(id)
+        case .masterFX:       return .masterFX
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -29,6 +48,19 @@ struct FXChainView: View {
                 FXStageRow(chain: chain, stage: stage, index: index, library: library)
             }
         }
+        .padding(4)
+        .background(isTargeted ? Color.accentColor.opacity(0.12) : Color.clear)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(isTargeted ? Color.accentColor : Color.clear, lineWidth: 1.5))
+        .dropDestination(for: ShaderDrag.self) { items, _ in
+            guard let drag = items.first,
+                  ShaderDrag.accepts(drag, on: dragDestination, isSlotFilled: false,
+                                     withOption: NSEvent.modifierFlags.contains(.option))
+            else { return false }
+            instrument.load(drag.url, onto: target, thenApply: drag.snapshot)
+            return true
+        } isTargeted: { isTargeted = $0 }
     }
 
     /// Amber/red track the MEASURED global frame time, never a per-chain estimate. A chain with no

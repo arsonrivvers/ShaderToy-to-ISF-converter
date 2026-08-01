@@ -36,16 +36,14 @@ final class LibrarySelection: ObservableObject {
     }
 }
 
-/// Browse the corpus and load a shader onto a deck.
+/// Browse the corpus and drag a shader onto a deck, an FX chain, or a slot.
 struct LibraryPanelView: View {
     let instrument: Instrument
-    @Binding var target: LibraryTarget
     @StateObject private var selection = LibrarySelection()
     @ObservedObject private var library: LibraryModel
 
-    init(instrument: Instrument, target: Binding<LibraryTarget>) {
+    init(instrument: Instrument) {
         self.instrument = instrument
-        self._target = target
         self.library = instrument.library
     }
 
@@ -63,29 +61,15 @@ struct LibraryPanelView: View {
                 .frame(width: 150)
             }
 
-            // Unlabelled: the segments say A / A FX / B / B FX / MST FX, and "Load onto" ate a
-            // column of a 300pt panel to restate what picking a segment then clicking a shader
-            // obviously does (operator, 2026-07-31). The accessibility label stays.
-            Picker("Load onto", selection: $target) {
-                ForEach(LibraryTarget.allCases) { Text($0.shortLabel).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .accessibilityLabel("Load onto")
-
             List(entries) { entry in
-                Button {
-                    instrument.load(entry.url, onto: target)
-                } label: {
-                    Text(entry.name)
-                        .font(.system(size: 12, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)   // long AR_Genuary names differ at the END
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(entry.name)
+                Text(entry.name)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)   // long AR_Genuary names differ at the END
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .draggable(ShaderDrag(source: .library, url: entry.url, snapshot: nil))
+                    .help("Drag onto a deck, an FX chain, or a slot")
             }
             .listStyle(.inset)
 

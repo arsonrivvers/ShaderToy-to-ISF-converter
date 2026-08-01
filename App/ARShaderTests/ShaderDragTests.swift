@@ -1,0 +1,128 @@
+import XCTest
+@testable import ARShader
+
+@MainActor
+final class ShaderDragTests: XCTestCase {
+    private let url = URL(fileURLWithPath: "/tmp/a.fs")
+    private var fromLibrary: ShaderDrag { .init(source: .library, url: url, snapshot: nil) }
+    private var fromDeck: ShaderDrag {
+        .init(source: .deck(.one), url: url, snapshot: ParamSnapshot(params: [:]))
+    }
+
+    // MARK: The never-overwrite rule, now under a drag
+
+    func testADropOnAnEmptySlotIsAccepted() {
+        XCTAssertTrue(ShaderDrag.accepts(fromLibrary, on: .slot, isSlotFilled: false,
+                                         withOption: false))
+    }
+
+    /// The rule phase 3b was built around, restated for a gesture that is a BIGGER mis-click risk
+    /// than a click: the operator is crossing the surface with a payload attached and a slot is a
+    /// small target beside seven identical ones.
+    func testADropOnAFilledSlotIsRejectedWithoutOption() {
+        XCTAssertFalse(ShaderDrag.accepts(fromLibrary, on: .slot, isSlotFilled: true,
+                                          withOption: false))
+        XCTAssertFalse(ShaderDrag.accepts(fromDeck, on: .slot, isSlotFilled: true,
+                                         withOption: false))
+    }
+
+    /// ⌥ is the ONE "I mean it" gesture on this surface. It already means overwrite for a click;
+    /// it means the same for a drop rather than inventing a second modifier.
+    func testOptionDragReplacesAFilledSlot() {
+        XCTAssertTrue(ShaderDrag.accepts(fromLibrary, on: .slot, isSlotFilled: true,
+                                         withOption: true))
+    }
+
+    // MARK: Which sources may reach which destinations
+
+    func testALibraryShaderMayReachEveryNonSlotDestination() {
+        for destination: ShaderDrag.Destination in [.deck(.one), .deck(.two),
+                                                    .deckFX(.one), .deckFX(.two), .masterFX] {
+            XCTAssertTrue(ShaderDrag.accepts(fromLibrary, on: destination,
+                                             isSlotFilled: false, withOption: false),
+                          "the library must be able to fill \(destination)")
+        }
+    }
+
+    /// A deck is a source for CAPTURE and nothing else. Dropping deck A onto deck B is not a
+    /// copy-shader gesture — it reads like one and would silently discard the dialled values that
+    /// are the entire reason a look is worth capturing.
+    func testADeckMayOnlyBeDroppedOnASlot() {
+        XCTAssertTrue(ShaderDrag.accepts(fromDeck, on: .slot, isSlotFilled: false,
+                                         withOption: false))
+        for destination: ShaderDrag.Destination in [.deck(.two), .deckFX(.one), .masterFX] {
+            XCTAssertFalse(ShaderDrag.accepts(fromDeck, on: destination,
+                                              isSlotFilled: false, withOption: false),
+                           "a deck must not be droppable on \(destination)")
+        }
+    }
+
+    /// Banned this phase. Clicking a slot already loads it onto a deck; a drag would be a second
+    /// way to fire a slot mid-set with no new capability, and twice the ways to do it by accident.
+    func testASlotIsNotADragSource() {
+        let fromSlot = ShaderDrag(source: .slot, url: url, snapshot: nil)
+        for destination: ShaderDrag.Destination in [.slot, .deck(.one), .deckFX(.one), .masterFX] {
+            XCTAssertFalse(ShaderDrag.accepts(fromSlot, on: destination,
+                                              isSlotFilled: false, withOption: false))
+        }
+    }
+
+    /// A capture carries the dialled values; a library drag cannot, because there are none yet.
+    func testOnlyADeckDragCarriesASnapshot() {
+        XCTAssertNil(fromLibrary.snapshot)
+        XCTAssertNotNil(fromDeck.snapshot)
+    }
+
+    // MARK: Task 6 — deck monitor → slot
+
+    /// Dragging a deck monitor to a slot must capture the LOOK — the shader AND the values dialled
+    /// into it. A capture that carried only the URL would recall at header defaults, which is
+    /// exactly the re-dialling-on-stage problem the slot bank exists to remove.
+    func testADeckDragCarriesTheDialledValuesNotJustTheURL() throws {
+        let snapshot = ParamSnapshot(params: ["speed": .float(0.87)])
+        let drag = ShaderDrag(source: .deck(.one), url: url, snapshot: snapshot)
+        let captured = Preset.capturing(url: drag.url,
+                                        snapshot: try XCTUnwrap(drag.snapshot))
+        XCTAssertEqual(captured.snapshot.params["speed"], .float(0.87))
+    }
+
+    /// The view-seam assertion Task 6 Step 5 calls for. `testADeckDragCarriesTheDialledValuesNotJustTheURL`
+    /// tests the payload TYPE, which survives a mutation that hardcodes `snapshot: nil` in
+    /// `MonitorTile.draggableIfCapturable` — that mutation never touches `ShaderDrag` or `Preset` at
+    /// all. This test instead reconstructs exactly what `draggableIfCapturable` builds — a
+    /// `ShaderDrag` from `Instrument.currentPreset(of:)` — so a regression AT THAT CALL SITE (not
+    /// just in the type) turns this red.
+    func testDeckMonitorDragPayloadCarriesTheCurrentPresetsSnapshot() async throws {
+        let instrument = Instrument()
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shaderdrag-view-seam-\(UUID().uuidString).fs")
+        try """
+        /*{ "DESCRIPTION": "test", "ISFVSN": "2", "INPUTS": [
+            { "NAME": "speed", "TYPE": "float", "MIN": 0.0, "MAX": 1.0, "DEFAULT": 0.5 }
+        ] }*/
+        void main() { gl_FragColor = vec4(speed, 0.0, 0.0, 1.0); }
+        """.write(to: url, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+
+        await withCheckedContinuation { continuation in
+            var resumed = false
+            instrument.onLoadSettledForTesting = {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            instrument.load(url, onto: .deck(.one))
+        }
+        instrument.onLoadSettledForTesting = nil
+        instrument.deck(.one).unit.params.set("speed", .float(0.42))
+
+        // Exactly what `MonitorTile.draggableIfCapturable` builds for a loaded deck.
+        let preset = try XCTUnwrap(instrument.currentPreset(of: .one))
+        let payload = ShaderDrag(source: .deck(.one), url: preset.shaderURL,
+                                 snapshot: preset.snapshot)
+
+        XCTAssertNotNil(payload.snapshot, "a deck monitor drag must carry the dialled values")
+        XCTAssertEqual(payload.snapshot?.params["speed"], .float(0.42),
+                       "the carried snapshot must reflect what is dialled NOW, not header defaults")
+    }
+}

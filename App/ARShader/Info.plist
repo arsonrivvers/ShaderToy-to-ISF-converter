@@ -11,5 +11,16 @@
   <key>NSHumanReadableCopyright</key><string>ArsonRivvers</string>
   <key>NSCameraUsageDescription</key>
   <string>ARShader uses the camera as a live source for filter shaders.</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.arshader.shader-drag</string>
+      <key>UTTypeDescription</key><string>ARShader shader drag payload</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

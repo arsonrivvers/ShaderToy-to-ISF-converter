@@ -12,6 +12,7 @@ import SwiftUI
 /// It observes the `ShaderUnit`, not the `Deck`: the deck is a plain container now and publishes
 /// nothing. Observing the deck would reproduce that same frozen-"—" defect with a green suite.
 struct DeckStripView: View {
+    let instrument: Instrument
     let id: DeckID
     @ObservedObject var unit: ShaderUnit
     @ObservedObject var mixer: MixerState
@@ -25,8 +26,9 @@ struct DeckStripView: View {
     /// defect documented at the top of this file, reintroduced one level up.
     @ObservedObject var router: SourceRouter
 
-    init(id: DeckID, unit: ShaderUnit, mixer: MixerState, fx: FXChain, stats: RenderStatsModel,
-         library: LibraryModel, layout: SurfaceLayout) {
+    init(instrument: Instrument, id: DeckID, unit: ShaderUnit, mixer: MixerState, fx: FXChain,
+         stats: RenderStatsModel, library: LibraryModel, layout: SurfaceLayout) {
+        self.instrument = instrument
         self.id = id
         self.unit = unit
         self.mixer = mixer
@@ -123,7 +125,8 @@ struct DeckStripView: View {
             Divider()
             CollapsibleSection(title: "FX", summary: "\(fx.stages.count)",
                                key: .deck(id, .fx), layout: layout) {
-                FXChainView(title: "FX", chain: fx, stats: stats, library: library)
+                FXChainView(title: "FX", instrument: instrument, target: .deckFX(id),
+                           chain: fx, stats: stats, library: library)
             }
 
             Divider()
@@ -146,7 +149,6 @@ struct InstrumentView: View {
     @ObservedObject private var stats: RenderStatsModel
     @ObservedObject private var layout: SurfaceLayout
     @ObservedObject private var masterFX: FXChain
-    @State private var libraryTarget: LibraryTarget = .deck(.one)
     @State private var keys: BlackoutKeyMonitor?
     @State private var renderScaleField = ""
     @State private var cueScaleField = ""
@@ -261,7 +263,7 @@ struct InstrumentView: View {
     @ViewBuilder private var panelContent: some View {
         switch layout.openPanel {
         case .library:
-            LibraryPanelView(instrument: instrument, target: $libraryTarget)
+            LibraryPanelView(instrument: instrument)
         case .settings:
             SettingsPanelView(instrument: instrument)
         case nil:
@@ -298,8 +300,8 @@ struct InstrumentView: View {
     private var deckStrips: some View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
-                DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
-                              fx: instrument.deck(id).fx, stats: stats,
+                DeckStripView(instrument: instrument, id: id, unit: instrument.deck(id).unit,
+                              mixer: mixer, fx: instrument.deck(id).fx, stats: stats,
                               library: instrument.library, layout: layout)
                 Divider()
             }
@@ -318,8 +320,8 @@ struct InstrumentView: View {
             CollapsibleSection(title: "MASTER FX",
                                summary: "\(masterFX.stages.count)",
                                key: .masterFX, layout: layout) {
-                FXChainView(title: "MASTER FX", chain: masterFX,
-                            stats: stats, library: instrument.library)
+                FXChainView(title: "MASTER FX", instrument: instrument, target: .masterFX,
+                            chain: masterFX, stats: stats, library: instrument.library)
             }
         }
         .padding(10)

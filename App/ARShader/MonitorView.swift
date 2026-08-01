@@ -1,3 +1,4 @@
+import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 import MetalKit
 
@@ -174,6 +175,9 @@ struct MonitorTile: View {
     var drivesClock: Bool = false
     @State private var isFrozen = false
     @State private var isOff = false
+    /// Set while a compatible drag hovers a deck tile. Never used for PROGRAM — see
+    /// `dropDestinationIfDeck`.
+    @State private var isDropTargeted = false
     @ObservedObject private var elementStats: ElementStatsModel
     @ObservedObject private var renderStats: RenderStatsModel
 
@@ -205,8 +209,9 @@ struct MonitorTile: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            MonitorViewport(instrument: instrument, source: source,
-                            isFrozen: isFrozen, isOff: isOff, drivesClock: drivesClock)
+            dropDestinationIfDeck(
+                MonitorViewport(instrument: instrument, source: source,
+                                isFrozen: isFrozen, isOff: isOff, drivesClock: drivesClock)
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .background(.black)
                 .overlay(alignment: .topLeading) {
@@ -247,11 +252,37 @@ struct MonitorTile: View {
                                       : Color.white.opacity(0.15),
                                       lineWidth: 1)
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(isDropTargeted ? Color.accentColor : Color.clear,
+                                      lineWidth: 2)
+                )
+            )
             HStack(spacing: 6) {
                 Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button).controlSize(.small)
                 Toggle("Off", isOn: $isOff).toggleStyle(.button).controlSize(.small)
             }
             .font(.system(size: 11))
+        }
+    }
+
+    /// A deck tile accepts a library drag (fills the deck) or a deck drag (never — see
+    /// `ShaderDrag.accepts`'s `.deck` branch, which only ever allows `.slot`). PROGRAM is not
+    /// wrapped at all: `ShaderDrag.Destination` has no case for the master composite, because it
+    /// is not a `Preset` — a blend of two decks and an FX chain has no single shader URL to load.
+    @ViewBuilder
+    private func dropDestinationIfDeck<V: View>(_ view: V) -> some View {
+        if case .deck(let id) = source {
+            view.dropDestination(for: ShaderDrag.self) { items, _ in
+                guard let drag = items.first,
+                      ShaderDrag.accepts(drag, on: .deck(id), isSlotFilled: false,
+                                         withOption: NSEvent.modifierFlags.contains(.option))
+                else { return false }
+                instrument.load(drag.url, onto: .deck(id), thenApply: drag.snapshot)
+                return true
+            } isTargeted: { isDropTargeted = $0 }
+        } else {
+            view
         }
     }
 }
