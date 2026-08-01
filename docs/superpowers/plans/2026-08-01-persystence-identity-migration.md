@@ -102,6 +102,7 @@ If it does not exist, build and stage the current master version with `./scripts
 Run:
 
 ```bash
+rm -f /tmp/persystence-identity-baseline/layout.json
 swift -e 'import Foundation
 let suite = "com.arsonrivvers.ARShader"
 let key = "ARShader.surfaceArrangement"
@@ -112,11 +113,13 @@ guard let data = defaults.data(forKey: key) else {
 }
 try data.write(to: URL(fileURLWithPath: "/tmp/persystence-identity-baseline/layout.json"))
 print(String(data: data, encoding: .utf8) ?? "LEGACY_LAYOUT_NON_UTF8")'
-shasum -a 256 /tmp/persystence-identity-baseline/layout.json
-swift -e 'import Foundation
+if [ -f /tmp/persystence-identity-baseline/layout.json ]; then
+  shasum -a 256 /tmp/persystence-identity-baseline/layout.json
+  swift -e 'import Foundation
 let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/persystence-identity-baseline/layout.json"))
 _ = try JSONSerialization.jsonObject(with: data)
 print("VALID_JSON")'
+fi
 ```
 
 Record whether the real key was present. If present, record its SHA-256 and decoded JSON in the baseline report. If absent, record that fact and state that the controlled XCTest fixture, rather than nonexistent operator data, is the preservation proof.
@@ -248,7 +251,7 @@ Keep `save(_:)` unchanged except that it now writes through `Self.key`.
 
 - [ ] **Step 9: Run the focused tests**
 
-Repeat the Task 1 Step 4 command.
+Repeat the Task 1 Step 6 command.
 
 Expected: PASS for `ProductIdentityTests` and `SurfaceLayoutStoreTests`.
 
