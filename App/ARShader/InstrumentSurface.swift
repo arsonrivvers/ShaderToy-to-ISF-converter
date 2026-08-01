@@ -40,18 +40,38 @@ enum SurfaceMetrics {
 
     /// The deck strips' own minimum. Below this they clip rather than shrink.
     ///
-    /// **620→830, fix-round-1, F3/F4.** The 620pt value predated a real measurement: task 4's
-    /// `testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth` originally measured DECK A / DECK B /
-    /// MASTER at ~619pt with a bare, un-forced `Instrument()` — which turned out to be silently
-    /// reading whatever section-expand state was left in real, persisted `UserDefaults` (F4). Forced
-    /// to a KNOWN state (every `SectionKey` explicitly expanded, not inherited), the SAME empty
-    /// configuration measures **815pt** — an empty FX chain's placeholder text ("Load a shader with
-    /// this chain selected in the library.") and PARAMETERS' own empty state both contribute real
-    /// width that a collapsed section had been hiding. 830 covers that with 15pt of margin. This
-    /// does NOT cover a POPULATED deck strip (a shader with real inputs, an actual FX stage): that
-    /// measured ~993pt in the same fix-round and is a separate, deferred finding — see the test's
-    /// doc comment.
-    static let stripsMinWidth: CGFloat = 830
+    /// **A hand-chosen usability floor, NOT a measured one — and this has been tried and reverted
+    /// once (fix-round-1→2, task 4, F3/F4).** Fix-round-1 raised this 620→830 off
+    /// `testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth`, which measured
+    /// `deckStripsContent.fixedSize(horizontal: true, vertical: false)` at 815pt (empty
+    /// configuration, sections forced open for determinism) or ~993pt populated. **That measurement
+    /// technique is wrong for what this constant claims to be.** `.fixedSize(horizontal:)` asks
+    /// SwiftUI for a view's IDEAL width — for `Text` with no `lineLimit`, that is its full
+    /// single-line, UNWRAPPED width. A MINIMUM width is roughly its widest word. The two differ by
+    /// hundreds of points, and the 815/993 figures were almost entirely three explanatory sentences
+    /// (`FXChainView`'s "Load a shader with this chain selected in the library.", ×3 for deck A FX /
+    /// deck B FX / MASTER FX; `InstrumentView`'s "Applied to the program feed, before blackout.";
+    /// `ShaderControlsView`'s "No shader loaded") measured as if they could never wrap. **Nothing
+    /// clips at 620pt** — every one of those sentences wraps happily in production, and the deck
+    /// strips have no floor-driven clipping at all: `Text` wraps, `Picker`s compress, `Slider`s
+    /// shorten. That graceful degradation is exactly the surface's own doctrine (the slot strip
+    /// scrolls rather than compress for the same reason). Under the "ideal width" criterion,
+    /// `stripsMinWidth` becomes a function of whatever content happens to be loaded — unbounded, and
+    /// therefore not a "minimum" in any sense this constant's own doc line ("below this they clip")
+    /// claims. It also cost real hardware: 1390 (the raised `minWindowWidth` this drove) does not
+    /// fit a 13"/14" MacBook at a common "Larger Text" scaled resolution (1280–1352 logical), and
+    /// leaves only 50pt of spare even on a 13" M1 Air at default scaling — with
+    /// `OutputDestination.floating` putting the projector preview in a second window on the SAME
+    /// screen, that is a real live-VJ regression, not a cosmetic one. Reverted to 620.
+    /// `testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth` was deleted rather than retargeted:
+    /// the deck strips do not actually have a clip-below-this floor to measure (see above), so a
+    /// "no control is clipped or truncated" test on this content would either be vacuous (nothing
+    /// ever clips, by design) or require inventing an arbitrary usability threshold no more
+    /// principled than this hand-picked 620. If a future review wants to re-derive this number,
+    /// start from "at what width does a specific control become genuinely hard to operate" (e.g. a
+    /// `Slider` or `Picker` compressed below a usable hit-target), not from an unwrapped-text ideal
+    /// width — and re-read this comment first.
+    static let stripsMinWidth: CGFloat = 620
 
     /// The mixer strip — BLACKOUT, SHOW MODE, the crossfader and the OUTPUT destination picker.
     /// Fixed width, and never a region anything else may cover.
@@ -67,10 +87,20 @@ enum SurfaceMetrics {
     /// the default 280pt width, plus slack for divider-thickness variation.
     ///
     /// Was 1100 through master, which predates the rail and the handle; raised to 1180 when
-    /// `reservedWidth` was 872 (1180 − (872 + 280) = 28pt slack). Fix-round-1 (task 4, F3/F4) raised
-    /// `stripsMinWidth` 620→830 off a real measurement, moving `reservedWidth` to 1082 — carrying
-    /// the SAME 28pt slack forward: 1082 + 280 + 28 = 1390.
-    static let minWindowWidth: CGFloat = 1390
+    /// `reservedWidth` was 872 (1180 − (872 + 280) = 28pt slack).
+    ///
+    /// **Tried 1390, rejected (fix-round-1→2, task 4, F3/F4).** Fix-round-1 raised `stripsMinWidth`
+    /// 620→830 off a measurement of `deckStripsContent`'s IDEAL (unwrapped) width, which moved
+    /// `reservedWidth` to 1082 and, carrying the same 28pt slack, this constant to 1390. Re-review
+    /// found the underlying measurement wrong — see `stripsMinWidth`'s doc comment for the full
+    /// account — and 1390 alone would have been a real regression even if the arithmetic behind it
+    /// had been sound: it does not fit a 13"/14" MacBook at a common "Larger Text" scaled resolution
+    /// (1280–1352 logical), the app would refuse to open on hardware it runs on today, and even a
+    /// 13" M1 Air at default scaling (1440) would leave too little room for
+    /// `OutputDestination.floating`'s second, same-screen preview window. Reverted to 1180. If
+    /// `stripsMinWidth` (or any other reserved region) is ever raised again for a REAL reason, redo
+    /// this arithmetic from the shipped numbers — do not assume 1180 still holds without checking.
+    static let minWindowWidth: CGFloat = 1180
     static let minWindowHeight: CGFloat = 720
 
     // MARK: Slot strip (task 6R)
@@ -124,7 +154,8 @@ enum SurfaceMetrics {
     /// rows rivaled the monitor strip above them in height — operator screenshot, 2026-08-01).
     ///
     /// **The fix rests on `.frame(width:height:)`'s documented semantics, not on a test that
-    /// reproduces the screenshot.** `SurfaceGeometryTests.testCellSizeIsPinnedRegardlessOfWindowWidth`
+    /// reproduces the screenshot.**
+    /// `SurfaceGeometryTests.testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`
     /// could NOT be made to distinguish the old, buggy modifier chain from this one: mutated back to
     /// `.frame(minWidth:, maxWidth: .infinity)` + `.aspectRatio(.fit)` — the exact code that shipped
     /// the operator's screenshot — the render harness (`SurfaceRenderHarness`, a single
