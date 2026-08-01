@@ -2,7 +2,7 @@
 title: ARShader Milestone 2 phase 3c — still frames, drag and drop, and the preview/program split
 date: 2026-07-31
 revised: 2026-08-01
-status: approved (revision 3 — PM review folded; master-pin corrected against the real frame graph)
+status: approved (revision 4 — OPEN-row rule corrected on device by the operator)
 target_repo: ShaderToy-to-ISF-converter
 depends_on: docs/superpowers/plans/2026-07-31-arshader-slot-bank.md (phase 3b, branch m2-slot-bank)
 review: ~/.claude/c-suite/reports/pm/2026-07-31-arshader-3c-thumbnails-drag-drop-spec-review.md
@@ -176,6 +176,37 @@ Why this and not the two simpler rules, both of which were live readings of revi
 
 Cue scale is untouched in every row: a cued deck is not on the projector, so nothing about opening
 output makes it need full resolution. That is what preserves a saving while the projector is live.
+
+#### Revision 4 correction (2026-08-01) — the operator ran it and rejected the OPEN row
+
+Revision 3 shipped, the operator opened the projector, and `PREVIEW SCALE` went inert — the readout
+snapped to `1920 × 1080` and the control stopped doing anything. His reaction: *"Clearly something
+happens here where that control gets ignored when it should still be operating that way while the
+projector is running at full resolution."*
+
+That is a rejection of the rule, not of the implementation. The three-way question that produced
+revision 3 **omitted the option his original ruling actually described** — *"Preview scale should
+only effect whats on the app preview screens"* — and offered only variations on how much of the
+live chain to pin. The omission is the defect.
+
+**The rule, restated so it holds in both rows:** `PREVIEW SCALE` always governs **what the monitors
+see**. How that is achieved differs by row, because what else needs the pixels differs:
+
+| `OutputDestination` | How preview scale acts | What it saves |
+|---|---|---|
+| `.off` | Decks rasterise small — nothing else needs them | **Shader cost.** 99.4 ms → 5.8 ms at 25%, measured 2026-07-30. Unchanged from revision 3. |
+| `.floating` / `.screen` | Decks and master rasterise **full size** for the projector; a **single downscaled copy** is made and all three monitor tiles read that instead of the full-size texture | **Display bandwidth only.** Three tiles each sampling a 1920×1080 texture into a ~340pt tile at 120 fps become three tiles reading one small copy. Real, modest, and **not** shader cost. |
+
+**The honest limit, stated because the operator must not expect otherwise:** while the projector is
+open, `PREVIEW SCALE` cannot reduce shader cost. The decks have to produce those pixels for the
+audience. Anyone reaching for this control mid-show because the GPU is struggling needs to know that
+the large saving lives with the output **closed**. Softening the projector to recover it was offered
+and refused — the "projector never affected, ever" rule stands.
+
+**The readout must state both numbers while the output is open**, e.g. `1920 × 1080 program ·
+960 × 540 preview`. Revision 3's single number was already caught lying once (PM finding, fixed in
+task 2 by making it conditional); one number cannot describe two rasterisations, and the operator
+reads that line precisely when he is deciding whether the control is worth touching.
 
 #### What this costs to build, named because revision 1 did not
 
