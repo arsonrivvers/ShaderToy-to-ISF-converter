@@ -51,8 +51,11 @@ ISFMSLKit (read only — this slice adds no shader code).
   plan reads it (the sole `FXStage` construction site, and the destination-filter reference in
   Task 12) but never modifies it. (PM spec review, 2026-08-01, finding 2.)
 - **Baseline gate counts:** record the executed counts *before* Task 1 changes anything and treat
-  them as a floor no later task may reduce. Source-counted, `ARShaderTests` currently declares
-  **207** `func test…`; the executed number is the one that matters and Task 1 Step 1 records it.
+  them as a floor no later task may reduce. Source-counted, `ARShaderTests` declares **207**
+  `func test…`. **EXECUTED BASELINE, measured 2026-08-01 on `m2-modulation` @ `bd0b9c1`:
+  `Executed 207 tests, with 0 failures (0 unexpected) in 15.870s` — `** TEST SUCCEEDED **`.**
+  Declared and executed agree, so **207 is the floor**; no later task may report fewer. Task 1
+  Step 8 expects 211.
 - **Blackout has no destination address.** No `ModDestination` case names it, and the applier's
   exhaustive `switch` has no branch that could reach `MixerState.isBlackedOut`. This is the
   mechanism, not a convention — the same structural exclusion phase 3a gave it for show mode.
@@ -353,8 +356,21 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
   test 2>&1 | tail -5
 ```
 
-Expected: the Step 1 baseline plus 4, all passing. `FXChainTests` in particular must still pass —
-it exercises the publish filter this task changed.
+Expected: the Step 1 baseline plus 4 = **211**, all passing.
+
+**Plan correction, made during execution 2026-08-01.** This step originally read "`FXChainTests` in
+particular must still pass — it exercises the publish filter this task changed." That was wrong, and
+the first full run proved it: **211 tests, 1 failure**, at `FXChainTests.swift:67`
+(`testAZeroMixStageWithdrawsItselfToo`), which asserted `renderStages().isEmpty` for a zero-mix
+stage — *precisely* the contract Step 5 deliberately inverts. A test asserting the old behaviour
+cannot survive the change that replaces it; the plan should have said so and scheduled the rewrite.
+
+Resolution: that test was **rewritten, not deleted**, as
+`testAZeroMixStageStaysInTheMirrorButCostsNothingToEncode`. Its intent — never pay for an invisible
+pass — is unchanged and now asserted where the behaviour actually lives, and end-to-end rather than
+by proxy: the dry stage IS published (so modulation can raise it), and running a zero-mix
+`invert_filter` over a red input through `encode` returns red. Test count is unaffected (211), so
+the 207 floor holds.
 
 - [ ] **Step 9: Commit**
 
