@@ -225,6 +225,8 @@ git commit -m "feat(identity): establish the PERSYSTENCE product contract"
 **Files:**
 - Rename: `App/ARShader/` → `App/Persystence/`
 - Rename: `App/ARShaderTests/` → `App/PersystenceTests/`
+- Create: `App/Persystence/Info.plist` (created by the directory rename)
+- Create: `App/Persystence/OutputWindowController.swift` (created by the directory rename)
 - Rename: `App/Persystence/ARShaderApp.swift` → `App/Persystence/PersystenceApp.swift`
 - Rename: `App/Persystence/ARShader-Bridging-Header.h` → `App/Persystence/Persystence-Bridging-Header.h`
 - Rename: `App/Persystence/ARShader.entitlements` → `App/Persystence/Persystence.entitlements`
@@ -354,6 +356,7 @@ git commit -m "refactor(identity): rename the native targets to Persystence"
 - Modify: `App/Persystence/Info.plist`
 - Modify: `App/Persystence/OutputWindowController.swift`
 - Rename: `scripts/run-instrument.sh` → `scripts/run-persystence.sh`
+- Create: `scripts/run-persystence.sh` (created by the file rename)
 - Modify: `scripts/run-persystence.sh`
 - Test: `App/PersystenceTests/ProductIdentityTests.swift`
 
