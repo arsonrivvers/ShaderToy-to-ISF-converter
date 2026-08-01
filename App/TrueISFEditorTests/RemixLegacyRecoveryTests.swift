@@ -49,14 +49,14 @@ final class RemixLegacyRecoveryTests: XCTestCase {
         XCTAssertNil(RemixLegacyRecovery.candidate(childID: "r1-4", transcript: fixture.transcript))
     }
 
-    private func decodedFixture() throws -> LegacySessionFixture {
+    private func decodedFixture() throws -> RemixSession {
         let url = try XCTUnwrap(
             Bundle(for: Self.self).url(
                 forResource: "remix-2026-08-01-empty-result-session-v1",
                 withExtension: "json"
             )
         )
-        return try JSONDecoder().decode(LegacySessionFixture.self, from: Data(contentsOf: url))
+        return try JSONDecoder().decode(RemixSession.self, from: Data(contentsOf: url))
     }
 
     private func shader(_ childID: String) -> String {
@@ -65,15 +65,4 @@ final class RemixLegacyRecoveryTests: XCTestCase {
         void main(){ gl_FragColor=vec4(1.0); }
         """
     }
-}
-
-private struct LegacySessionFixture: Decodable {
-    let schemaVersion: Int
-    let currentBatch: [LegacyChildFixture]
-    let transcript: [String]
-}
-
-private struct LegacyChildFixture: Decodable {
-    let id: String
-    let isfSource: String
 }

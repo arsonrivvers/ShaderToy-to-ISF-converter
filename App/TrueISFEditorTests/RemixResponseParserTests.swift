@@ -85,4 +85,123 @@ final class RemixResponseParserTests: XCTestCase {
 
         XCTAssertEqual(RemixResponseParser.extractCandidate(response), .failure(.incompleteFence))
     }
+
+    func test_extractCandidate_acceptsWhitespaceAndCommentSeparatedAllmanMain() {
+        let source = shader("""
+        void /* separator */
+        main
+        (void)
+        {
+            if (true) {
+                gl_FragColor = vec4(1.0);
+            }
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_acceptsNestedMatchedMainBody() {
+        let source = shader("""
+        void main() {
+            if (true) {
+                if (true) {
+                    gl_FragColor = vec4(1.0);
+                }
+            }
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_rejectsMainImageImpostor() {
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate(shader("void mainImage() {}")),
+            .failure(.incompleteSource)
+        )
+    }
+
+    func test_extractCandidate_rejectsTruncatedMainBody() {
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate(shader("void main() { gl_FragColor = vec4(1.0);")),
+            .failure(.incompleteSource)
+        )
+    }
+
+    func test_extractCandidate_ignoresBracesInCommentsQuotedTextAndPreprocessorLines() {
+        let incompleteBodies = [
+            "void main() { // }",
+            "void main() { /* } */",
+            "void main() { \"}\"",
+            "void main() {\n#define END }"
+        ]
+
+        for body in incompleteBodies {
+            XCTAssertEqual(
+                RemixResponseParser.extractCandidate(shader(body)),
+                .failure(.incompleteSource),
+                "Expected incomplete source for: \(body)"
+            )
+        }
+    }
+
+    func test_extractCandidate_skipsMalformedRawHeaderBeforeLaterValidRawISF() {
+        let valid = shader("void main() { gl_FragColor = vec4(1.0); }")
+        let response = "/*{not json}*/\nvoid main() {}\n\(valid)"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(response), .success(valid))
+    }
+
+    func test_extractCandidate_boundsAnIncompleteRawHeaderBeforeLaterValidRawISF() {
+        let incomplete = "/*{ \"ISFVSN\": \"2.0\" }*/\nnot a shader"
+        let valid = shader("void main() { gl_FragColor = vec4(1.0); }")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate("\(incomplete)\n\(valid)"), .success(valid))
+    }
+
+    func test_extractCandidate_keepsEmbeddedBackticksInShaderComments() {
+        let source = shader("""
+        void main() {
+            // ``` is shader text, not a closing fence
+            gl_FragColor = vec4(1.0);
+        }
+        """)
+        let response = "```glsl\n\(source)\n```"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(response), .success(source))
+    }
+
+    func test_extractCandidate_recognizesIndentedTaggedAndBareFences() {
+        let tagged = shader("void main() { gl_FragColor = vec4(1.0); }")
+        let bare = shader("void main() { gl_FragColor = vec4(0.0); }")
+        let response = "  ```glsl\n\(tagged)\n  ```\n\t```\n\(bare)\n\t```"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(response), .success(tagged))
+    }
+
+    func test_extractCandidate_requiresStandaloneClosingFenceLine() {
+        let response = "```glsl\n\(isf)\n``` trailing text"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(response), .failure(.incompleteFence))
+    }
+
+    func test_extractCandidate_handlesAdjacentFencedBlocksAndCRLF() {
+        let source = shader("void main() { gl_FragColor = vec4(1.0); }")
+        let adjacent = "```text\nnot a shader\n```\n```glsl\n\(source)\n```"
+        let crlf = "  ```glsl\r\n\(source)\r\n  ```\r\n"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(adjacent), .success(source))
+        XCTAssertEqual(RemixResponseParser.extractCandidate(crlf), .success(source))
+    }
+
+    func test_extractCandidate_excludesAnUnterminatedOpeningFenceWithoutNewline() {
+        let response = "```glsl /*{ \"ISFVSN\": \"2.0\" }*/"
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(response), .failure(.incompleteFence))
+    }
+
+    private func shader(_ body: String) -> String {
+        "/*{ \"ISFVSN\": \"2.0\" }*/\n\(body)"
+    }
 }

@@ -1,12 +1,38 @@
 {
   "schemaVersion": 1,
+  "round": 1,
+  "seedCounter": 0,
+  "parentAID": null,
+  "parentBID": null,
+  "parentHistory": [],
+  "mode": "crossover",
+  "steer": "",
+  "batchSize": 5,
   "currentBatch": [
-    {"id": "r1-0", "isfSource": ""},
-    {"id": "r1-1", "isfSource": ""},
-    {"id": "r1-2", "isfSource": ""},
-    {"id": "r1-3", "isfSource": ""},
-    {"id": "r1-4", "isfSource": ""}
+    {"id": "r1-0", "isfSource": "", "parents": [], "mode": "crossover", "steer": "", "directive": "", "round": 1, "status": {"interrupted": {}}, "label": null},
+    {"id": "r1-1", "isfSource": "", "parents": [], "mode": "crossover", "steer": "", "directive": "", "round": 1, "status": {"interrupted": {}}, "label": null},
+    {"id": "r1-2", "isfSource": "", "parents": [], "mode": "crossover", "steer": "", "directive": "", "round": 1, "status": {"interrupted": {}}, "label": null},
+    {"id": "r1-3", "isfSource": "", "parents": [], "mode": "crossover", "steer": "", "directive": "", "round": 1, "status": {"interrupted": {}}, "label": null},
+    {"id": "r1-4", "isfSource": "", "parents": [], "mode": "crossover", "steer": "", "directive": "", "round": 1, "status": {"interrupted": {}}, "label": null}
   ],
+  "batchHistory": [],
+  "lineage": {"nodes": {}, "order": [], "favorites": []},
+  "workspace": {
+    "canvasMode": "grid",
+    "focusedChildID": null,
+    "comparedChildIDs": [],
+    "heroChildID": null,
+    "collapsedZones": [],
+    "zoneWidths": ["breedingBay", 280, "lineage", 300, "activity", 180],
+    "previewsPaused": false,
+    "preFocusCollapsed": null,
+    "preFocusWidths": null
+  },
+  "selectedLineageNodeID": null,
+  "crossoverSettings": {"balance": 0.5, "variation": 0.4, "traitSources": {}, "enabledDirectives": []},
+  "activity": {"idle": {}},
+  "compileDiagnosticsByNodeID": null,
+  "pendingParentRequest": null,
   "transcript": [
     "[r1-0] ```glsl\n/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }\n```",
     "[r1-1] ```glsl\n/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-1\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }\n```",
