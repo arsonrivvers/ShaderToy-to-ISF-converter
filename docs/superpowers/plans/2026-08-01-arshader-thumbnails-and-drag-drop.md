@@ -1519,6 +1519,9 @@ git commit -m "docs(3c): combined live smoke report — 3b's remaining legs fold
 | 34 | Rejected drops are visibly rejected | Drag a deck monitor onto MASTER FX, and onto another deck. Both refuse, visibly. Drag a slot anywhere: nothing drags at all |
 | 35 | Clicking the library does nothing | Click-to-load is gone. A click on a library row must not load anything anywhere — if it does, the removal was incomplete |
 | 36 | Projector is never soft | Open the output on the external display. Set PREVIEW SCALE to 25%. **The projected image stays sharp** while the app's monitor tiles get cheap. Close the output: the saving comes back. This is the phase's behavioural correction and the one leg with a wall as its assertion |
+| 37 | Panel has a ceiling, not just a floor | **Phase 3a fix, merged to master unsigned.** Drag the panel divider hard right, past the window edge: the panel stops at a ceiling clamped against the window rather than starving the deck strips and pushing the mixer off-screen |
+| 38 | Window minimum holds | **Phase 3a fix, unsigned.** Shrink the window as far as macOS allows: the mixer strip still fits and nothing is clipped |
+| 39 | Panel width survives a window shrink | **Phase 3a fix, unsigned.** Set a wide panel, shrink the window so the panel must give way, then widen the window again: the panel returns to the width you set rather than staying pinned at its floor |
 
 ---
 
