@@ -118,20 +118,41 @@ final class ThumbnailServiceTests: XCTestCase {
     /// What IS deterministic, and what this test proves instead: cancelling hover work must never
     /// leave a mark that a LATER, independent bank request trips over. `cancelInteractive()` runs
     /// to completion first (a safe no-op — nothing interactive is in flight), then a fresh
-    /// `.batch` request is made and must succeed. This is real coverage, not a weaker stand-in:
-    /// `.batch`'s isolation from `interactiveTask` is a code-level guarantee (its case body never
-    /// reads `interactiveTask` or anything `cancelInteractive()` touches), so the interesting bug
-    /// class this catches is a `cancelInteractive()` that leaves STICKY state behind (a flag never
-    /// reset, a queue entry poisoned) rather than one that races an in-flight render — see the
-    /// mutation-proof in task-7-report.md for a concrete instance of that bug class going red.
+    /// `.batch` request is made and must succeed.
+    ///
+    /// **Fix round 1, F3 — honest scope, not a weaker stand-in dressed up as a strong one.** Step
+    /// 4's brief named the mutation "make `cancelInteractive()` cancel everything," meaning: route
+    /// `.batch` through the same `interactiveTask`-tracked `Task` `.interactive` uses, so a racing
+    /// `cancelInteractive()` cancels it too. **That literal mutation does NOT fail this test** —
+    /// tried and confirmed: at the moment `cancelInteractive()` runs (line above, sequential, no
+    /// batch work started yet), there is nothing for it to cancel, so the mutated `.batch` branch
+    /// still runs to completion untouched. This is not a gap I missed; it is the SAME finding as
+    /// the dropped `testAnInteractiveRequestSupersedesItsPredecessor` wearing a different hat — the
+    /// operator ruled it unfalsifiable rather than asking for a fix: `.batch`'s case body
+    /// (`ThumbnailService.swift:97-98`) never reads `interactiveTask` or anything else
+    /// `cancelInteractive()` touches (`:141-144`), and actor serialization means an EXTERNAL
+    /// `cancelInteractive()` call cannot preempt a render already dequeued regardless of what it's
+    /// wired to touch — so "cancelling hover drops a queued bank thumbnail" has no reachable
+    /// failure mode as this service is built, by ANY mutation that only changes what gets raced
+    /// against an in-flight render.
+    ///
+    /// **The mutation actually run and reverted for this test (see task-7-report.md) was a
+    /// DIFFERENT, sequential-reachable class:** a sticky flag — `cancelInteractive()` sets a bit
+    /// that never resets, and `render()`'s first guard checks it — so a call already completed
+    /// (line above) poisons every `.batch` request made AFTER it, forever. That mutation DOES fail
+    /// this test, because it doesn't need to win any race: it corrupts persistent actor state that
+    /// a later, fully-sequential call reads. That is the actual, narrower guarantee this test has
+    /// power to enforce: cancelling hover work leaves no lasting mark for a later bank request to
+    /// trip over — not "an in-flight bank render survives a concurrent cancel," which no test here
+    /// (or achievable here) proves.
     func testCancellingInteractiveWorkLeavesBatchWorkAlone() async throws {
         let service = ThumbnailService(cacheDirectory: try temporaryCacheDirectory())
         await service.cancelInteractive()
         let result = await service.thumbnail(for: try fixtureURL("solid_red"), priority: .batch)
         guard case .image = result else {
-            return XCTFail("Cancelling hover work must never block a queued bank thumbnail — that "
-                            + "leaves permanently blank cells only a resize or relaunch would "
-                            + "fill; got \(result)")
+            return XCTFail("A prior cancelInteractive() call must never poison a LATER, "
+                            + "independent .batch request — got \(result) instead of an image for "
+                            + "a fresh, uncached solid_red render.")
         }
     }
 

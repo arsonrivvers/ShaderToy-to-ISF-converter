@@ -98,4 +98,27 @@ final class LibraryPanelTests: XCTestCase {
         model.loadInstrumentLibraries()
         XCTAssertTrue(model.sources.isEmpty)
     }
+
+    /// F4, fix round 1 on task 7: `LibraryPanelView`'s hover dwell delay only does its job — a row
+    /// the pointer merely sweeps past never reaches `ThumbnailService` — if cancelling the dwell
+    /// is OBSERVED, not swallowed. `try? await Task.sleep(...)` would catch the thrown
+    /// `CancellationError` and fall through to `.dwelled` regardless, making the whole guard a
+    /// no-op while still looking correct.
+    ///
+    /// Deterministic by the same proven pattern as
+    /// `ThumbnailServiceTests.testACancelledRequestIsNeverPersistedAsUnavailable`: cancel the
+    /// wrapping task immediately after creation, before it has any chance to run, so
+    /// `Task.sleep`'s own cancellation check reads true before the sleep can elapse. No scheduling
+    /// race — `Task.sleep` checking cancellation promptly is a documented Swift guarantee, unlike
+    /// `ThumbnailService.render`'s cooperative `Task.isCancelled` checks (see
+    /// `ThumbnailServiceTests`' determinism-decision doc comments for why THOSE can't be tested
+    /// this way).
+    func testHoverDwellReturnsCancelledEarlyRatherThanSwallowingCancellation() async throws {
+        let task = Task { await waitOutHoverDwell(.seconds(30)) }
+        task.cancel()
+        let outcome = await task.value
+        XCTAssertEqual(outcome, .cancelledEarly,
+                       "a row the pointer only swept past must never fall through to requesting "
+                       + "a thumbnail")
+    }
 }
