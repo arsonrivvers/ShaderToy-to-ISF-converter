@@ -2,7 +2,7 @@
 title: ARShader Milestone 2 phase 3c — still frames, drag and drop, and the preview/program split
 date: 2026-07-31
 revised: 2026-08-01
-status: approved (revision 4 — OPEN-row rule corrected on device by the operator)
+status: approved (revision 5 — monitor-only downscale withdrawn; monitor rate-limit pulled forward from M3)
 target_repo: ShaderToy-to-ISF-converter
 depends_on: docs/superpowers/plans/2026-07-31-arshader-slot-bank.md (phase 3b, branch m2-slot-bank)
 review: ~/.claude/c-suite/reports/pm/2026-07-31-arshader-3c-thumbnails-drag-drop-spec-review.md
@@ -207,6 +207,39 @@ and refused — the "projector never affected, ever" rule stands.
 960 × 540 preview`. Revision 3's single number was already caught lying once (PM finding, fixed in
 task 2 by making it conditional); one number cannot describe two rasterisations, and the operator
 reads that line precisely when he is deciding whether the control is worth touching.
+
+#### Revision 5 correction (2026-08-01) — the downscale does not pay, and is not being built
+
+Revision 4 asserted that downscaling a monitor-only copy saves "display bandwidth — three tiles each
+sampling a full-size texture into a ~340pt tile at 120 fps become three tiles reading one small
+copy. Real, measurable, modest." **That claim was written from reasoning that had not been checked,
+and it is wrong.**
+
+Count the work. A monitor tile samples its source straight into a ~680px (340pt @2×) tile: roughly
+680 × 383 samples. The downscale path instead runs a full pass that reads all 1920 × 1080 texels to
+write a 960 × 540 copy, *and then* the tile samples that. One consumer, two passes. For the PROGRAM
+tile — a single consumer — it is strictly more work. For the deck tiles it is roughly a wash.
+Sampling into a small tile is already cheap no matter how large the source is.
+
+So: **with the projector open, a RESOLUTION-based preview saving is approximately nil.** Revisions
+1, 2 and 4 all assumed otherwise in different ways.
+
+**What the operator actually asked for is real, and it is frame rate, not resolution.** The three
+monitor tiles are redrawn 120 times a second to show something a human reads identically at 30.
+Operator's ruling, 2026-08-01: pull that one piece of Milestone 3 forward into this phase.
+
+| `OutputDestination` | Deck / master rasterisation | Monitor tiles |
+|---|---|---|
+| `.off` | `previewScale` — **unchanged**, keeps the 99.4 ms → 5.8 ms saving | redraw at the reduced rate |
+| `.floating` / `.screen` | full size, always — the projector rule stands | redraw at the reduced rate |
+
+`PREVIEW SCALE` therefore governs deck rasterisation **only while the output is closed**, and says so
+on its face; the monitor-rate cut is what carries the saving while projecting. The readout must state
+which regime is active rather than implying the control is doing something it is not.
+
+**The remaining honest limit:** while the projector is open, nothing recovers *shader* cost short of
+softening the projector, which was offered and refused. The rate cut reduces how often the monitor
+tiles are composited and presented — not how often the decks must rasterise for the audience.
 
 #### What this costs to build, named because revision 1 did not
 
