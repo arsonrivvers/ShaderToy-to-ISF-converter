@@ -75,57 +75,79 @@ enum SurfaceMetrics {
     /// The strip's own outer `.padding(_:)` (same value on all four sides).
     static let slotStripPadding: CGFloat = 8
 
-    /// The SOURCE (deck A/B) picker's fixed width.
-    static let slotStripSourceWidth: CGFloat = 90
+    /// The RECALL TO (two-way, task 4) picker's fixed width. Reuses phase 3b's SOURCE width: it is
+    /// the same widget — a `DeckID` segmented picker with the same "A"/"B" labels — SOURCE is gone
+    /// (task 4), not shrunk, so there is no separate SOURCE constant to keep in sync with this one.
+    static let slotStripRecallWidth: CGFloat = 90
 
-    /// The RECALL TO (five-way) picker's fixed width.
-    static let slotStripRecallWidth: CGFloat = 220
-
-    /// The gap between SOURCE and RECALL TO, RECALL TO and the divider, and the divider and the
-    /// cells region — three of these.
+    /// The gap between RECALL TO and the divider, and the divider and the cells region — two of
+    /// these since task 4 removed SOURCE (was three, with a SOURCE-to-RECALL-TO gap too).
     static let slotStripGapWidth: CGFloat = 10
-    static let slotStripGapCount: CGFloat = 3
+    static let slotStripGapCount: CGFloat = 2
 
     /// Spacing between adjacent cells inside the (scrollable) cells row.
     static let slotStripCellSpacing: CGFloat = 6
 
     /// Everything in the slot strip that is fixed, BEFORE the cells region: both padding edges,
-    /// both pickers, the three gaps around them, and the one `Divider()` separating RECALL TO
+    /// the RECALL TO picker, the two gaps around it, and the one `Divider()` separating RECALL TO
     /// from the cells. Derived from its own named parts rather than a single magic number, so a
     /// future change to any one part moves this automatically and the fit test below catches a
     /// regression instead of silently drifting stale.
     static var slotStripLeadingChromeWidth: CGFloat {
-        slotStripPadding * 2 + slotStripSourceWidth + slotStripRecallWidth
+        slotStripPadding * 2 + slotStripRecallWidth
             + slotStripGapWidth * slotStripGapCount + dividerWidth
     }
 
-    /// A cell's own floor. 56pt (phase 3b/7R) was sized for a bare index-and-name row; phase 3c
-    /// (task 3) gave the cell a 16:9 thumbnail instead, and a 16:9 image at 56pt wide is 31pt
-    /// tall — unreadable as a still, let alone as a contact-sheet look the operator recognises at
-    /// a glance. 96pt keeps the thumbnail legible (54pt tall at the floor) while the cell's
-    /// `.contentShape(Rectangle())` still never drops below a size where adjacent cells' hit areas
-    /// could overlap — the defect this constant has existed to prevent since 7R.
-    static let minCellWidth: CGFloat = 96
+    /// A cell's fixed HEIGHT — the driving constant (task 4, addition 1, fix-round-2). Width is
+    /// derived from it at the 16:9 ratio the thumbnail enforces, never the other way around: see
+    /// `minCellWidth`.
+    ///
+    /// 54pt reuses the value phase 3c (task 3) already vetted as the legibility floor for a 16:9
+    /// thumbnail (96pt wide × 9/16 = 54pt tall) — that floor was always meant to be the cell's
+    /// actual size, not just a lower bound; fix-round-2 makes production actually reach it, by
+    /// driving sizing from an explicit height instead of a `.frame(minWidth:, maxWidth: .infinity)`
+    /// + `.aspectRatio(.fit)` pair whose WIDTH the ambient container's proposal could stretch (a
+    /// real window did stretch it, to roughly an eighth of the available width per cell, and two
+    /// rows rivaled the monitor strip above them in height — operator screenshot, 2026-08-01).
+    ///
+    /// **The fix rests on `.frame(width:height:)`'s documented semantics, not on a test that
+    /// reproduces the screenshot.** `SurfaceGeometryTests.testCellSizeIsPinnedRegardlessOfWindowWidth`
+    /// could NOT be made to distinguish the old, buggy modifier chain from this one: mutated back to
+    /// `.frame(minWidth:, maxWidth: .infinity)` + `.aspectRatio(.fit)` — the exact code that shipped
+    /// the operator's screenshot — the render harness (`SurfaceRenderHarness`, a single
+    /// `NSHostingView.layoutSubtreeIfNeeded()` pass) still measured cells pinned at the floor, even
+    /// rendering the REAL `SlotBankStripView` inside a real `InstrumentSurface`. So the harness
+    /// cannot reproduce whatever the operator's live, interactively-resized window did — this is a
+    /// known category gap (SwiftUI `ScrollView` content sizing can behave differently across a real
+    /// resize than a single offscreen layout pass), not something this fix-round could close.
+    /// `.frame(width:height:)` is used anyway because its size-reporting behaviour is documented and
+    /// unconditional — it does not depend on what any ancestor proposes, full stop — unlike the old
+    /// `minWidth`/`maxWidth: .infinity` + `.aspectRatio(.fit)` pair, which is proposal-dependent by
+    /// design. That is a stronger basis than an empirical measurement this harness cannot make.
+    /// **Still, this specific fix has not been confirmed on-device against the original screenshot
+    /// and should be treated as STAGED, not CONFIRMED, until an operator sees the strip full-width
+    /// in a live window.**
+    static let slotCellHeight: CGFloat = 54
+
+    /// A cell's fixed WIDTH, derived from `slotCellHeight` at the 16:9 ratio the thumbnail enforces
+    /// — not an independent literal, so the two can never drift out of the ratio the frame below
+    /// advertises. Still named `minCellWidth` (not `slotCellWidth`): the value is the same 96pt
+    /// legibility floor phase 3c established, and every other call site (the eight-cell fit gate,
+    /// the anti-overlap gate) reasons about it as a floor a cell must never render narrower than —
+    /// which remains true now that it is also the cell's exact, always-reached width.
+    static var minCellWidth: CGFloat { slotCellHeight * 16.0 / 9.0 }
 
     // MARK: Slot strip rows (task 7R)
 
-    /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `SlotCell`'s own
-    /// floor height — `minCellWidth` at the 16:9 aspect ratio the thumbnail enforces (96 × 9/16 =
-    /// 54pt) — plus the spacing between rows (`slotStripCellSpacing`, 6pt) = 60.
-    ///
-    /// Computed against the floor deliberately, not as an approximation of it: fix-round-1 (task
-    /// 3, F3) found the floor IS the cell's real width at every window size, not just the narrowest
-    /// one. `.fixedSize(vertical: true)` (which `InstrumentSurface` wraps the whole `slots()`
-    /// region in) makes the row report its own ideal height upward instead of receiving one from
-    /// outside, and combined with the `ScrollView(.horizontal)` cells sit in, `.aspectRatio(16/9,
-    /// .fit)` resolves to `minCellWidth` regardless of window width — cells do not expand at a
-    /// wide window (confirmed:
-    /// `SurfaceGeometryTests.testCellWidthIsPinnedAtItsFloorRegardlessOfWindowWidth`). So there is
-    /// no second, wider case this constant also needs to satisfy. Not asserted by any layout gate
-    /// beyond that — a drag that snaps a few points early or late is a feel issue, not a
-    /// correctness one; the correctness invariant is that `bankRows` never touches `SlotBank`,
-    /// which is tested directly.
-    static let slotStripRowHeight: CGFloat = 60
+    /// Feel constant for the row-resize drag's snap-to-whole-rows arithmetic: `slotCellHeight` plus
+    /// the spacing between rows (`slotStripCellSpacing`, 6pt). Derived, not independently reasoned
+    /// about — task 4's fix-round-2 found the OLD derivation (floor width × 9/16, on the claim that
+    /// `.aspectRatio(.fit)` resolves to the floor "regardless of window width") did not hold in
+    /// production even though it held in the isolated test harness that first "confirmed" it. Now
+    /// that cell height is an explicit constant rather than something inferred from a width-floor
+    /// assumption, this can just add the row spacing to it directly — no second, wider case to
+    /// reason about, because there is no window-width dependency left at all.
+    static var slotStripRowHeight: CGFloat { slotCellHeight + slotStripCellSpacing }
 }
 
 /// The four-region geometry of the instrument window: rail | panel | content | mixer, with the

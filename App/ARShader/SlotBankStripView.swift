@@ -1,18 +1,20 @@
 import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
-/// The slot bank: a SOURCE deck picker, a RECALL TO destination picker, and one row of eight cells
-/// — always visible directly under the monitors, never a panel to open mid-set.
+/// The slot bank: a RECALL TO destination picker, and one row of eight cells — always visible
+/// directly under the monitors, never a panel to open mid-set.
 ///
-/// Moved here from the rail (task 6R) because recall fires at `target`, and a rail panel put that
-/// picker off-screen exactly when the Bank panel itself was open — an operator could fire a slot at
-/// an invisible destination, where one wrong value silently appends unbounded FX stages. An
+/// Moved here from the rail (task 6R) because recall fires at `recallTarget`, and a rail panel put
+/// that picker off-screen exactly when the Bank panel itself was open — an operator could fire a
+/// slot at an invisible destination, where one wrong value silently appends unbounded FX stages. An
 /// always-visible strip keeps the destination always visible too.
 ///
-/// Two pickers, two directions, both on the strip's leading edge. Both bind the SAME `$target` the
-/// Library panel binds, so there is no duplicated state: SOURCE (deck A/B) is where a capture READS
-/// from; RECALL TO is where a recall WRITES to. Leaving RECALL TO on a stale value such as `MST FX`
-/// would make recall additive — every slot click appends a new FX stage instead of swapping a deck.
+/// **SOURCE removed (task 4).** A slot holds a shader, and shaders go on decks — "they will always
+/// be shaders not fx" — so RECALL TO is typed as `DeckID` rather than `LibraryTarget`: there is no
+/// value of this picker that can append an FX stage, which is what made phase 3b's stale-RECALL-TO
+/// hazard reachable in the first place. That constraint also removes the deck a capture would read
+/// FROM, so there is deliberately no way to capture a look between this task and task 6, which
+/// restores capture via a deck-monitor drag rather than reinstating a picker. See `capture(into:)`.
 ///
 /// Rows, collapse, and the resize drag (task 7R). The model (`SlotBank`) always holds forty slots
 /// and has no concept of rows at all — `layout.bankRows` decides how many are DRAWN, never how
@@ -20,10 +22,15 @@ import SwiftUI
 /// rather than a promise. See `SlotBank.slotCount`'s doc comment.
 struct SlotBankStripView: View {
     let instrument: Instrument
-    @Binding var target: LibraryTarget
     @ObservedObject private var bank: SlotBank
     @ObservedObject var layout: SurfaceLayout
-    @State private var source: DeckID = .one
+
+    /// Where a recall WRITES. Two answers, because a slot holds a shader and shaders go on decks —
+    /// "they will always be shaders not fx". Typed as `DeckID` rather than `LibraryTarget` so the
+    /// phase 3b hazard is unreachable: there is no value of this picker that appends an FX stage.
+    @State private var recallTarget: DeckID = .one
+
+    static var recallTargets: [DeckID] { DeckID.allCases }
 
     /// Tracks the row count as it stood when the current drag began, so the drag reads as an
     /// absolute offset from a fixed start rather than accumulating per-frame deltas — the same
@@ -53,9 +60,8 @@ struct SlotBankStripView: View {
     /// mtime), so this in-memory copy is the only surviving one.
     @State private var thumbnails: [URL: Image] = [:]
 
-    init(instrument: Instrument, target: Binding<LibraryTarget>, layout: SurfaceLayout) {
+    init(instrument: Instrument, layout: SurfaceLayout) {
         self.instrument = instrument
-        self._target = target
         self.bank = instrument.slotBank
         self.layout = layout
     }
@@ -159,28 +165,15 @@ struct SlotBankStripView: View {
     private var content: some View {
         HStack(spacing: SurfaceMetrics.slotStripGapWidth) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("SOURCE")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Picker("Capture from", selection: $source) {
-                    ForEach(DeckID.allCases) { Text($0.displayName).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityLabel("Capture from — which deck a capture reads")
-            }
-            .frame(width: SurfaceMetrics.slotStripSourceWidth)
-
-            VStack(alignment: .leading, spacing: 2) {
                 Text("RECALL TO")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
-                Picker("Load onto", selection: $target) {
-                    ForEach(LibraryTarget.allCases) { Text($0.shortLabel).tag($0) }
+                Picker("Load onto", selection: $recallTarget) {
+                    ForEach(Self.recallTargets) { Text($0.displayName).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .accessibilityLabel("Load onto — where a recall writes")
+                .accessibilityLabel("Load onto — which deck a recall writes to")
             }
             .frame(width: SurfaceMetrics.slotStripRecallWidth)
 
@@ -195,6 +188,16 @@ struct SlotBankStripView: View {
             // whole `slots()` slot — confirmed empirically to bound this ScrollView to its
             // content's ideal height rather than the greedy full-window height it reports when
             // unconstrained.
+            //
+            // Cells are pinned with an EXACT `.frame(width:height:)` below (fix-round-2, task 4
+            // addition 1), not `.frame(minWidth:, maxWidth: .infinity)`. The min/max form let each
+            // cell's width follow whatever the ambient HStack/ScrollView proposal happened to be —
+            // in the test harness that resolved to the floor, as documented, but a real window
+            // proposed each cell roughly an eighth of the available width, and two rows of
+            // stretched cells rivaled the monitor strip above them in height (operator, with
+            // screenshot, 2026-08-01). An exact `.frame(width:height:)` reports that size to its
+            // parent regardless of what is proposed, so the cell can no longer inherit stray width
+            // from whatever container it sits inside — see `SurfaceMetrics.slotCellHeight`.
             ScrollView(.horizontal, showsIndicators: true) {
                 // One VStack of rows inside a SINGLE horizontal ScrollView, not one ScrollView per
                 // row — separate scroll views could drift out of sync and a wide bank would show
@@ -216,8 +219,8 @@ struct SlotBankStripView: View {
                                          onRecall: { recall(index) },
                                          onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
-                                    .frame(minWidth: SurfaceMetrics.minCellWidth,
-                                           maxWidth: .infinity)
+                                    .frame(width: SurfaceMetrics.minCellWidth,
+                                           height: SurfaceMetrics.slotCellHeight)
                             }
                         }
                     }
@@ -276,7 +279,7 @@ struct SlotBankStripView: View {
 
     private func recall(_ index: Int) {
         guard let preset = bank.recall(index) else { return }
-        instrument.load(preset.shaderURL, onto: target, thenApply: preset.snapshot)
+        instrument.load(preset.shaderURL, onto: .deck(recallTarget), thenApply: preset.snapshot)
     }
 
     /// The ONLY call site of `capture` in this view. Every gesture that reaches it — clicking an
@@ -284,10 +287,14 @@ struct SlotBankStripView: View {
     /// click on a filled cell routes to `recall`, never here: losing a dialled-in look to a
     /// one-cell mis-click is unrecoverable and would happen exactly once before the bank stopped
     /// being trusted.
-    private func capture(into index: Int) {
-        guard let preset = instrument.currentPreset(of: source) else { return }
-        bank.capture(preset, into: index)
-    }
+    ///
+    /// **No-op between task 4 and task 6 (task 4 brief, ambiguity note 2).** Removing SOURCE (this
+    /// task) leaves no deck to capture FROM, and task 6 restores capture via a deck-monitor drag
+    /// rather than reinstating a picker — so there is deliberately no way to capture a look for one
+    /// review cycle; the two tasks land together. `SlotCell` itself is untouched (its empty-cell
+    /// click and Replace menu item still call this), so the gap is silent rather than surfaced by a
+    /// disabled control — accepted, not a stopgap fix.
+    private func capture(into index: Int) {}
 }
 
 /// How one cell reads. Derived rather than stored, so it cannot drift from the bank.

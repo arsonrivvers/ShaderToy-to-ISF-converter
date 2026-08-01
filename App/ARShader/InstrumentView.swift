@@ -173,7 +173,7 @@ struct InstrumentView: View {
         } monitors: {
             monitors
         } slots: {
-            SlotBankStripView(instrument: instrument, target: $libraryTarget, layout: layout)
+            SlotBankStripView(instrument: instrument, layout: layout)
         } strips: {
             deckStrips
         } mixer: {
@@ -296,6 +296,17 @@ struct InstrumentView: View {
     /// content changed height (operator, 2026-07-31). Top-aligned, a collapsed column simply gets
     /// shorter and everything above it stays put.
     private var deckStrips: some View {
+        deckStripsContent
+            .frame(minWidth: SurfaceMetrics.stripsMinWidth)
+    }
+
+    /// DECK A / DECK B / MASTER, without the enforced `stripsMinWidth` floor — the testable surface
+    /// for what that floor must be at least as large as. Split out for the same reason
+    /// `InstrumentView.liveResolution` is: SwiftUI gives no way to read back a Picker's or a
+    /// Slider's true minimum size, so a render-harness test needs the un-floored content itself,
+    /// not the already-clamped view, to measure what the three columns actually need
+    /// (`SurfaceGeometryTests.testTheDeckStripsFloorCoversTheirMeasuredNaturalWidth`).
+    var deckStripsContent: some View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(MixerState.layerOrder) { id in
                 DeckStripView(id: id, unit: instrument.deck(id).unit, mixer: mixer,
@@ -305,7 +316,6 @@ struct InstrumentView: View {
             }
             masterStrip
         }
-        .frame(minWidth: SurfaceMetrics.stripsMinWidth)
     }
 
     /// The master FX chain reads exactly like a deck chain — one mental model for both.
