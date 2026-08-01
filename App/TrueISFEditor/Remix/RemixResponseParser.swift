@@ -63,16 +63,25 @@ enum RemixResponseParser {
         }
 
         var errors: [RemixResponseError] = []
-        for (index, header) in headers.enumerated() {
-            guard header.isClosed else {
-                errors.append(.invalidHeader(malformedHeaderMessage))
+        let validHeaders = headers.compactMap(\.headerRange)
+        let firstValidHeader = validHeaders.first
+        var validHeaderIndex = 0
+        for header in headers {
+            guard let headerRange = header.headerRange else {
+                // A malformed marker after a valid header is part of that candidate's shader body,
+                // not evidence of a second response. This avoids misclassifying legal comments such
+                // as `/* { debug note } */` while retaining malformed-first diagnostics.
+                if firstValidHeader.map({ header.location < $0.lowerBound }) ?? true {
+                    errors.append(.invalidHeader(malformedHeaderMessage))
+                }
                 continue
             }
 
-            let end = index + 1 < headers.count
-                ? headers[index + 1].range.lowerBound
+            let end = validHeaderIndex + 1 < validHeaders.count
+                ? validHeaders[validHeaderIndex + 1].lowerBound
                 : text.endIndex
-            let source = String(text[header.range.lowerBound..<end])
+            validHeaderIndex += 1
+            let source = String(text[headerRange.lowerBound..<end])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             do {
@@ -170,8 +179,8 @@ enum RemixResponseParser {
     }
 
     private struct HeaderCandidate {
-        let range: Range<String.Index>
-        let isClosed: Bool
+        let location: String.Index
+        let headerRange: Range<String.Index>?
     }
 
     private struct FenceRegions {
@@ -229,19 +238,36 @@ enum RemixResponseParser {
 
         while let opening = text.range(of: "/*", range: cursor..<text.endIndex) {
             let bodyStart = opening.upperBound
-            guard let closing = text.range(of: "*/", range: bodyStart..<text.endIndex) else {
+            let nextOpening = text.range(of: "/*", range: bodyStart..<text.endIndex)
+            let closing = text.range(of: "*/", range: bodyStart..<text.endIndex)
+
+            if let nextOpening,
+               closing == nil || nextOpening.lowerBound < closing!.lowerBound {
+                if text[bodyStart..<nextOpening.lowerBound]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .hasPrefix("{") {
+                    candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: nil))
+                }
+                cursor = nextOpening.lowerBound
+                continue
+            }
+
+            guard let closing else {
                 if text[bodyStart...]
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .hasPrefix("{") {
-                    candidates.append(HeaderCandidate(range: opening.lowerBound..<text.endIndex, isClosed: false))
+                    candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: nil))
                 }
                 break
             }
 
+            let range = opening.lowerBound..<closing.upperBound
+            let comment = String(text[range])
             if text[bodyStart..<closing.lowerBound]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .hasPrefix("{") {
-                candidates.append(HeaderCandidate(range: opening.lowerBound..<closing.upperBound, isClosed: true))
+                let validRange = (try? ISFHeader.parse(comment)) == nil ? nil : range
+                candidates.append(HeaderCandidate(location: opening.lowerBound, headerRange: validRange))
             }
             cursor = closing.upperBound
         }
@@ -303,8 +329,7 @@ enum RemixResponseParser {
                 continue
             }
             if character == "#" {
-                cursor = text.range(of: "\n", range: cursor..<text.endIndex)
-                    .map { text.index(after: $0.lowerBound) } ?? text.endIndex
+                cursor = afterPreprocessorDirective(in: text, startingAt: cursor)
                 continue
             }
             if isIdentifierStart(character) {
@@ -322,6 +347,19 @@ enum RemixResponseParser {
             cursor = next
         }
         return tokens
+    }
+
+    private static func afterPreprocessorDirective(in text: Substring, startingAt start: String.Index) -> String.Index {
+        var lineStart = start
+
+        while true {
+            let lineEnd = text.range(of: "\n", range: lineStart..<text.endIndex)?.lowerBound ?? text.endIndex
+            let lastNonWhitespace = text[lineStart..<lineEnd].last { !$0.isWhitespace }
+            guard lastNonWhitespace == "\\", lineEnd < text.endIndex else {
+                return lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+            }
+            lineStart = text.index(after: lineEnd)
+        }
     }
 
     private static func isIdentifierStart(_ character: Character) -> Bool {
