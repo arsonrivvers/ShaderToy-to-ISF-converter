@@ -1500,6 +1500,10 @@ git commit -m "docs(3c): combined live smoke report — 3b's remaining legs fold
 
 **Phase 3c legs (16 new)**
 
+> Later tasks append their own legs to this list. As of 2026-08-01 that is **leg 45 only** (Task 4C,
+> the clamp). **Legs 40–44 are STRUCK** — they belonged to Task 4B, which was skipped; see its
+> section. Do not carry them into the combined report.
+
 | # | Leg | Hypothesis |
 |---|---|---|
 | 20 | Slots show pictures | Every filled slot draws a still frame of its shader, not a name-only cell. A slot captured this session gets one within a second or two, not on next launch |
@@ -1608,7 +1612,27 @@ them there is no way to capture a look at all.
 
 ---
 
-### Task 4B: Monitor tiles redraw at a reduced rate
+### Task 4B: Monitor tiles redraw at a reduced rate — ❌ SKIPPED, DO NOT IMPLEMENT
+
+> **SKIPPED by operator decision, 2026-08-01 (second session).** Everything below is retained as the
+> record of a task that was specced and then cancelled on two facts found by reading the render path
+> before dispatching an implementer:
+>
+> 1. **Step 3 is wrong.** `OutputWindowController.swift:128` registers the **projector's own view**
+>    in the same `monitors` `NSHashTable` that Step 3 tells you to gate. Gating that loop
+>    rate-limits the audience's image and delays blackout on the wall — the two things this task's
+>    own "What must NOT change" section calls non-negotiable (legs 41, 42).
+> 2. **The reach is two tiles, not three.** `MonitorView.swift:41-49`: the PROGRAM tile
+>    `drivesClock` and is deliberately **never registered** (it calls `renderFrame()` from
+>    `onWillDraw`; registering it would recurse). It must draw every frame. With the projector
+>    excluded as well, the divider reaches exactly DECK A and DECK B.
+>
+> Against `InstrumentRenderer.swift:143` — *"monitors just sample a texture that already exists,
+> which is nearly free"* — the saving is ~1.5 fewer ~340px presents per frame, so **leg 44's REVERT
+> was the likely outcome rather than the edge case.** Legs 40–44 are struck from Task 8.
+>
+> The rate-limit question is not closed, only moved: it is answered with measurements under the
+> existing M3 gate (`arshader-m3-perf-measurement-gate-20260801`), not by argument here.
 
 **Added 2026-08-01**, after the operator ran task 2 on device and rejected its OPEN row. Executes
 after Task 4 and before Task 5. See spec revision 5 for why the revision-4 downscale was withdrawn.
