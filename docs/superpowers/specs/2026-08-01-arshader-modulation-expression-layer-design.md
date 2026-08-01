@@ -139,10 +139,23 @@ Phase 2 made FX chains stackable and reorderable. `deck.a.fx.2.amount` silently 
 different effect the moment the chain is reordered, with no error anywhere — a kick would begin
 driving an unrelated parameter and nothing would report it.
 
-Every FX stage therefore carries an identifier assigned at insertion, stable across reorder,
-persisted with the chain. Bindings address that ID. This is the same defect class as phase 3b's
-`sourceURL` riding the swap and `unload()` failing to clear it, both of which cost fix rounds; the
-cost of designing it out here is one field.
+`FXStage` already carries `let id = UUID()` (`App/ARShader/FXStage.swift:11`), and `FXChain` already
+addresses stages by it in `remove(_:)`. Bindings use that same identifier rather than the array
+index, and reorder becomes a non-event.
+
+**However, that identity is not sufficient on its own.** `id` is generated fresh in the stage's
+initialiser, so it is stable across `move(from:to:)`, `moveUp` and `moveDown` — but *not* across a
+relaunch, because a rebuilt chain constructs new stages with new UUIDs. A binding persisted as
+`deck.a.fx.<uuid>.mix` would resolve on the session it was made in and silently fail to resolve
+ever again.
+
+Persistence therefore requires the stage identifier to be serialised **with the chain** and
+restored into the rebuilt stage, not regenerated. That makes `FXStage.id` a persisted property
+rather than an incidental one, which is a change to phase 2's code and belongs to this slice's
+first task rather than being assumed.
+
+This is the same defect class as phase 3b's `sourceURL` riding the swap and `unload()` failing to
+clear it, both of which cost fix rounds.
 
 ### 4.2 Shader inputs may disappear, and bindings survive it
 
