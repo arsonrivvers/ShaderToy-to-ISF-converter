@@ -44,14 +44,14 @@ struct SlotBankStripView: View {
         self.layout = layout
     }
 
-    /// How many of the bank's forty slots the current row count actually draws.
-    private var visibleSlotCount: Int { layout.bankRows * SlotBank.perRow }
-
-    /// Filled slots at or beyond the visible rows — captured but not currently drawn. Never lost:
-    /// growing `bankRows` back reveals them unchanged, because a resize never touches `SlotBank`.
+    /// Filled slots the strip is not drawing. Never lost: growing the rows back reveals them
+    /// unchanged, because a resize never touches `SlotBank`.
+    ///
+    /// Derived from `drawnBankRows`, not `bankRows`: collapsed draws no rows at all, so a count
+    /// taken from the row SETTING reported a collapsed strip as hiding nothing — every captured
+    /// look off screen with no marker saying it still exists.
     private var hiddenFilledCount: Int {
-        let start = min(visibleSlotCount, bank.slots.count)
-        return bank.slots[start...].lazy.filter { $0 != nil }.count
+        bank.hiddenFilledCount(drawnRows: layout.drawnBankRows)
     }
 
     var body: some View {

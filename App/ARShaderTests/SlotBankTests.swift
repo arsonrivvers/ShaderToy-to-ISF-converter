@@ -130,4 +130,37 @@ final class SlotBankTests: XCTestCase {
         XCTAssertEqual(got.snapshot.params["speed"], .float(0.42),
                        "The last slot in the full grid behaves identically to any other slot")
     }
+
+    func testHiddenFilledCountCountsOnlyFilledSlotsBeyondTheDrawnRows() {
+        let bank = SlotBank()
+        bank.capture(preset(), into: 0)                     // row 1, drawn at one row
+        bank.capture(preset(), into: SlotBank.perRow)       // row 2
+        bank.capture(preset(), into: SlotBank.perRow * 2)   // row 3
+
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: 1), 2)
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: 2), 1)
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: 3), 0)
+    }
+
+    /// The collapse defect, at the model seam. Collapsed draws ZERO rows, so every filled slot is
+    /// hidden — a count derived from the row setting alone reports the collapsed strip as hiding
+    /// nothing, and the operator's looks vanish with no marker saying they still exist.
+    func testDrawingZeroRowsHidesEveryFilledSlot() {
+        let bank = SlotBank()
+        bank.capture(preset(), into: 0)
+        bank.capture(preset(), into: 5)
+
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: 0), 2,
+                       "With nothing drawn, every captured look is hidden")
+    }
+
+    /// Row counts outside the grid must not trap on a slice bound.
+    func testHiddenFilledCountToleratesOutOfRangeRowCounts() {
+        let bank = SlotBank()
+        bank.capture(preset(), into: 0)
+
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: SlotBank.maxRows + 4), 0)
+        XCTAssertEqual(bank.hiddenFilledCount(drawnRows: -1), 1,
+                       "A negative row count draws nothing, so nothing is visible")
+    }
 }

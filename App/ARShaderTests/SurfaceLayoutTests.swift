@@ -341,4 +341,20 @@ final class SurfaceLayoutTests: XCTestCase {
         XCTAssertEqual(decoded.bankRows, 1, "A blob with no bankRows key takes the default")
         XCTAssertFalse(decoded.isBankCollapsed, "A blob with no isBankCollapsed key takes the default")
     }
+
+    /// `bankRows` is the row count the operator SET; `drawnBankRows` is what is actually on screen.
+    /// Collapsing draws nothing, and anything deriving from the setting alone — the hidden-look
+    /// marker above all — reads a collapsed strip as showing rows it is not showing.
+    func testCollapsingTheBankDrawsZeroRowsWhateverTheRowCountIs() {
+        let layout = SurfaceLayout()
+        layout.setBankRows(3)
+        XCTAssertEqual(layout.drawnBankRows, 3, "Expanded, the drawn rows are the rows set")
+
+        layout.toggleBankCollapsed()
+        XCTAssertEqual(layout.bankRows, 3, "Collapsing must not forget the row count")
+        XCTAssertEqual(layout.drawnBankRows, 0, "Collapsed draws no rows at all")
+
+        layout.toggleBankCollapsed()
+        XCTAssertEqual(layout.drawnBankRows, 3, "Expanding again draws the remembered rows")
+    }
 }

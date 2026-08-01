@@ -269,6 +269,12 @@ final class SurfaceLayout: ObservableObject {
         bankRows = Self.clampedBankRows(rows)
     }
 
+    /// Rows actually ON SCREEN, as opposed to `bankRows`, which is the count the operator set and
+    /// which collapse deliberately preserves. Anything asking "what is the operator currently
+    /// seeing?" must ask this: reading `bankRows` alone reports a collapsed strip as drawing rows
+    /// it is not drawing, which is exactly how the hidden-look marker went silent on collapse.
+    var drawnBankRows: Int { isBankCollapsed ? 0 : bankRows }
+
     /// Manual collapse. `isBankCollapsed` has no `SectionKey`, so `toggleShowMode()` — which
     /// iterates `SectionKey.all` — cannot reach it. The operator can still collapse the strip by
     /// hand; show mode just will never do it for them.

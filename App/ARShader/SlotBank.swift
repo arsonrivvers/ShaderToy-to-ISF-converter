@@ -57,6 +57,18 @@ final class SlotBank: ObservableObject {
         onChange?()
     }
 
+    /// Filled slots the strip is not currently drawing. Never lost: drawing more rows reveals them
+    /// unchanged, because nothing about rows reaches this model.
+    ///
+    /// Takes rows DRAWN, not rows set, so a collapsed strip (zero drawn) reports every captured
+    /// look as hidden. Callers pass `SurfaceLayout.drawnBankRows`; passing `bankRows` is the bug
+    /// this parameter name exists to make obvious.
+    func hiddenFilledCount(drawnRows: Int) -> Int {
+        let visible = max(drawnRows, 0) * Self.perRow
+        let start = min(visible, slots.count)
+        return slots[start...].lazy.filter { $0 != nil }.count
+    }
+
     /// False for an empty slot and for one whose shader file is no longer on disk. The slot is
     /// deliberately NOT cleared in the second case: an unmounted drive comes back, and destroying
     /// the operator's bank over a bad mount is worse than a dark cell.
