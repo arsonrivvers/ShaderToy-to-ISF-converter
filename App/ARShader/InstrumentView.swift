@@ -379,31 +379,49 @@ struct InstrumentView: View {
         .padding(10)
     }
 
+    /// The size a live deck / the master composite is ACTUALLY rasterising at right now — what the
+    /// PREVIEW SCALE readout must show. Mirrors `InstrumentRenderer.liveResolutionLocked()`: while
+    /// the program feed is live this ignores `previewScale` entirely, exactly like the renderer
+    /// does, so the readout can never claim a size the chain isn't producing.
+    ///
+    /// `internal`, not `private`: SwiftUI gives no way to read back rendered text in a test, so this
+    /// pure function — not the view body — is the testable surface for what the two scale readouts
+    /// display. See `InstrumentViewLiveResolutionTests`.
+    static func liveResolution(programLive: Bool, previewScale: RenderScale,
+                               outputResolution: RenderSize) -> RenderSize {
+        programLive ? outputResolution : previewScale.applied(to: outputResolution)
+    }
+
     /// The two scales stay on the strip: these are what gets reached for when the GPU is
     /// struggling mid-set. Output size and destination moved to the settings panel.
     private var scalePickers: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // `output.destination != .off` mirrors exactly what `OutputWindowController.setDestination`
+        // pushes into `InstrumentRenderer.isProgramLive` — no new plumbing, `output` is already an
+        // `@ObservedObject` so both readouts stay reactive.
+        let live = Self.liveResolution(programLive: output.destination != .off,
+                                       previewScale: instrument.renderer.previewScale,
+                                       outputResolution: instrument.renderer.outputResolution)
+        return VStack(alignment: .leading, spacing: 4) {
             scaleField(title: "PREVIEW SCALE",
                        text: $renderScaleField,
                        current: instrument.renderer.previewScale,
-                       resolved: instrument.renderer.previewScale
-                           .applied(to: instrument.renderer.outputResolution),
+                       resolved: live,
                        caption: "rasterising",
                        help: "What live decks AND the program composite actually rasterise at. "
                            + "With output closed these panes are the only thing looking, and they "
                            + "are tiny — so dropping this is free GPU at no visible cost. The "
                            + "projector is never affected: opening it pins this chain to full "
-                           + "size regardless of what this reads.",
+                           + "size, and the size shown below updates to reflect that.",
                        apply: { instrument.renderer.previewScale = $0 })
 
             scaleField(title: "CUE SCALE",
                        text: $cueScaleField,
                        current: instrument.renderer.cueRenderScale,
                        // Composed, not applied to the output: cue is a fraction of the LIVE
-                       // render, so the readout has to show the product of the two scales.
-                       resolved: instrument.renderer.cueRenderScale
-                           .applied(to: instrument.renderer.previewScale
-                               .applied(to: instrument.renderer.outputResolution)),
+                       // render, so the readout has to show the product of the two scales — and
+                       // the LIVE render is `live` above, which already accounts for whether the
+                       // program feed is open.
+                       resolved: instrument.renderer.cueRenderScale.applied(to: live),
                        caption: "cued decks",
                        help: "What a deck rasterises at while it is NOT on program — a loaded deck "
                            + "you have faded out. This reallocates nothing and never touches the "

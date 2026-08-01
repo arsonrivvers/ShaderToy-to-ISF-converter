@@ -66,26 +66,15 @@ enum OutputPlacement {
     }
 }
 
-/// Whether what reaches the projector is being upscaled.
-///
-/// Until phase 3c the render scale was MANUAL by the operator's choice (2026-07-30) and never
-/// changed behind your back when output opened — so you could walk on stage still rasterising at
-/// a rehearsal value, and the surface had to say so out loud. Phase 3c replaced that with a hard
-/// rule instead of a warning: `InstrumentRenderer.isProgramLive` pins the live chain to full size
-/// the instant output opens, so the hazard this type existed to flag can no longer occur.
-enum OutputSharpness {
-    /// Once TRUE when the program output was live and the chain rasterised below the typed output
-    /// resolution. Phase 3c made that unreachable: `InstrumentRenderer.isProgramLive` lifts
-    /// PREVIEW SCALE off the whole live chain the moment output opens, so an open projector is
-    /// always rasterising at full size.
-    ///
-    /// Kept, and kept false, deliberately. It is the assertion that the hazard is gone; a change
-    /// that lets a preview control reach the projector again turns this true and fails
-    /// `testProjectingAnUpscaleIsUnreachable`.
-    static func isProjectingUpscaled(destination: OutputDestination, scale: RenderScale) -> Bool {
-        false
-    }
-}
+// `OutputSharpness` (the "is the projector upscaled" warning check) lived here until phase 3c
+// round-1 review. It flagged a hazard `InstrumentRenderer.isProgramLive` now makes structurally
+// impossible, but its own implementation returned a hardcoded `false` with no coupling to the
+// renderer — so its doc comment's claim that a regression would "turn this true and fail
+// testProjectingAnUpscaleIsUnreachable" was itself false: gutting the real pin in `renderFrame()`
+// left it green. The actual regression guards are `FrameGraphTests`'
+// `testWithOutputLiveALiveDeckIgnoresPreviewScale` and
+// `testWithOutputLiveTheMasterIsFullSizeAtAnyPreviewScale`. Deleted rather than kept as dead code
+// that lies about what it protects.
 
 enum OutputMenu {
     static func options(for screens: [ScreenInfo]) -> [OutputDestination] {

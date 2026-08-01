@@ -301,12 +301,24 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
     }
 
+    /// Requires `lock` held. The whole preview/program split, in one place: with the projector open
+    /// the live chain ignores PREVIEW SCALE entirely; with it closed, PREVIEW SCALE governs exactly
+    /// as it always has.
+    ///
+    /// Both `renderFrame()` (deck rasterisation, cue size, master FX) and
+    /// `reallocateMastersLocked()` (the master pair's own allocation) call this SAME function —
+    /// there is no second copy of the rule to drift out of sync. Before this was extracted, the two
+    /// call sites held independent literal copies of the conditional; a mutation to only one of them
+    /// left the other's tests green, which is exactly the failure mode this extraction closes.
+    private func liveResolutionLocked() -> RenderSize {
+        programLive ? masterResolution : renderScale.applied(to: masterResolution)
+    }
+
     /// Requires `lock` held. Only swaps if BOTH allocated: a half-resized pair would composite
     /// across mismatched targets, and the failure would look like a corrupted image rather than
     /// an error.
     private func reallocateMastersLocked() {
-        let live = programLive ? masterResolution : renderScale.applied(to: masterResolution)
-        let fresh = Self.makeMasterPair(device: device, resolution: live)
+        let fresh = Self.makeMasterPair(device: device, resolution: liveResolutionLocked())
         if fresh.count == 2 {
             masters = fresh
             masterIndex = 0
@@ -387,12 +399,11 @@ final class InstrumentRenderer: @unchecked Sendable {
         }
         let metering = meteringEnabled
         let deckList = decks
-        let outRes = masterResolution
-        // The whole preview/program split, in one expression. With the projector open the live
-        // chain ignores PREVIEW SCALE entirely; with it closed, PREVIEW SCALE governs exactly as
-        // it always has. Deck rasterisation, cue size, master FX and the master pair's own
-        // allocation all derive from this, so there is no second rule that can drift out of sync.
-        let liveRes = programLive ? outRes : renderScale.applied(to: outRes)
+        // Deck rasterisation, cue size and master FX all derive from this. The master pair's own
+        // allocation (`reallocateMastersLocked`) calls the SAME function — see
+        // `liveResolutionLocked` — so there is no second copy of the rule that can drift out of
+        // sync.
+        let liveRes = liveResolutionLocked()
         // Cue is a fraction of the LIVE render, not of the output. Applied to the output it could
         // exceed the live size — preview 25% with cue 50% rasterised a faded-out deck at 960px
         // against the live deck's 480, so the deck nobody can see cost four times the pixels of
