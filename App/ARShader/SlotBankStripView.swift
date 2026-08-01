@@ -1,10 +1,17 @@
 import AppKit      // NSEvent.modifierFlags — SwiftUI alone does not guarantee it
 import SwiftUI
 
-/// Carries the SAME clamped cell width every `SlotCell` in the strip is actually drawn at
-/// (`SlotBankStripView.cellWidth`) up through the view tree. Task 4C makes cell width a range
-/// (`SurfaceMetrics.minCellWidth`...`maxCellWidth`) rather than one fixed value, so a test — or
-/// any future reader — needs a way to observe what got drawn instead of assuming a constant.
+/// Carries `SlotBankStripView.cellWidth` — the COMPUTED clamp result — up through the view tree.
+/// Task 4C makes cell width a range (`SurfaceMetrics.minCellWidth`...`maxCellWidth`) rather than
+/// one fixed value, so a test — or any future reader — needs a way to observe what the clamp
+/// arithmetic produced.
+///
+/// **This is the injection point, not the render.** It reports `cellWidth` itself, not what
+/// `SlotCell`'s `.frame(width:height:)` call site actually applies that value to (see
+/// `RenderedCellWidthKey`, immediately below, for that). A mutation that severs the frame from
+/// `cellWidth` — e.g. hardcoding `.frame(width: 96, height: 54)` while leaving `cellWidth` intact —
+/// changes nothing this key reports; `RenderedCellWidthKey` is what catches exactly that mutation
+/// (task 4's shipped defect: an exact frame pinned regardless of the computed clamp).
 ///
 /// Not `private`: `SurfaceGeometryTests` taps this preference externally, wrapping the real
 /// `SlotBankStripView` inside a real `InstrumentSurface` at real window widths, WITHOUT reaching
@@ -12,6 +19,23 @@ import SwiftUI
 /// reported from inside a view keeps bubbling up through every ancestor's `.onPreferenceChange`,
 /// including the test's own, which is what makes external observation possible at all.
 struct DrawnCellWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Carries the ACTUAL rendered width of one `SlotCell` (row 0, column 0 — every cell in a row shares
+/// the same `cellWidth`, so one is enough) — the real geometry SwiftUI laid it out at, not a
+/// computed property that feeds it. Reported at `SlotBankStripView.body`'s OUTER level, republishing
+/// `renderedCellWidth`, a `@State` var written from `.onAppear`/`.onChange` on the cell's own
+/// `.background(GeometryReader)`. NOT a `.preference` bubbling directly from the cell — see
+/// `renderedCellWidth`'s doc comment for why that reported 0 at every window width when tried.
+///
+/// This is what `DrawnCellWidthKey` is NOT: a mutation that disconnects the `.frame` call from
+/// `cellWidth` (restoring an unconditional `.frame(width: 96, height: 54)`, for instance) leaves
+/// `DrawnCellWidthKey` correctly reporting whatever `cellWidth` still computes, while THIS key
+/// reports the frozen 96 that actually got drawn — the two keys disagreeing is itself the signal
+/// that the render has come loose from the computation.
+struct RenderedCellWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
@@ -27,16 +51,18 @@ struct DrawnRowHeightKey: PreferenceKey {
 }
 
 /// The content column's width, handed DOWN from `InstrumentSurface` via `@Environment` rather than
-/// measured by `SlotBankStripView` itself. This replaced a `PreferenceKey`-based self-measurement
-/// (a `.background(GeometryReader)` reporting upward from inside this view) that turned out to be
-/// unreliable in exactly this tree shape: even attached to `body`'s own outer `VStack` — nowhere
-/// near the cells `ScrollView` — the reported value never left 0 in extensive testing (including a
-/// direct print inside the `GeometryReader` closure and inside the `.onPreferenceChange` callback,
-/// both of which fired, but with a size that measured zero). Whatever the specific cause, self-
-/// measurement from inside a view whose sibling-in-spirit content lives behind a `ScrollView`
-/// proved fragile enough not to trust. `@Environment` is the opposite direction (parent hands a
-/// value DOWN) and needs no `GeometryReader`/`PreferenceKey` round trip at all —
-/// `InstrumentSurface` already knows this width because it is the one proposing it.
+/// measured by `SlotBankStripView` itself. `SlotBankStripView` tried self-measuring first — a
+/// `PreferenceKey`-based `.background(GeometryReader)` reporting upward, tried at `body`'s own outer
+/// `VStack` and at `content`'s inner `HStack` — and both reported 0 at every window width tested.
+/// **Corrected, fix round 1 (F2): this is NOT because any `ScrollView` in the tree breaks any
+/// `PreferenceKey`** — `DrawnCellWidthKey`/`DrawnRowHeightKey`, reported from this SAME `body` level,
+/// resolve correctly, and a retry with a much longer settle loop (up to 60 passes, not the original
+/// 2) did not fix this specific measurement either. See `InstrumentSurface.body`'s own doc comment
+/// (at the identical `.onAppear`/`.onChange` measurement, one level up) for the full, re-verified
+/// account of what actually distinguishes the working cases from this one. `@Environment` is the
+/// opposite direction (parent hands a value DOWN) and needs no `GeometryReader`/`PreferenceKey`
+/// round trip at all — `InstrumentSurface` already knows this width because it is the one proposing
+/// it, which is reason enough to prefer it here regardless of the `PreferenceKey` question.
 private struct SlotBankContentColumnWidthKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
@@ -77,6 +103,16 @@ struct SlotBankStripView: View {
     /// See `SlotBankContentColumnWidthKey`'s doc comment for why this is handed down rather than
     /// self-measured.
     @Environment(\.slotBankContentColumnWidth) private var contentColumnWidth: CGFloat
+
+    /// The ACTUAL rendered width of a `SlotCell`, written from `.onAppear`/`.onChange` on a cell's
+    /// own `.background(GeometryReader)`, then republished at `body`'s OUTER level via
+    /// `RenderedCellWidthKey` (see that key's doc comment). Same reason as `contentColumnWidth`:
+    /// `.preference` reported from WITHIN the cells `ScrollView`'s own content did not propagate to
+    /// an external listener in this harness (fix round 1, F1 investigation) — confirmed directly,
+    /// not assumed, by trying it first and observing 0 at every window width, including with the
+    /// reduce-order confound (below) already fixed. `.onAppear`/`.onChange` write directly, without
+    /// bubbling through `reduce`, and reported correctly in the same position.
+    @State private var renderedCellWidth: CGFloat = 0
 
     /// Where a recall WRITES. Two answers, because a slot holds a shader and shaders go on decks —
     /// "they will always be shaders not fx". Typed as `DeckID` rather than `LibraryTarget` so the
@@ -157,6 +193,11 @@ struct SlotBankStripView: View {
         // window. See `DrawnCellWidthKey`'s and `DrawnRowHeightKey`'s doc comments.
         .preference(key: DrawnCellWidthKey.self, value: cellWidth)
         .preference(key: DrawnRowHeightKey.self, value: slotStripRowHeight)
+        // Republishes `renderedCellWidth` (written by `.onAppear`/`.onChange` from WITHIN the cells
+        // `ScrollView`) from OUT HERE, at the same outer level `DrawnCellWidthKey`/`DrawnRowHeightKey`
+        // already report from successfully — see `renderedCellWidth`'s doc comment for why the
+        // report has to happen here rather than as a `.preference` bubbling directly from the cell.
+        .preference(key: RenderedCellWidthKey.self, value: renderedCellWidth)
         // Keyed on `bank.slots`, not fired once: fix-round-1 (F2). `bank.slots` is `@Published`
         // and `Preset` is `Equatable`, so SwiftUI restarts this task — cancelling whatever sweep
         // was still in flight — every time a capture or clear changes the array, not just at
@@ -306,6 +347,34 @@ struct SlotBankStripView: View {
                                          onCapture: { capture(into: index) },
                                          onClear: { bank.clear(index) })
                                     .frame(width: cellWidth, height: cellWidth * 9.0 / 16.0)
+                                    // The ONE gate that observes the RENDERED frame rather than the
+                                    // computed property feeding it — writes `renderedCellWidth`,
+                                    // republished at `body`'s outer level as `RenderedCellWidthKey`
+                                    // (see both doc comments).
+                                    //
+                                    // `.onAppear`/`.onChange`, not `.preference`, from THIS cell:
+                                    // tried `.preference` first (reported from row 0/column 0 only,
+                                    // then — after finding `reduce`'s "last-write-wins" let the
+                                    // other seven cells' un-set `defaultValue` silently overwrite the
+                                    // one real report — from every cell). Neither reported anything
+                                    // but 0, at every window width: a `.preference` bubbling from
+                                    // WITHIN this `ScrollView`'s own content does not reach an
+                                    // external listener in this harness, the same limit
+                                    // `contentColumnWidth` hit measuring from OUTSIDE it. `.onAppear`/
+                                    // `.onChange` write directly, without bubbling, and reported
+                                    // correctly. Row 0, column 0 only: every cell in a row shares
+                                    // `cellWidth`, so a second write would just be redundant.
+                                    .background {
+                                        if row == 0 && column == 0 {
+                                            GeometryReader { proxy in
+                                                Color.clear
+                                                    .onAppear { renderedCellWidth = proxy.size.width }
+                                                    .onChange(of: proxy.size.width) { newValue in
+                                                        renderedCellWidth = newValue
+                                                    }
+                                            }
+                                        }
+                                    }
                             }
                         }
                     }

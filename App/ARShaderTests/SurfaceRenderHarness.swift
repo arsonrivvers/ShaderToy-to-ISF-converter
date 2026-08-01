@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import XCTest
 
 /// Frames reported by self-measuring test content, keyed by name.
 ///
@@ -92,9 +93,18 @@ enum SurfaceRenderHarness {
     /// (fed by the cell width computed from THAT) needs a pass after that again. Two fixed
     /// `layoutSubtreeIfNeeded()` calls (`frames(_:size:)`'s technique) measured `DrawnCellWidthKey`
     /// stuck at the floor at every window width, including 2560pt — not a real result, an
-    /// under-settled harness. Looping until the reported value stops changing (capped, so a
-    /// genuinely unstable preference chain fails loudly instead of hanging) is what actually
+    /// under-settled harness. Looping until the reported value stops changing is what actually
     /// reaches what production converges to.
+    ///
+    /// **Capped AND fails loudly on non-convergence (fix round 1, F4).** A previous version of this
+    /// comment claimed the cap alone made "a genuinely unstable preference chain fail loudly instead
+    /// of hanging" — it did not: the loop silently returned whatever `box.value` happened to hold
+    /// after the last iteration, cap reached or not, so an oscillating chain would have reported a
+    /// plausible-looking number instead of failing. Now it does what the comment always claimed: if
+    /// the loop exhausts every iteration without two consecutive reads agreeing, it calls `XCTFail`
+    /// with the two disagreeing values before returning — the exact guard task 4C's own
+    /// measure → `@Environment` → resize → re-measure chain would need if a future change reintroduced
+    /// an oscillation instead of a converging settle.
     static func preferenceValue<V: View, K: PreferenceKey>(
         _ view: V, key: K.Type, size: CGSize
     ) -> K.Value where K.Value: Equatable {
@@ -108,12 +118,22 @@ enum SurfaceRenderHarness {
         host.frame = CGRect(origin: .zero, size: size)
 
         var previous: K.Value?
+        var converged = false
         for _ in 0..<10 {
             host.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
             host.layoutSubtreeIfNeeded()
-            if let previous, previous == box.value { break }
+            if let previous, previous == box.value {
+                converged = true
+                break
+            }
             previous = box.value
+        }
+        if !converged {
+            XCTFail("SurfaceRenderHarness.preferenceValue(\(K.self)) did not converge in 10 "
+                     + "settle passes — last two reads were \(String(describing: previous)) and "
+                     + "\(box.value). Either a genuinely unstable preference chain (fix it) or a "
+                     + "settle count that needs raising, not a value to trust silently.")
         }
         return box.value
     }

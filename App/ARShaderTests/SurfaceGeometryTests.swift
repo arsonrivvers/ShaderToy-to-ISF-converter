@@ -357,22 +357,32 @@ final class SurfaceGeometryTests: XCTestCase {
     /// 4C needs the REAL, proposal-driven width a window actually gives the strip, which `.fixedSize`
     /// structurally cannot supply.
     ///
-    /// **A second, harder-won harness lesson from THIS task, worth recording for the next one:**
-    /// `PreferenceKey`/`.onPreferenceChange` — the mechanism `.measured(_:in:)` and every geometry
-    /// gate above rely on — was found to silently report 0 for ANY key, from ANY branch of the tree,
-    /// the instant a `ScrollView` exists ANYWHERE in that same tree, in this specific
-    /// `NSHostingView.layoutSubtreeIfNeeded()`-driven harness. Confirmed with a controlled A/B: the
-    /// identical `PreferenceKey` wiring reported correctly with `slots()` swapped for a trivial
-    /// `Color` stub, and reported 0 with the real `ScrollView`-containing `SlotBankStripView` — same
-    /// harness, same window sizes, only the presence of a `ScrollView` differed. `SlotBankStripView`
-    /// and `InstrumentSurface` route the cell-width measurement through `.onAppear`/`.onChange`
-    /// (an imperative side effect, not a `PreferenceKey` value bubbling through `reduce`) for exactly
-    /// this reason — see `InstrumentSurface`'s content-column measurement (in `body`) for the full
-    /// account. `DrawnCellWidthKey`/`DrawnRowHeightKey` (used by `measuredCellWidth`/
-    /// `measuredRowPitch` below) are still ordinary `PreferenceKey`s and still work correctly: they
-    /// are reported ONCE, at `SlotBankStripView`'s own top level, from a value already computed by
-    /// `.onChange` upstream — never from inside the `ScrollView` itself, which is the specific
-    /// configuration that failed.
+    /// **A second, harder-won harness lesson from THIS task, worth recording for the next one —
+    /// corrected once already (fix round 1, F2), so read the correction, not the first draft.** The
+    /// first draft of this note claimed `PreferenceKey`/`.onPreferenceChange` silently reports 0 for
+    /// ANY key, from ANY branch of the tree, the instant a `ScrollView` exists ANYWHERE in that
+    /// tree. That is FALSE: `DrawnCellWidthKey`/`DrawnRowHeightKey`, reported from
+    /// `SlotBankStripView`'s own top level — whose subtree contains the cells `ScrollView` — resolve
+    /// correctly, refuting it directly. A proposed alternative (the earlier failures just needed a
+    /// longer settle loop; two fixed `layoutSubtreeIfNeeded()` passes were confirmed to under-settle
+    /// a genuinely different case, see `SurfaceRenderHarness.preferenceValue`'s doc comment) was
+    /// retried against BOTH original failures with up to 60 settle passes: both stayed at 0. Neither
+    /// claim survived re-verification.
+    ///
+    /// **What is actually, repeatedly confirmed, across two independent investigations in this same
+    /// task (`InstrumentSurface`'s content-column measurement, and `SlotBankStripView.renderedCellWidth`,
+    /// fix round 1 F1):** a `PreferenceKey` value established by measuring something and bubbling it
+    /// UP THROUGH a `ScrollView` boundary — either reported from WITHIN the `ScrollView`'s own
+    /// content, or from an ancestor wrapping a descendant that contains one — does not reach an
+    /// external `.onPreferenceChange` listener in this harness, at any settle-loop length tried. A
+    /// `PreferenceKey` whose value has no such link resolves fine, `ScrollView` present in the same
+    /// tree or not. `SlotBankStripView` and `InstrumentSurface` both route their `ScrollView`-crossing
+    /// measurements through `.onAppear`/`.onChange` (an imperative side effect, not a value bubbling
+    /// through `reduce`) for exactly this reason — see `InstrumentSurface.body`'s doc comment, at the
+    /// content-column measurement, for the fullest account. `DrawnCellWidthKey`/`DrawnRowHeightKey`
+    /// (used by `measuredCellWidth`/`measuredRowPitch` below) remain ordinary `PreferenceKey`s and
+    /// still work correctly, because what they report was already computed by `.onChange` upstream —
+    /// they never need to cross the `ScrollView` boundary themselves.
 
     // MARK: Cell clamp (task 4C)
 
@@ -395,16 +405,35 @@ final class SurfaceGeometryTests: XCTestCase {
         }
     }
 
-    /// The clamped width every `SlotCell` in the strip is actually drawn at, read from
-    /// `DrawnCellWidthKey` — reported by the REAL `SlotBankStripView`, not a stand-in. Deliberately
-    /// NOT `.fixedSize`: that asks a view for its IDEAL size, an unconstrained query that decouples
-    /// the result from the real, window-width-driven proposal this is meant to observe — the same
-    /// reason `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`'s `.fixedSize`-based
+    /// The COMPUTED clamp result — `SlotBankStripView.cellWidth` — read from `DrawnCellWidthKey`,
+    /// reported by the REAL `SlotBankStripView`, not a stand-in. Deliberately NOT `.fixedSize`: that
+    /// asks a view for its IDEAL size, an unconstrained query that decouples the result from the
+    /// real, window-width-driven proposal this is meant to observe — the same reason
+    /// `testSlotBankStripCellsRowWidthIsPinnedRegardlessOfWindowWidth`'s `.fixedSize`-based
     /// technique cannot be reused here.
+    ///
+    /// **Does not, on its own, prove anything about what got DRAWN** (fix round 1 finding, F1): this
+    /// reports the clamp arithmetic's output, not the frame SwiftUI actually applied to `SlotCell`.
+    /// A mutation that disconnects the two — hardcoding `SlotCell`'s `.frame(width:height:)` while
+    /// leaving `cellWidth` untouched — leaves this helper reporting the SAME healthy numbers it
+    /// always did. `measuredRenderedCellWidth`, below, is what closes that gap.
     private func measuredCellWidth(windowWidth: CGFloat) -> CGFloat {
         SurfaceRenderHarness.preferenceValue(
             slotBankSurface(instrument: Instrument(), layout: SurfaceLayout()),
             key: DrawnCellWidthKey.self,
+            size: CGSize(width: windowWidth, height: SurfaceMetrics.minWindowHeight))
+    }
+
+    /// The ACTUAL rendered width of a `SlotCell`, read from `RenderedCellWidthKey` — reported by a
+    /// `.background(GeometryReader)` attached directly to `SlotCell`'s own `.frame(width:height:)`
+    /// call site in production, not by a computed property that feeds it. This is the gate that
+    /// observes real rendered geometry rather than the arithmetic that is supposed to drive it — see
+    /// `RenderedCellWidthKey`'s doc comment (`SlotBankStripView.swift`) for why `DrawnCellWidthKey`
+    /// alone cannot catch the render coming loose from the computation.
+    private func measuredRenderedCellWidth(windowWidth: CGFloat) -> CGFloat {
+        SurfaceRenderHarness.preferenceValue(
+            slotBankSurface(instrument: Instrument(), layout: SurfaceLayout()),
+            key: RenderedCellWidthKey.self,
             size: CGSize(width: windowWidth, height: SurfaceMetrics.minWindowHeight))
     }
 
@@ -421,9 +450,18 @@ final class SurfaceGeometryTests: XCTestCase {
     /// The cell grows with the window, and STOPS. Task 3 shipped a floor with infinite growth and
     /// the operator rejected the result on device; task 4 shipped an exact size and the reviewer
     /// flagged that it is tiny on a large display. Both extremes are wrong; this is the range.
+    ///
+    /// **Asserts on BOTH the computed clamp (`measuredCellWidth`) and the actually-rendered cell
+    /// (`measuredRenderedCellWidth`), and requires them to agree** (fix round 1, F1). The computed
+    /// side alone could not distinguish a correct implementation from one where `SlotCell`'s
+    /// `.frame(width:height:)` had been quietly disconnected from `cellWidth` — task 4's shipped
+    /// defect, restated as: the arithmetic is right but nothing draws it. Mutation 2 (brief, Step 6)
+    /// specifically targets the RENDER, not the arithmetic — see this file's mutation-proof section.
     func testTheCellGrowsWithTheWindowUpToItsCeiling() throws {
         let narrow = measuredCellWidth(windowWidth: SurfaceMetrics.minWindowWidth)
         let wide   = measuredCellWidth(windowWidth: 2560)
+        let renderedNarrow = measuredRenderedCellWidth(windowWidth: SurfaceMetrics.minWindowWidth)
+        let renderedWide   = measuredRenderedCellWidth(windowWidth: 2560)
 
         XCTAssertEqual(narrow, SurfaceMetrics.minCellWidth, accuracy: 0.5,
                        "At the window minimum the cell sits on its legibility/hit-target floor")
@@ -433,6 +471,20 @@ final class SurfaceGeometryTests: XCTestCase {
         XCTAssertLessThanOrEqual(wide, SurfaceMetrics.maxCellWidth,
                                  "…but never past the ceiling, or the strip eats the monitors "
                                  + "again — the defect the operator reported on device")
+
+        XCTAssertEqual(renderedNarrow, narrow, accuracy: 0.5,
+                       "The cell SwiftUI actually laid out at the window minimum must match the "
+                       + "clamp's own computed floor — a mismatch means the frame has come loose "
+                       + "from cellWidth")
+        XCTAssertGreaterThan(renderedWide, renderedNarrow,
+                             "The RENDERED cell, not just the computed one, must be bigger at a "
+                             + "wider window — task 4 shipped a `.frame(width:height:)` pinned "
+                             + "regardless of what any computed clamp said, and this is the gate "
+                             + "that specific defect requires")
+        XCTAssertEqual(renderedWide, wide, accuracy: 0.5,
+                       "The cell SwiftUI actually laid out at a wide window must match the clamp's "
+                       + "own computed ceiling — a mismatch means the frame has come loose from "
+                       + "cellWidth")
     }
 
     /// The row height must follow the DRAWN cell, not a constant, or the resize drag desyncs from
