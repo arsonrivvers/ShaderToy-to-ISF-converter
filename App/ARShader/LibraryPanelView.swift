@@ -1,3 +1,4 @@
+import AppKit      // NSImage — decoding the hover-preview PNG, matching SlotBankStripView's pattern
 import SwiftUI
 
 /// Where a clicked library shader goes. Clicking loads onto a deck, or APPENDS a stage to a chain.
@@ -42,6 +43,17 @@ struct LibraryPanelView: View {
     let instrument: Instrument
     @StateObject private var selection = LibrarySelection()
     @ObservedObject private var library: LibraryModel
+
+    /// The row the pointer is over right now, or `nil` once it has left the list entirely. Drives
+    /// `.task(id:)` below — every change (including a swap directly from one row to another)
+    /// starts a fresh `.interactive` request, which `ThumbnailService` itself supersedes any
+    /// request still in flight for (see the service's `Priority.interactive` doc comment).
+    @State private var hoveredURL: URL?
+    /// The still shown in the foot well. Deliberately NOT cleared when `hoveredURL` goes `nil` on
+    /// list-exit (see the list's `.onHover` below) — the last resolved still stays put rather than
+    /// flashing blank every time the pointer leaves the rows for the search field, the sort
+    /// picker, or the well itself.
+    @State private var hoverPreview: Image?
 
     init(instrument: Instrument) {
         self.instrument = instrument
@@ -89,8 +101,47 @@ struct LibraryPanelView: View {
                 // gesture is documented at all.
                 .help("\(entry.name) — click to load onto deck A, or drag onto a deck, an FX "
                       + "chain, or a slot")
+                // Task 7: a THIRD gesture on a row that already carries a click (the Button
+                // action) and a drag (`.draggable`). `.onHover` is a hover-tracking area, not a
+                // click/drag gesture recognizer, so it does not compete with either — verified by
+                // running the existing drag-and-drop and click-to-load test coverage unchanged
+                // (ShaderDragTests, LibraryPanelTests) after adding this, plus a manual on-device
+                // check that click-to-load and drag-to-slot both still work with the hover well
+                // live (see task-7-report.md). Only reacts to hover-IN: hover-OUT of a single row
+                // is deliberately ignored so moving to an ADJACENT row doesn't cancel the request
+                // that adjacency just made — see the list's own `.onHover` below for the one exit
+                // that matters (leaving the list entirely).
+                .onHover { isHovering in
+                    if isHovering { hoveredURL = entry.url }
+                }
             }
             .listStyle(.inset)
+            // Hover-exit of the WHOLE list, not each row: a superseded request between adjacent
+            // rows is handled for free by `ThumbnailService.Priority.interactive` (a new request
+            // cancels its predecessor); this is the other half — nothing left in flight once the
+            // pointer leaves the rows altogether, which is what the on-device sweep leg is
+            // actually proving (FPS must not drop while the pointer crosses the whole library).
+            .onHover { isHovering in
+                if !isHovering {
+                    hoveredURL = nil
+                    Task { await instrument.thumbnailService.cancelInteractive() }
+                }
+            }
+            // One request per hover target, started/superseded by `hoveredURL` changing — SwiftUI
+            // cancels the previous instance of this task on every id change, but that cancellation
+            // doesn't reach into the actor (see ThumbnailService.render's doc comment), so the
+            // `Task.isCancelled` check below is what stops a superseded response from clobbering a
+            // newer one.
+            .task(id: hoveredURL) {
+                guard let url = hoveredURL else { return }
+                let result = await instrument.thumbnailService.thumbnail(for: url, priority: .interactive)
+                guard !Task.isCancelled else { return }
+                if case .image(let data) = result, let decoded = NSImage(data: data) {
+                    hoverPreview = Image(nsImage: decoded)
+                } else {
+                    hoverPreview = nil
+                }
+            }
 
             // Honest absence: while the scan is in flight the count is unknown, so say so rather
             // than print "0 shaders" — which reads as an empty corpus, not a pending one.
@@ -104,7 +155,30 @@ struct LibraryPanelView: View {
             }
             .font(.system(size: 11)).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            hoverPreviewWell
         }
         .padding(8)
+    }
+
+    /// A fixed-size well at the panel's foot, not a floating popover over the rows — a popover
+    /// would sit on top of exactly what the operator is scanning, and reflowing the list to make
+    /// room for a preview would shift the row out from under the pointer mid-hover.
+    private var hoverPreviewWell: some View {
+        ZStack {
+            if let hoverPreview {
+                hoverPreview
+                    .resizable()
+                    .aspectRatio(16.0 / 9.0, contentMode: .fill)
+                    .clipped()
+            } else {
+                Rectangle().fill(Color.white.opacity(0.05))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.12)))
+        .accessibilityIdentifier("libraryPanel.hoverPreview")
     }
 }

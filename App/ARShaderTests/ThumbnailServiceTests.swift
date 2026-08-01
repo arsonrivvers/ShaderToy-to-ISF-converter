@@ -99,6 +99,42 @@ final class ThumbnailServiceTests: XCTestCase {
                        "sharing the live queue is how a thumbnail becomes a dropped frame mid-set")
     }
 
+    /// Hover is superseded constantly as the pointer moves; a thumbnail for a row the pointer has
+    /// left is wasted work. This is the OPPOSITE of the bank's requirement, which is why priority
+    /// is a parameter rather than a policy baked into the service.
+    ///
+    /// NOTE: no counterpart test here proves an in-flight `.interactive` request is actually
+    /// interrupted by `cancelInteractive()`, and this test is deliberately SEQUENTIAL rather than
+    /// racing `cancelInteractive()` against a concurrently-started `.batch` call — both were tried
+    /// and abandoned as undeliverable without new production surface. `render()` has no `await`
+    /// between its entry and either return path, so once the actor dequeues a render it runs to
+    /// completion without ever yielding — an externally-issued `cancelInteractive()` can only
+    /// matter if it reaches the actor before that dequeue, and across ~24 empirical trials
+    /// (`async let`, `Task.detached`, two fixture speeds including a deliberately expensive
+    /// 2M-iteration loop) it never once did; duration didn't move the result, because the race is
+    /// about enqueue order, not render speed. See the "determinism decision" section of
+    /// task-7-report.md for the full evidence.
+    ///
+    /// What IS deterministic, and what this test proves instead: cancelling hover work must never
+    /// leave a mark that a LATER, independent bank request trips over. `cancelInteractive()` runs
+    /// to completion first (a safe no-op — nothing interactive is in flight), then a fresh
+    /// `.batch` request is made and must succeed. This is real coverage, not a weaker stand-in:
+    /// `.batch`'s isolation from `interactiveTask` is a code-level guarantee (its case body never
+    /// reads `interactiveTask` or anything `cancelInteractive()` touches), so the interesting bug
+    /// class this catches is a `cancelInteractive()` that leaves STICKY state behind (a flag never
+    /// reset, a queue entry poisoned) rather than one that races an in-flight render — see the
+    /// mutation-proof in task-7-report.md for a concrete instance of that bug class going red.
+    func testCancellingInteractiveWorkLeavesBatchWorkAlone() async throws {
+        let service = ThumbnailService(cacheDirectory: try temporaryCacheDirectory())
+        await service.cancelInteractive()
+        let result = await service.thumbnail(for: try fixtureURL("solid_red"), priority: .batch)
+        guard case .image = result else {
+            return XCTFail("Cancelling hover work must never block a queued bank thumbnail — that "
+                            + "leaves permanently blank cells only a resize or relaunch would "
+                            + "fill; got \(result)")
+        }
+    }
+
     /// C1/I2 (round-1 review, Critical): the original brief persisted `.unavailable` for ANY
     /// non-image outcome, including a cancelled request — so a hover interrupted mid-request
     /// permanently marked a valid shader broken. `.batch` cancellation is the deterministic way to
