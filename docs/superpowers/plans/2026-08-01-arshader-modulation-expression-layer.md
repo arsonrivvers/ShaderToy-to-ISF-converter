@@ -149,7 +149,7 @@ discovered at the on-device gate.
     the zero-mix skip happens inside `encode`.
   Tasks 8, 10, 11 and 12 use exactly these names.
 
-- [ ] **Step 1: Record the baseline gate counts**
+- [x] **Step 1: Record the baseline gate counts**
 
 Announce to the operator first — this launches a second ARShader window via `TEST_HOST`.
 
@@ -163,7 +163,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 Write the reported `Executed N tests` figure into the plan's Global Constraints as the floor. Every
 later task must not reduce it.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `App/ARShaderTests/FXStageIdentityTests.swift`:
 
@@ -247,7 +247,7 @@ final class FXStageIdentityTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -259,7 +259,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 Expected: compile failure — `FXStage` has no `init(id:device:queue:clock:)`, `FXChain` has no
 `stage(id:)`, `FXStageSnapshot` has no `id`.
 
-- [ ] **Step 4: Make the stage id injectable**
+- [x] **Step 4: Make the stage id injectable**
 
 In `App/ARShader/FXStage.swift`, replace line 11 and the initialiser at lines 16–19:
 
@@ -283,7 +283,7 @@ In `App/ARShader/FXStage.swift`, replace line 11 and the initialiser at lines 16
     }
 ```
 
-- [ ] **Step 5: Carry the id into the render mirror and move the zero-mix skip**
+- [x] **Step 5: Carry the id into the render mirror and move the zero-mix skip**
 
 In `App/ARShader/FXChain.swift`, add `id` to the snapshot (lines 6–10):
 
@@ -328,7 +328,7 @@ In `encode` (line 116), skip the dry stages that `publishToRenderThread` no long
             guard stage.mix > 0 else { continue }   // dry: no render, no cost (was a publish filter)
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -339,7 +339,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 7: Prove the stable-ID gate can fail**
+- [x] **Step 7: Prove the stable-ID gate can fail**
 
 Temporarily replace `chain.stage(id: first.id)?.mix` with `chain.stages[0].mix` and
 `chain.stage(id: second.id)?.mix` with `chain.stages[1].mix` in
@@ -348,7 +348,7 @@ Temporarily replace `chain.stage(id: first.id)?.mix` with `chain.stages[0].mix` 
 Expected: FAIL — `0.75` is not `0.25`. Revert the mutation and re-run to confirm PASS. Record the
 observed failure line in the Task 13 evidence table.
 
-- [ ] **Step 8: Run the full suite**
+- [x] **Step 8: Run the full suite**
 
 ```bash
 xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
@@ -372,7 +372,7 @@ by proxy: the dry stage IS published (so modulation can raise it), and running a
 `invert_filter` over a red input through `encode` returns red. Test count is unaffected (211), so
 the 207 floor holds.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add App/ARShader/FXStage.swift App/ARShader/FXChain.swift \
