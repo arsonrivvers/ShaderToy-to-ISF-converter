@@ -1,6 +1,8 @@
 import XCTest
 import Metal
 import VVMetalKit
+import ImageIO
+import CoreGraphics
 @testable import ARShader
 
 final class ThumbnailServiceTests: XCTestCase {
@@ -16,6 +18,24 @@ final class ThumbnailServiceTests: XCTestCase {
             .url(forResource: name, withExtension: "fs", subdirectory: "Fixtures"))
     }
 
+    /// Decode a PNG back into a known RGBA8 layout, mirroring `FramePNGEncoderTests.decodeRGBA` —
+    /// so I4's pixel assertion doesn't depend on the decoder's preferred format.
+    private func decodeRGBA(_ png: Data) -> (w: Int, h: Int, bytes: [UInt8])? {
+        guard let src = CGImageSourceCreateWithData(png as CFData, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let w = img.width, h = img.height
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        let ok = bytes.withUnsafeMutableBytes { buf -> Bool in
+            guard let ctx = CGContext(
+                data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8,
+                bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        return ok ? (w, h, bytes) : nil
+    }
+
     func testAValidShaderProducesAnImage() async throws {
         let service = ThumbnailService(cacheDirectory: try temporaryCacheDirectory())
         let result = await service.thumbnail(for: try fixtureURL("solid_red"), priority: .batch)
@@ -25,8 +45,31 @@ final class ThumbnailServiceTests: XCTestCase {
     /// The whole reason t is not 0: many shaders are black at t=0, and a black thumbnail is worse
     /// than no thumbnail. 2.0s is past nearly every fade-in and early enough that feedback shaders
     /// have not drifted into mush.
+    ///
+    /// I4 (round-1 review): this is a sanity check on the CONSTANT only — it catches an edit to
+    /// `sampleTime` but not a render call site that ignores it and passes a literal instead. That
+    /// mutation is proven by `testTheRenderedThumbnailReflectsTheSampleTimeNotZero` below, which
+    /// inspects actual rendered pixels rather than comparing two literals.
     func testTheSampleTimeIsTwoSeconds() {
         XCTAssertEqual(ThumbnailService.sampleTime, 2.0)
+    }
+
+    /// The real proof for I4: `solid_red` is time-invariant and can't catch a render call site
+    /// that silently ignores `sampleTime` — passing a literal `0.0` at the call site instead of
+    /// `Self.sampleTime` would still produce a red image and this suite would stay green. This
+    /// renders `time_gate.fs` (black at t=0, red past t=1) and inspects the decoded pixels, so a
+    /// render that actually happened at t=0 is visibly different from one at `sampleTime` (2.0).
+    func testTheRenderedThumbnailReflectsTheSampleTimeNotZero() async throws {
+        let service = ThumbnailService(cacheDirectory: try temporaryCacheDirectory())
+        let result = await service.thumbnail(for: try fixtureURL("time_gate"), priority: .batch)
+        guard case .image(let png) = result else { return XCTFail("expected an image, got \(result)") }
+        let decoded = try XCTUnwrap(decodeRGBA(png), "PNG failed to decode")
+        let hasRedPixel = stride(from: 0, to: decoded.bytes.count, by: 4).contains { i in
+            decoded.bytes[i] > 200 && decoded.bytes[i + 1] < 50 && decoded.bytes[i + 2] < 50
+        }
+        XCTAssertTrue(hasRedPixel,
+                      "expected a red frame (rendered past t=1), got an all-black one — the render "
+                      + "did not actually sample at sampleTime")
     }
 
     func testABrokenShaderResolvesAsUnavailable() async throws {
@@ -54,5 +97,27 @@ final class ThumbnailServiceTests: XCTestCase {
         let serviceQueue = await service.commandQueueForTesting
         XCTAssertFalse(serviceQueue === RenderProperties.global().renderQueue,
                        "sharing the live queue is how a thumbnail becomes a dropped frame mid-set")
+    }
+
+    /// C1/I2 (round-1 review, Critical): the original brief persisted `.unavailable` for ANY
+    /// non-image outcome, including a cancelled request — so a hover interrupted mid-request
+    /// permanently marked a valid shader broken. `.batch` cancellation is the deterministic way to
+    /// test the shared fix (`RenderOutcome.cancelled` is never persisted): unlike `.interactive`
+    /// (which hands the render off to an inner unstructured `Task` not reachable from the caller's
+    /// own task), `.batch` awaits `render` directly on the CALLING task with no intervening
+    /// `await`, so cancelling that task immediately after creation — before it has had a chance to
+    /// run — guarantees `Task.isCancelled` reads true for its entire body. No scheduling race.
+    func testACancelledRequestIsNeverPersistedAsUnavailable() async throws {
+        let service = ThumbnailService(cacheDirectory: try temporaryCacheDirectory())
+        let shader = try fixtureURL("solid_red")
+        let cancelled = Task { await service.thumbnail(for: shader, priority: .batch) }
+        cancelled.cancel()
+        _ = await cancelled.value
+        // If the cancelled request had persisted `.unavailable`, this uncancelled follow-up would
+        // read the poisoned cache entry back instead of rendering fresh.
+        let result = await service.thumbnail(for: shader, priority: .batch)
+        guard case .image = result else {
+            return XCTFail("a cancelled request must not poison the cache; got \(result)")
+        }
     }
 }

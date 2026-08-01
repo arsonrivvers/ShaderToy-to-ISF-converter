@@ -55,6 +55,13 @@ final class ThumbnailCacheTests: XCTestCase {
 
     /// Bounded by COUNT, not bytes: thumbnails are small and fixed-size, so a byte budget would
     /// add arithmetic for no behavioural gain. Swept at launch, never during a set.
+    ///
+    /// I5 (round-1 review): the original version touched `shaders[4]` — already the newest by
+    /// WRITE order — so the assertions held even with the read-touch deleted entirely; it proved
+    /// FIFO-by-write-order, not LRU-by-use. This version touches the OLDEST entry (`shaders[0]`)
+    /// so it becomes the most recently MODIFIED despite being the least recently WRITTEN. If the
+    /// touch in `entry()` did nothing, `shaders[0]` would be evicted (it's the oldest write) and
+    /// `shaders[3]` would survive (the second-newest write) — the opposite of what's asserted.
     func testEvictionDropsTheLeastRecentlyUsedAboveTheCeiling() throws {
         let (cache, _) = try makeCache()
         var shaders: [URL] = []
@@ -63,9 +70,13 @@ final class ThumbnailCacheTests: XCTestCase {
             try cache.store(.image(Data([UInt8(i)])), for: s)
             shaders.append(s)
         }
-        _ = try cache.entry(for: shaders[4])          // touch the newest
+        _ = try cache.entry(for: shaders[0])          // touch the OLDEST write
         try cache.evict(keepingAtMost: 2)
-        XCTAssertNotNil(try cache.entry(for: shaders[4]), "the most recently used survives")
-        XCTAssertNil(try cache.entry(for: shaders[0]), "the least recently used is gone")
+        XCTAssertNotNil(try cache.entry(for: shaders[0]),
+                        "touched after being written oldest — survives because it was USED, not written, last")
+        XCTAssertNotNil(try cache.entry(for: shaders[4]), "the most recently WRITTEN entry survives")
+        XCTAssertNil(try cache.entry(for: shaders[3]),
+                     "would have survived under write-order alone (2nd-newest write), but was never touched")
+        XCTAssertNil(try cache.entry(for: shaders[1]), "never touched, never recently written — gone")
     }
 }
