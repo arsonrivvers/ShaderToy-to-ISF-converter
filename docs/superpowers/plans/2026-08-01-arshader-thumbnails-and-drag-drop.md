@@ -1605,3 +1605,139 @@ concern, the service's is an API concern — and Task 1 converts between them ex
 **One ordering constraint that is not negotiable:** Tasks 4 and 6 must land in the same review
 cycle. Task 4 removes the SOURCE picker and Task 6 replaces it with the deck-monitor drag; between
 them there is no way to capture a look at all.
+
+---
+
+### Task 4B: Monitor tiles redraw at a reduced rate
+
+**Added 2026-08-01**, after the operator ran task 2 on device and rejected its OPEN row. Executes
+after Task 4 and before Task 5. See spec revision 5 for why the revision-4 downscale was withdrawn.
+
+**Files:**
+- Modify: `App/ARShader/InstrumentRenderer.swift` — monitor presentation gains a rate divider
+- Modify: `App/ARShader/InstrumentView.swift` — the PREVIEW SCALE readout states which regime is active
+- Test: `App/ARShaderTests/MonitorRateTests.swift` (new), `App/ARShaderTests/FrameGraphTests.swift`
+
+**Interfaces:**
+- Consumes: `InstrumentRenderer.isProgramLive` and `liveResolutionLocked()` from Task 2, unchanged.
+- Produces: `InstrumentRenderer.monitorRateDivider: Int` (lock-guarded, same shape as `previewScale`).
+
+**The problem this solves, stated so it can fail.** Opening the projector made `PREVIEW SCALE` inert
+— correct per revision 3, rejected by the operator on device. The saving he wants while projecting
+is real, but it is not resolution: a downscaled monitor copy is one consumer and two passes, so it
+costs more than it saves. It is **rate**. The three monitor tiles are redrawn 120×/second to show
+something a human reads identically at 30.
+
+**What must NOT change:**
+- The **program feed keeps its full rate.** The projector is the audience's image.
+- **Blackout stays perceptually instant.** It is a panic button; it must never wait for a slow tile.
+  Blackout is gated in `programTexture()` and runs after master FX deliberately — *nothing may sit
+  between the panic button and darkness*. Verify a rate divider cannot delay it.
+- **The crossfader must stay responsive.** A monitor rate cut must not make the operator's own
+  control feel laggy — that is worse on stage than a warm GPU.
+- Deck rasterisation is untouched. This task changes how often tiles are **presented**, not how
+  often shaders **render**.
+
+- [ ] **Step 1: Write the failing tests**
+
+```swift
+    /// The monitor tiles carry the saving while projecting, because resolution cannot: with the
+    /// output open the decks must rasterise full-size for the audience regardless.
+    func testMonitorTilesAreDrawnLessOftenThanTheProgram() {
+        renderer.monitorRateDivider = 4
+        var monitorDraws = 0
+        // Register a stub monitor that counts its own draws.
+        let stub = CountingMonitor { monitorDraws += 1 }
+        renderer.registerMonitor(stub)
+        for _ in 0..<12 { renderer.renderFrame() }
+        XCTAssertEqual(monitorDraws, 3, "12 frames at a divider of 4 is 3 tile draws")
+    }
+
+    func testADividerOfOneDrawsEveryFrame() {
+        renderer.monitorRateDivider = 1
+        var monitorDraws = 0
+        let stub = CountingMonitor { monitorDraws += 1 }
+        renderer.registerMonitor(stub)
+        for _ in 0..<12 { renderer.renderFrame() }
+        XCTAssertEqual(monitorDraws, 12, "a divider of 1 is the pre-task behaviour, exactly")
+    }
+
+    /// Blackout is a panic button. A rate divider must never put frames between it and darkness.
+    func testBlackoutIsNotDelayedByTheMonitorRate() {
+        renderer.monitorRateDivider = 8
+        mixer.setBlackout(true)
+        renderer.renderFrame()
+        XCTAssertNil(renderer.programTexture(),
+                     "blackout gates the PROGRAM path, which the divider must not touch")
+    }
+
+    /// The divider is bounded: a corrupt or future-build value cannot freeze the monitors.
+    func testTheDividerIsClamped() {
+        renderer.monitorRateDivider = 0
+        XCTAssertEqual(renderer.monitorRateDivider, 1)
+        renderer.monitorRateDivider = 99
+        XCTAssertEqual(renderer.monitorRateDivider, InstrumentRenderer.maxMonitorRateDivider)
+    }
+```
+
+`CountingMonitor` is a test double conforming to whatever `registerMonitor` accepts — read
+`registerMonitor`/`unregisterMonitor` and the `monitors` collection in `InstrumentRenderer` and
+follow the real protocol. Do not change production to make the double easier.
+
+- [ ] **Step 2: Run — expect a compile failure** (`monitorRateDivider` does not exist).
+
+- [ ] **Step 3: Add the divider**
+
+Lock-guarded, in the exact shape of `previewScale` (guard the no-op set), with a frame counter.
+`renderFrame()` currently ends by drawing every registered monitor:
+
+```swift
+        let views = monitors.allObjects
+        lock.unlock()
+        …
+        for view in views { view.draw() }
+```
+
+Gate only that loop. **The program path, the deck rasterisation, the composite, master FX and the
+blackout gate are all upstream of it and must be left alone.** Default the divider to a value that
+gives ~30fps at the instrument's real frame rate, and say in the doc comment how that number was
+chosen rather than leaving a bare literal.
+
+- [ ] **Step 4: Run the tests — expect PASS.** Then run the full suite: nothing that measures deck
+raster size, master size, or cue behaviour may move. If any frame-graph test changes, the divider
+reached further than the tile draw and that is a defect.
+
+- [ ] **Step 5: Make the readout state its regime**
+
+Task 2 made the resolved-size readout conditional. It must now also say which regime is active,
+because "50%" beside a full-resolution number reads as a bug (the operator reported exactly that).
+While the output is open, the line should make clear the decks are full-size for the projector and
+the saving is in how often the tiles refresh. Keep it to one short line — this is a strip, not a
+dialog.
+
+- [ ] **Step 6: Mutation-prove three gates**, each run then REVERTED:
+  1. Gate the program present on the divider as well. Expected: `testBlackoutIsNotDelayedByTheMonitorRate` or a frame-graph test FAILS.
+  2. Remove the clamp. Expected: `testTheDividerIsClamped` FAILS.
+  3. Ignore the divider and draw every frame. Expected: `testMonitorTilesAreDrawnLessOftenThanTheProgram` FAILS.
+
+- [ ] **Step 7: Full suite, commit**
+
+```bash
+git add App/ARShader/InstrumentRenderer.swift App/ARShader/InstrumentView.swift \
+        App/ARShaderTests/MonitorRateTests.swift App/ARShaderTests/FrameGraphTests.swift
+git commit -m "feat(3c): monitor tiles redraw at a reduced rate
+
+The saving the operator wanted while projecting is rate, not resolution — a
+downscaled monitor copy is one consumer and two passes. Program feed, blackout
+and deck rasterisation are untouched."
+```
+
+**Smoke legs this adds to Task 8** (append to the phase-3c leg list):
+
+| # | Leg | Hypothesis |
+|---|---|---|
+| 40 | Monitors stay readable at the reduced rate | With the instrument playing, the three tiles still read as live motion — not a slideshow. If 30fps looks wrong on a tile, the divider is too aggressive |
+| 41 | The projector does NOT lose frames | Output open on the external display: the projected image is as smooth as before this task. Any judder on the wall is a defect, not a trade-off |
+| 42 | Blackout is still instant | `⌘B` with the divider active. Darkness must arrive immediately, not on the next tile refresh |
+| 43 | The crossfader still feels immediate | Sweep it during a show. If the monitors lag the control, the divider reached something it should not have |
+| 44 | GPU actually drops | Compare the FPS/ms readout before and after. If nothing moved, this task bought nothing and should be reverted rather than kept for tidiness |
