@@ -45,9 +45,11 @@ ISFMSLKit (read only — this slice adds no shader code).
   session.
 - **Known merge-conflict surface with `m2-slot-bank`** (measured 2026-08-01 against the merge
   base): `FXChain.swift`, `ShaderUnit.swift`, `SurfaceLayout.swift`, `InstrumentView.swift`,
-  `Instrument.swift`, `LibraryPanelView.swift`. All six are additive on that branch, so conflicts
-  will be textual rather than semantic — but this slice should rebase onto 3b/3c after they land
-  rather than the other way round, because 3c is further along.
+  `Instrument.swift`. All five are additive on that branch, so conflicts will be textual rather
+  than semantic — but this slice should rebase onto 3b/3c after they land rather than the other
+  way round, because 3c is further along. `LibraryPanelView.swift` is *not* on this list: this
+  plan reads it (the sole `FXStage` construction site, and the destination-filter reference in
+  Task 12) but never modifies it. (PM spec review, 2026-08-01, finding 2.)
 - **Baseline gate counts:** record the executed counts *before* Task 1 changes anything and treat
   them as a floor no later task may reduce. Source-counted, `ARShaderTests` currently declares
   **207** `func test…`; the executed number is the one that matters and Task 1 Step 1 records it.
@@ -3313,6 +3315,15 @@ extension ModulationSnapshot: Codable {
 
 /// Reads and writes the binding set as one JSON blob, exactly as `SurfaceLayoutStore` does for the
 /// arrangement: one key, not N, because the set is restored together or the restore is wrong.
+///
+/// **Binding scope is instrument-global, and this single flat key is the decision** — spec §10.3
+/// asks whether bindings belong to the instrument or to a slot-bank preset, and one unscoped
+/// `UserDefaults` key answers it by shape: every binding is live regardless of which preset is
+/// loaded. That is the right default for this slice (an operator dialling in a kick→scale routing
+/// expects it to survive a shader change), but it is a decision, not a deferral. Re-scoping to
+/// per-preset later means adding a preset id to the key or to `ModulationSnapshot` — a migration,
+/// so revisit it when phase 3b/3c's `Preset` model lands rather than after operators have patches
+/// saved. (PM spec review, 2026-08-01, finding 1.)
 struct ModulationStore {
     static let key = "ARShader.modulationBindings"
 
@@ -5027,7 +5038,7 @@ Run after the plan was written, before it was handed over.
 | §9.1 mutation-proven gates | every task, collected in 13 |
 | §9.2 frame budget | 13 |
 | §9.3 on-device gate | 14 |
-| §10 open questions | 14 (legs 1 and 3 inform §10.1 and §10.2); §10.3 deferred to 3c |
+| §10 open questions | 14 (legs 1 and 3 inform §10.1 and §10.2); **§10.3 is answered by Task 9, not deferred** — one unscoped `UserDefaults` key makes binding scope instrument-global by shape. Revisit against 3b/3c's `Preset` before operators have patches saved; re-scoping later is a migration. (PM spec review, finding 1.) |
 | §11 provenance | recorded in Task 6's note — only the motion function NAMES came from prior-art research |
 
 **Gaps found and closed while reviewing:**
