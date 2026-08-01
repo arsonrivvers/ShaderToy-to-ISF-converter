@@ -2,7 +2,7 @@
 title: ARShader Milestone 2 phase 3c — still frames, drag and drop, and the preview/program split
 date: 2026-07-31
 revised: 2026-08-01
-status: approved (revision 2 — PM review folded)
+status: approved (revision 3 — PM review folded; master-pin corrected against the real frame graph)
 target_repo: ShaderToy-to-ISF-converter
 depends_on: docs/superpowers/plans/2026-07-31-arshader-slot-bank.md (phase 3b, branch m2-slot-bank)
 review: ~/.claude/c-suite/reports/pm/2026-07-31-arshader-3c-thumbnails-drag-drop-spec-review.md
@@ -130,10 +130,21 @@ Operator's ruling: *"Preview scale should only effect whats on the app preview s
 feed should never be effected ever. That will always be at 100%."*
 
 So:
-- **The master texture is pinned at 1920×1080 unconditionally.** No control lowers it, ever, whether
-  output is open or closed. `OutputSharpness.isProjectingUpscaled` becomes unreachable-by-design
-  rather than a warning the operator has to notice.
-- **`PREVIEW SCALE` governs deck rasterisation, and only while the program feed is closed.**
+- **While the program feed is OPEN, the whole live chain is pinned at full output resolution** —
+  live decks and the master alike. `PREVIEW SCALE` cannot reach the projector by any path.
+- **While it is CLOSED, `PREVIEW SCALE` governs the whole live chain exactly as it does today.**
+  Nothing is projected, so there is no image to protect and the saving is free.
+- `OutputSharpness.isProjectingUpscaled` becomes unreachable-by-design rather than a warning the
+  operator has to notice.
+
+**Revision 3 correction (2026-08-01), made while planning against the real frame graph.** Revision 2
+said "the master is pinned at 1920×1080 unconditionally". That is worse, and reading
+`InstrumentRenderer.renderFrame()` is what showed it: a pinned master with scaled decks composites
+an upscale into a full-size target on every frame *while output is closed* — paying full-resolution
+compositor and master-FX cost for an image whose only consumers are three ~340pt monitor tiles. It
+would have partly undone the very saving `PREVIEW SCALE` exists for. Pinning the master **with** the
+decks, on the same condition, keeps the projector rule exactly as the operator stated it and costs
+nothing when it is closed.
 
 #### The rule, stated so an implementer cannot read it two ways
 
@@ -143,8 +154,15 @@ it opens.**
 
 | `OutputDestination` | Live deck (contributing) | Cued deck (not contributing) | Master |
 |---|---|---|---|
-| `.off` | `previewScale` | `cueRenderScale` | 1920×1080 |
-| `.floating` / `.screen` | **100%, pinned** | `cueRenderScale` | 1920×1080 |
+| `.off` | `previewScale` | `cueRenderScale` (a fraction of live) | follows `previewScale` |
+| `.floating` / `.screen` | **100%, pinned** | `cueRenderScale` (a fraction of live) | **1920×1080, pinned** |
+
+In the frame graph this is a **single expression**, which is the strongest argument for it. Today
+`InstrumentRenderer.renderFrame()` computes `let liveRes = renderScale.applied(to: outRes)` and
+everything else derives from it — deck rasterisation, cue size, master FX, and the master pair's own
+allocation. The change is that one line becoming
+`let liveRes = isProgramLive ? outRes : renderScale.applied(to: outRes)`. There is no second rule to
+keep in sync, and no path by which a deck and its master can disagree about scale.
 
 Why this and not the two simpler rules, both of which were live readings of revision 1:
 
@@ -177,24 +195,35 @@ acceptable and must not happen per-frame.
 Revision 1 said "updates the seven tests" and named none. They are, in `FrameGraphTests.swift` and
 `InstrumentRendererTests.swift`:
 
+**All seven keep passing, unchanged in behaviour** — and that is a finding, not luck.
+`OutputDestination.launchDefault` is `.off`, and none of the seven opens an output, so every one of
+them was *already* testing the output-closed row of the table above. They were silently assuming it.
+
 | Test | Fate |
 |---|---|
-| `testRenderScaleResizesTheMaster` | **Inverted.** It asserts previewScale 50% shrinks the master; the master now never shrinks. Rewrite it as the assertion that the master holds 1920×1080 across every `RenderScale` value. |
-| `testMasterIsFixedAt1920x1080` | **Kept and strengthened** — now true unconditionally rather than at the default scale only. |
-| `testRenderScaleAppliesToALiveDeckNotJustACuedOne` | **Kept**, with an explicit `output == .off` precondition. This is the anti-`CueQuality` gate and must not be deleted. |
-| `testALiveAndACuedDeckRasteriseAtDifferentScalesInTheSameFrame` | **Kept**, same precondition. |
-| `testCueScaleIsAFractionOfTheLiveRenderNotOfTheOutput` | **Kept**, same precondition. |
-| `testTheInstrumentStillRendersCorrectlyAtAReducedRenderScale` | **Kept**, same precondition. |
-| `testSettingTheSameRenderScaleIsANoOp` | **Unchanged** — no-op semantics are orthogonal to the pin. |
+| `testRenderScaleResizesTheMaster` | Passes unchanged (master still follows scale while closed). **Gains an explicit output-closed precondition** so the assumption is stated. |
+| `testMasterIsFixedAt1920x1080` | Passes unchanged — it never sets `previewScale`, and the default is 100%. Gains the same precondition. |
+| `testRenderScaleAppliesToALiveDeckNotJustACuedOne` | Passes unchanged. Gains the precondition. **This is the anti-`CueQuality` gate and must never be deleted.** |
+| `testALiveAndACuedDeckRasteriseAtDifferentScalesInTheSameFrame` | Passes unchanged. Gains the precondition. |
+| `testCueScaleIsAFractionOfTheLiveRenderNotOfTheOutput` | Passes unchanged. Gains the precondition. |
+| `testTheInstrumentStillRendersCorrectlyAtAReducedRenderScale` | Passes unchanged. Gains the precondition. |
+| `testSettingTheSameRenderScaleIsANoOp` | Unchanged, no precondition needed — no-op semantics are orthogonal. |
 
-Adding a precondition to five tests is the tell that they were all silently assuming output closed.
-Three NEW tests carry the other half of the table, and the task is not done without them:
+Making the precondition explicit in six of seven is the whole point: an implicit assumption that
+happens to hold is one refactor away from a test that passes for the wrong reason, and this codebase
+has already shipped one of those (see `SurfaceGeometryTests.stubMonitorIdealHeight`'s comment, where
+a rigid stub could only ever prove the stub was rigid).
 
-1. With output open, a live deck rasterises at 1920×1080 **whatever `previewScale` says**.
-2. With output open, a cued deck still follows `cueRenderScale` — opening the projector must not
-   silently cost the cue saving.
-3. Opening output while `previewScale` is at 25% reallocates and the master is still 1920×1080 with
-   no upscale — i.e. `OutputSharpness.isProjectingUpscaled` cannot return true.
+Four NEW tests carry the other half of the table, and the task is not done without them:
+
+1. With output open, a live deck rasterises at full output resolution **whatever `previewScale` says**.
+2. With output open, the master is 1920×1080 at `previewScale` 25%.
+3. With output open, a cued deck **still follows `cueRenderScale`** — opening the projector must not
+   silently cost the cue saving, which is the whole reason cue is a fraction of live.
+4. `OutputSharpness.isProjectingUpscaled` cannot return true for any reachable combination — it is
+   now structurally false, since the only condition that made it true (open output at reduced scale)
+   no longer reduces the scale. The warning UI it drives is removed, and this test is what stops it
+   silently returning.
 
 **Stated honestly, because it changes what to expect:** with the projector open this saves shader
 cost nowhere. That is the point — the projector gets everything. The large saving lives exactly
