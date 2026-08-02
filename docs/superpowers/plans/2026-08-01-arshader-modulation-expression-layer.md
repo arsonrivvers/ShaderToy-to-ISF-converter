@@ -1101,7 +1101,7 @@ git commit -m "feat(mod): the source registry, its per-frame snapshot and the id
     (phase)
   Tasks 10 and 12 use exactly these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ManualSourceTests.swift`:
 
@@ -1209,7 +1209,7 @@ final class ManualSourceTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1220,7 +1220,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: `cannot find 'ManualSourceRuntime' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `App/ARShader/ManualSource.swift`:
 
@@ -1357,7 +1357,7 @@ final class ManualSource: ObservableObject {
 Add `import QuartzCore` at the top of the file alongside `Foundation` — `CACurrentMediaTime` is
 declared there.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1368,7 +1368,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add App/ARShader/ManualSource.swift App/ARShaderTests/ManualSourceTests.swift
