@@ -69,35 +69,62 @@ final class SlotBankStoreTests: XCTestCase {
                        "a readable slot AFTER the bad one must survive too, at its own index")
     }
 
-    /// The other half of F1, and the one that makes the loss permanent: after a lossy load, the
-    /// very next capture used to `save()` over the still-present-but-unreadable bytes.
-    func testALossyLoadTakesSaveOutOfServiceRatherThanOverwritingTheStoredBytes() throws {
+    /// Fix round 2, item 2. The original F1 fix took `save()` out of service for the rest of the
+    /// process the moment a load was lossy, with no way back — exactly the schema-migration
+    /// scenario F1 was built to survive (a future non-optional `Preset` property) would fail every
+    /// stored element and lock the operator out of persistence PERMANENTLY: every capture made for
+    /// the rest of that install, discarded on relaunch, forever, with no message anywhere. The fix
+    /// is to back the raw bytes up under a recoverable key instead of refusing to write — this test
+    /// pins the backup half.
+    func testALossyLoadBacksUpTheOriginalBytesUnderADatedKey() throws {
         let stored = Data("[{\"nonsense\":true}]".utf8)
         defaults.set(stored, forKey: SlotBankStore.key)
         let store = SlotBankStore(defaults: defaults)
         _ = store.load()
         XCTAssertTrue(store.loadFailed)
 
-        var slots = [Preset?](repeating: nil, count: SlotBank.slotCount)
-        slots[0] = preset(0.9)
-        store.save(slots)
-
-        XCTAssertEqual(defaults.data(forKey: SlotBankStore.key), stored,
-                       "A bank this build could not read must survive the next capture untouched — "
+        let backupKey = try XCTUnwrap(store.lastUnreadableBackupKeyForTesting,
+                                      "a lossy load must record where it backed the bytes up")
+        XCTAssertEqual(backupKey, SlotBankStore.unreadableBackupKey())
+        XCTAssertEqual(defaults.data(forKey: backupKey), stored,
+                       "the ORIGINAL bytes, byte-for-byte, must survive under the backup key — "
                        + "'we cannot read it' must never become 'it is gone'")
-        XCTAssertNotNil(store.lastFailureReasonForTesting,
-                        "and the refusal has to be observable, not silent")
     }
 
     /// Wholly-undecodable bytes are the same hazard as a partly-undecodable array, and were already
-    /// returning an empty bank before this fix — what they did NOT do was stop the overwrite.
-    func testWhollyCorruptStoredDataAlsoTakesSaveOutOfService() {
+    /// returning an empty bank before this fix — this pins that the whole-blob failure path backs
+    /// its bytes up too, not just the per-element path above.
+    func testWhollyCorruptStoredDataAlsoBacksUpTheOriginalBytes() throws {
         let stored = Data("not json".utf8)
         defaults.set(stored, forKey: SlotBankStore.key)
         let store = SlotBankStore(defaults: defaults)
         _ = store.load()
-        store.save([preset(0.1)])
-        XCTAssertEqual(defaults.data(forKey: SlotBankStore.key), stored)
+
+        let backupKey = try XCTUnwrap(store.lastUnreadableBackupKeyForTesting)
+        XCTAssertEqual(defaults.data(forKey: backupKey), stored)
+    }
+
+    /// The other half of the fix (item 2): once the bytes are safely backed up there is nothing
+    /// left to protect, so `save()` must proceed normally rather than refusing for the rest of the
+    /// process — and the new capture must actually be readable back, not just accepted in memory.
+    func testASaveImmediatelyAfterAFailedLoadSucceedsAndIsReadableBack() throws {
+        let corrupt = Data("not json".utf8)
+        defaults.set(corrupt, forKey: SlotBankStore.key)
+        let store = SlotBankStore(defaults: defaults)
+        _ = store.load()
+        XCTAssertTrue(store.loadFailed, "sanity: the load really did fail")
+
+        store.save([preset(0.6)])
+
+        XCTAssertNotEqual(defaults.data(forKey: SlotBankStore.key), corrupt,
+                          "the live key must actually take the new capture, not stay refused")
+
+        let rereadStore = SlotBankStore(defaults: defaults)
+        let reloaded = rereadStore.load()
+        XCTAssertEqual(reloaded[0]?.snapshot.params["speed"], .float(0.6),
+                       "a capture made right after a failed load must survive a FRESH load, not "
+                       + "just an in-memory read")
+        XCTAssertFalse(rereadStore.loadFailed, "the bytes just written by this build ARE readable")
     }
 
     /// An EMPTY store is not a failed one — persistence must work normally on a first launch.

@@ -66,6 +66,67 @@ final class LibrarySelection: ObservableObject {
     }
 }
 
+/// Owns the hover preview's resolved image and its generation-guarded loading flag (fix round 2,
+/// item 1). An `ObservableObject`, not `@State`, for the same reason `LibrarySelection` above is
+/// one: `@State`'s storage only functions inside a LIVE SwiftUI view graph — writes to a `@State`
+/// property on a `LibraryPanelView` value constructed directly (as a test must, to reach the real
+/// call site rather than a re-derivation of it) are silently discarded, confirmed empirically while
+/// building this fix (every write read back as the property's initial value, even within the SAME
+/// method call). That made the flag's lifecycle — the one part of F7 that most needed a test —
+/// structurally unreachable. This class has ordinary reference semantics: a test constructs one
+/// directly, calls `resolveHoverPreview` on it, and reads `isResolvingPreview` back like any other
+/// object, no hosting required. `@Published` still drives the same live view updates `@State` did.
+@MainActor
+final class HoverPreviewResolver: ObservableObject {
+    /// The still shown in the foot well. Deliberately NOT cleared when hover leaves the list (see
+    /// `LibraryPanelView`'s list-exit `.onHover`) — the last resolved still stays put rather than
+    /// flashing blank every time the pointer leaves the rows for the search field, the sort
+    /// picker, or the well itself.
+    @Published private(set) var hoverPreview: Image?
+    /// A request is outstanding right now (final-review F7). Until this existed, the well kept the
+    /// PREVIOUS shader's still at full opacity while a new one was being resolved — looking like a
+    /// settled answer for the row under the pointer. On a cold cache a deliberate slow scan could
+    /// leave the well seconds behind and still read as correct. Smoke leg 28 exists to judge that
+    /// load behaviour on device, and judging it against a well that cannot say "still working"
+    /// wastes the leg.
+    @Published private(set) var isResolvingPreview = false
+    /// Generation stamp for `isResolvingPreview` (fix round 2, item 1). `.task(id:)` cancellation
+    /// does not stop an already-suspended instance's execution — only its own `Task.isCancelled`
+    /// check does, and `ThumbnailService.render` has no suspension point that observes it early
+    /// (see `LibraryPanelView.hoveredURL`'s doc comment). So a superseded instance (row A) can
+    /// still be suspended inside `thumbnail(for:)` when a newer instance (row B) starts, sets
+    /// `isResolvingPreview = true` again, and begins its own render. When A's render finishes, A
+    /// resumes, hits `guard !Task.isCancelled`, returns — and WITHOUT this guard its `defer` would
+    /// clear `isResolvingPreview` while B is still outstanding, flipping the well to `.settled` on
+    /// the PREVIOUS row's still for the whole of B's render. Each call stamps the generation it
+    /// started with and only clears the flag if it is still the current one.
+    private var previewGeneration = 0
+
+    /// The body of `.task(id:)`, extracted here (rather than left inline in the view) so a test can
+    /// drive the REAL generation-guarded flag lifecycle directly instead of merely modelling it.
+    /// `render` is never defaulted — the production call site always passes the real
+    /// `ThumbnailService` call explicitly — so a test can substitute a controllable stand-in and
+    /// reproduce the exact overlap this fix exists to survive, without depending on real GPU render
+    /// timing. See `LibraryPanelTests.testASupersededHoverInstanceDoesNotClearTheFlagWhileANewerOneIsOutstanding`.
+    func resolveHoverPreview(url: URL, render: (URL) async -> ThumbnailService.Result) async {
+        previewGeneration += 1
+        let generation = previewGeneration
+        isResolvingPreview = true
+        // Fix round 2, item 1: only the call that is STILL current may clear the flag. A
+        // superseded call (see `previewGeneration`'s doc comment) reaches this same `defer` after
+        // a newer request has already taken over — without the generation check it would clear
+        // the flag out from under that newer request.
+        defer { if previewGeneration == generation { isResolvingPreview = false } }
+        let result = await render(url)
+        guard !Task.isCancelled else { return }
+        if case .image(let data) = result, let decoded = NSImage(data: data) {
+            hoverPreview = Image(nsImage: decoded)
+        } else {
+            hoverPreview = nil
+        }
+    }
+}
+
 /// Browse the corpus, click a shader to load it onto deck A, or drag it onto any deck, FX chain,
 /// or slot.
 struct LibraryPanelView: View {
@@ -93,26 +154,16 @@ struct LibraryPanelView: View {
     /// that into "a row merely swept past never reaches the actor at all." See
     /// task-7-report.md's fix-round-1 entry for the full empirical account.
     @State private var hoveredURL: URL?
-    /// The still shown in the foot well. Deliberately NOT cleared when `hoveredURL` goes `nil` on
-    /// list-exit (see the list's `.onHover` below) — the last resolved still stays put rather than
-    /// flashing blank every time the pointer leaves the rows for the search field, the sort
-    /// picker, or the well itself.
-    @State private var hoverPreview: Image?
-    /// A request is outstanding right now (final-review F7). Until this existed, the well kept the
-    /// PREVIOUS shader's still at full opacity while a new one was being resolved — looking like a
-    /// settled answer for the row under the pointer. On a cold cache a deliberate slow scan could
-    /// leave the well seconds behind and still read as correct. Smoke leg 28 exists to judge that
-    /// load behaviour on device, and judging it against a well that cannot say "still working"
-    /// wastes the leg.
-    @State private var isResolvingPreview = false
+    /// Fix round 2, item 1: owns the resolved still and the generation-guarded loading flag — see
+    /// `HoverPreviewResolver`'s doc comment for why this is an `ObservableObject` rather than
+    /// `@State` (testability).
+    @StateObject private var hoverResolver = HoverPreviewResolver()
 
     /// What the foot well should be saying, given what it holds and whether a request is out.
     ///
-    /// A named function rather than a ternary inline in `body` because it is the only part of F7
-    /// that can be pinned by a test: the `@State` flag's lifecycle lives inside a `.task(id:)`
-    /// closure with no seam a unit test can reach, but the MAPPING — the thing that decides whether
-    /// a stale still is presented as settled — is pure. `hoverPreviewWell` calls this; there is no
-    /// second copy of the rule.
+    /// A named function rather than a ternary inline in `body`: the MAPPING — the thing that
+    /// decides whether a stale still is presented as settled — is pure and this is what
+    /// `hoverPreviewWell` calls; there is no second copy of the rule.
     enum WellState: Equatable {
         /// Nothing has resolved yet and nothing is pending.
         case empty
@@ -180,12 +231,13 @@ struct LibraryPanelView: View {
                 // gesture is documented at all. The "click to load onto deck A" half is gone with
                 // the behaviour it described.
                 .help("\(entry.name) — drag onto a deck, an FX chain, or a slot")
-                // Task 7: a THIRD gesture on a row that already carries a click (the Button
-                // action) and a drag (`.draggable`). `.onHover` is a hover-tracking area, not a
-                // click/drag gesture recognizer, so it does not compete with either — verified by
-                // running the existing drag-and-drop and click-to-load test coverage unchanged
-                // (ShaderDragTests, LibraryPanelTests) after adding this; not yet verified
-                // on-device (see task-7-report.md). Only reacts to hover-IN: hover-OUT of a single row
+                // Task 7, corrected fix round 2 (item 3a): a SECOND gesture on a row that is
+                // otherwise inert (F12 removed the Button — no click path at all) and carries only
+                // a drag (`.draggable`). `.onHover` is a hover-tracking area, not a click/drag
+                // gesture recognizer, so it does not compete with the drag — verified by running
+                // the existing drag-and-drop test coverage unchanged (ShaderDragTests,
+                // LibraryPanelTests) after adding this; not yet verified on-device (see
+                // task-7-report.md). Only reacts to hover-IN: hover-OUT of a single row
                 // is deliberately ignored so moving to an ADJACENT row doesn't cancel the request
                 // that adjacency just made — see the list's own `.onHover` below for the one exit
                 // that matters (leaving the list entirely).
@@ -223,17 +275,8 @@ struct LibraryPanelView: View {
             .task(id: hoveredURL) {
                 guard let url = hoveredURL else { return }
                 guard case .dwelled = await waitOutHoverDwell(Self.hoverDwell) else { return }
-                // Set AFTER the dwell, not before it (F7): a row merely swept past never requests
-                // anything, so flagging on hover-enter would flicker the whole well on every row
-                // the pointer crossed. This flips only once a request is genuinely going out.
-                isResolvingPreview = true
-                defer { isResolvingPreview = false }
-                let result = await instrument.thumbnailService.thumbnail(for: url, priority: .interactive)
-                guard !Task.isCancelled else { return }
-                if case .image(let data) = result, let decoded = NSImage(data: data) {
-                    hoverPreview = Image(nsImage: decoded)
-                } else {
-                    hoverPreview = nil
+                await hoverResolver.resolveHoverPreview(url: url) { url in
+                    await instrument.thumbnailService.thumbnail(for: url, priority: .interactive)
                 }
             }
 
@@ -263,9 +306,10 @@ struct LibraryPanelView: View {
         // unchanged in every state. "Ideal width is not minimum width" already cost this branch two
         // fix rounds, and a well that resizes while the operator scans the list is the same class
         // of defect on the other axis.
-        let state = Self.wellState(hasPreview: hoverPreview != nil, isResolving: isResolvingPreview)
+        let state = Self.wellState(hasPreview: hoverResolver.hoverPreview != nil,
+                                   isResolving: hoverResolver.isResolvingPreview)
         return ZStack {
-            if let hoverPreview {
+            if let hoverPreview = hoverResolver.hoverPreview {
                 hoverPreview
                     .resizable()
                     .aspectRatio(16.0 / 9.0, contentMode: .fill)

@@ -156,4 +156,96 @@ final class LibraryPanelTests: XCTestCase {
                        "a row the pointer only swept past must never fall through to requesting "
                        + "a thumbnail")
     }
+
+    // MARK: the resolving flag's generation guard (fix round 2, item 1)
+
+    /// A one-shot async gate a test can hold closed until it chooses to open it — lets a test
+    /// control the EXACT moment a stand-in render "completes" (and confirm the render call has
+    /// actually STARTED, i.e. is genuinely outstanding) without depending on real GPU timing.
+    private actor RenderGate {
+        private var isArrived = false
+        private var arrivedContinuation: CheckedContinuation<Void, Never>?
+        private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+        func waitUntilArrived() async {
+            if isArrived { return }
+            await withCheckedContinuation { arrivedContinuation = $0 }
+        }
+
+        func waitToBeReleased() async {
+            isArrived = true
+            arrivedContinuation?.resume()
+            arrivedContinuation = nil
+            await withCheckedContinuation { releaseContinuation = $0 }
+        }
+
+        func release() {
+            releaseContinuation?.resume()
+            releaseContinuation = nil
+        }
+    }
+
+    /// The re-review's headline finding (final fix round 2, item 1): `.task(id:)` cancellation does
+    /// not stop an already-suspended instance's execution — only its OWN `Task.isCancelled` check
+    /// does, and `ThumbnailService.render` has no suspension point that observes it early. So on a
+    /// cold cache a superseded instance (row A) can still be mid-render when a newer instance (row
+    /// B) starts, sets `isResolvingPreview = true` again, and begins ITS OWN render. Without a
+    /// generation guard, A resuming and returning (cancelled or not) would clear the flag while B
+    /// is still outstanding — the well would flip to `.settled` on A's stale still for the whole of
+    /// B's render, which is worse than no loading state at all: it reads as "resolved" when it is
+    /// not.
+    ///
+    /// This drives `HoverPreviewResolver.resolveHoverPreview` — the actual extracted body of the
+    /// `.task(id:)` closure, not a re-derivation of its logic — with two overlapping calls gated by
+    /// `RenderGate`, so the exact overlap is reproduced deterministically rather than raced against
+    /// real GPU timing. Drives the resolver directly (not `LibraryPanelView`) because `@State`'s
+    /// storage only functions inside a live SwiftUI view graph — see `HoverPreviewResolver`'s doc
+    /// comment for the empirical confirmation of that constraint, which is why the flag's owner was
+    /// moved off `@State` in the first place.
+    @MainActor
+    func testASupersededHoverInstanceDoesNotClearTheFlagWhileANewerOneIsOutstanding() async throws {
+        let resolver = HoverPreviewResolver()
+        let urlA = URL(fileURLWithPath: "/tmp/fix-round-2-row-a.fs")
+        let urlB = URL(fileURLWithPath: "/tmp/fix-round-2-row-b.fs")
+        let gateA = RenderGate()
+        let gateB = RenderGate()
+
+        // Row A: dwell has elapsed, the render is genuinely in flight.
+        let taskA = Task {
+            await resolver.resolveHoverPreview(url: urlA) { _ in
+                await gateA.waitToBeReleased()
+                return .unavailable
+            }
+        }
+        await gateA.waitUntilArrived()
+        XCTAssertTrue(resolver.isResolvingPreview, "sanity: A's request is outstanding")
+
+        // The pointer has moved on — SwiftUI would cancel A's `.task(id:)` instance here. Per the
+        // doc comment above, that does NOT stop A's render from running to completion.
+        taskA.cancel()
+
+        // Row B: a newer request starts and is ALSO genuinely in flight before A is allowed to
+        // finish.
+        let taskB = Task {
+            await resolver.resolveHoverPreview(url: urlB) { _ in
+                await gateB.waitToBeReleased()
+                return .unavailable
+            }
+        }
+        await gateB.waitUntilArrived()
+
+        // Let A finish. Its `guard !Task.isCancelled` takes the early-return path — but its
+        // `defer` still runs either way, and MUST see its own generation is stale.
+        await gateA.release()
+        _ = await taskA.value
+        XCTAssertTrue(resolver.isResolvingPreview,
+                      "row B's request is still outstanding — A finishing (even cancelled) must "
+                      + "not clear the flag out from under it")
+
+        // Only once B — the genuinely current request — finishes does the flag clear.
+        await gateB.release()
+        _ = await taskB.value
+        XCTAssertFalse(resolver.isResolvingPreview,
+                       "once the LAST outstanding request truly finishes, the flag must clear")
+    }
 }

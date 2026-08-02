@@ -36,8 +36,9 @@ final class InMemoryKeyValueStore: KeyValueStoring {
 /// One key rather than one per slot: the slots are restored together or the restore is wrong, and
 /// per-slot keys can drift out of sync across app versions.
 ///
-/// **A class, not a struct (final-review F1).** `load()` now records whether the stored bytes were
-/// fully readable, and `save()` reads that flag to decide whether overwriting them is safe. The two
+/// **A class, not a struct (final-review F1).** `load()` records whether the stored bytes were fully
+/// readable and, if not, backs the raw bytes up under a dated key before returning (fix round 2,
+/// item 2 — see `loadFailed`'s doc comment for why `save()` no longer refuses to write). The two
 /// calls happen at opposite ends of `Instrument.init` — `load()` inline, `save()` from the
 /// `slotBank.onChange` closure — and a struct captured by that closure would carry a COPY taken
 /// before the flag was ever set, which is the one thing this fix must not do.
@@ -47,14 +48,16 @@ final class SlotBankStore {
     private let defaults: KeyValueStoring
 
     /// True when the last `load()` found stored bytes it could not fully read: either the whole
-    /// blob failed to decode, or at least one non-null element inside it did. `save()` refuses to
-    /// write while this is set, so unreadable-but-present bytes are never overwritten by the next
-    /// capture — the difference between "this build cannot read your bank" and "your bank is gone."
+    /// blob failed to decode, or at least one non-null element inside it did. Purely informational
+    /// since fix round 2 (item 2) — it no longer gates `save()`.
     ///
-    /// Deliberately sticky for the life of the store (i.e. the life of the process): the operator's
-    /// bytes stay on disk untouched until a build that can read them runs, or the operator clears
-    /// the key. Persistence being off for the session is the lesser loss, and
-    /// `lastFailureReasonForTesting` is the observable signal that it is off.
+    /// **History:** the original F1 fix left this sticky for the life of the process and had
+    /// `save()` refuse to write while it was set, so unreadable-but-present bytes could never be
+    /// overwritten. That traded one bug for a worse one: the exact schema-migration scenario F1 was
+    /// built to survive (a future non-optional `Preset` property) would fail every stored element,
+    /// set this permanently, and lock the operator out of persistence for good — every capture made
+    /// for the rest of that install, forever, silently discarded on relaunch, recoverable only via
+    /// `defaults delete` in Terminal. See `backUpUnreadableBytes(_:reason:)` for the fix.
     private(set) var loadFailed = false
 
     /// Why the last `load()`/`save()` failed, or nil if neither did. Named for the
@@ -62,6 +65,13 @@ final class SlotBankStore {
     /// seam a test can assert on and a future UI task can surface, replacing the `assertionFailure`
     /// that used to TRAP a debug build on a merely-unencodable value.
     private(set) var lastFailureReasonForTesting: String?
+
+    /// The `UserDefaults`/`KeyValueStoring` key the most recent unreadable-bytes backup was written
+    /// under, or nil if `load()` has never had to back anything up. Unlike
+    /// `lastFailureReasonForTesting` (which `save()` clears on its own success), this is NOT
+    /// cleared — it is the only handle a test (or an operator reading `defaults read`) has on WHICH
+    /// key the original bytes now live under, since `unreadableBackupKey()` is dated.
+    private(set) var lastUnreadableBackupKeyForTesting: String?
 
     init(defaults: KeyValueStoring = UserDefaults.standard) { self.defaults = defaults }
 
@@ -78,14 +88,13 @@ final class SlotBankStore {
 
     /// Absent or wholly-unreadable bytes yield an empty bank; a single unreadable element yields an
     /// empty SLOT. A corrupt bank must never be able to stop the instrument launching — and, since
-    /// F1, must never be silently overwritten either: anything lost here sets `loadFailed`, which
-    /// takes `save()` out of service for the session.
+    /// F1, must never be silently DISCARDED either: anything lost here is backed up first (see
+    /// `backUpUnreadableBytes(_:reason:)`), so persistence can resume immediately rather than being
+    /// refused for the rest of the process.
     func load() -> [Preset?] {
         guard let data = defaults.data(forKey: Self.key) else { return Self.empty }
         guard let decoded = try? JSONDecoder().decode([FailablePreset?].self, from: data) else {
-            loadFailed = true
-            lastFailureReasonForTesting =
-                "Stored slot bank could not be decoded — not overwriting it this session"
+            backUpUnreadableBytes(data, reason: "Stored slot bank could not be decoded")
             return Self.empty
         }
         // `map`, not `compactMap`: an element that decoded to nothing must leave its slot EMPTY at
@@ -93,22 +102,36 @@ final class SlotBankStore {
         let slots = decoded.map { $0?.value }
         let lost = zip(decoded, slots).filter { $0.0 != nil && $0.1 == nil }.count
         if lost > 0 {
-            loadFailed = true
-            lastFailureReasonForTesting =
-                "\(lost) stored slot(s) could not be decoded — not overwriting the bank this session"
+            backUpUnreadableBytes(data, reason: "\(lost) stored slot(s) could not be decoded")
         }
         return Self.normalised(slots)
     }
 
+    /// The dated key `load()` backs up unreadable bytes under. Dated rather than per-failure-unique
+    /// so repeated failures on the same day (e.g. relaunching against the same corrupt bytes)
+    /// collapse into one backup instead of littering a new key on every launch.
+    static func unreadableBackupKey(on date: Date = Date()) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return "\(key)-unreadable-\(formatter.string(from: date))"
+    }
+
+    /// Fix round 2, item 2. The original fix here (F1) refused every future `save()` once
+    /// `loadFailed` was set, with no way to clear it — a future `Preset` schema change (the exact
+    /// trigger F1 was written for) would fail every stored element and lock the operator out of
+    /// persistence permanently and silently. Instead: preserve the RAW unreadable bytes once, under
+    /// a dated key, then let `save()` proceed normally. Nothing is lost — the original bytes survive
+    /// under the backup key for manual recovery — and nothing is silently refused forever.
+    private func backUpUnreadableBytes(_ data: Data, reason: String) {
+        loadFailed = true
+        let backupKey = Self.unreadableBackupKey()
+        defaults.set(data, forKey: backupKey)
+        lastUnreadableBackupKeyForTesting = backupKey
+        lastFailureReasonForTesting =
+            "\(reason) — original bytes preserved under '\(backupKey)'; persistence continues normally"
+    }
+
     func save(_ slots: [Preset?]) {
-        guard !loadFailed else {
-            // The whole point of F1: the next capture after a lossy load must not be what makes the
-            // loss permanent. Non-fatal and non-trapping — the operator keeps working, the session
-            // just does not persist.
-            lastFailureReasonForTesting =
-                "Refusing to overwrite a slot bank this build could not fully read"
-            return
-        }
         do {
             // Phase 3a's branch review found SurfaceLayoutStore swallowing exactly this: an
             // unencodable value ended persistence for the session with no symptom until the next

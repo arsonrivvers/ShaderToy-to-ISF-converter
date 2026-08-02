@@ -29,9 +29,11 @@ can see us shrinking this bar a lot."*
 > task-4 review, and a reader who meets them elsewhere needs to find this correction. **The
 > argument this section makes is unaffected** — a percentage still cannot express "grow with the
 > window but do not eat my monitors", which is why the ceiling exists. Only the magnitude was
-> overstated. Authoritative version: `SurfaceMetrics.maxCellWidth`'s doc comment. Vertical space is the scarce resource on this surface — the
-monitor row is above and the deck strips below — and a percentage cannot express *"grow with the
-window but do not eat my monitors."*
+> overstated. Authoritative version: `SurfaceMetrics.maxCellWidth`'s doc comment.
+
+Vertical space is the scarce resource on this surface — the monitor row is above and the deck
+strips below — and a percentage cannot express *"grow with the window but do not eat my
+monitors."*
 
 **Pure fixed, phase 3c task 4.** The fix went to `.frame(width: 96, height: 54)` — exact, forever.
 That solved the complaint and introduced its opposite: a permanently tiny strip with dead space
