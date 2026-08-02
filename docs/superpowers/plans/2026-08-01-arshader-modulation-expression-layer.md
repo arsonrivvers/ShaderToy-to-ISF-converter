@@ -402,7 +402,7 @@ git commit -m "feat(mod): FX stages carry an injectable, resolvable identity"
     `ModDestination.fxScope: ModFXScope?`
   Tasks 7–12 use exactly these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ModDestinationTests.swift`:
 
@@ -490,7 +490,7 @@ final class ModDestinationTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -502,7 +502,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 Expected: compile failure — `cannot find 'ModDestination' in scope`. (`build-for-testing` opens
 no window; use it whenever a step only needs to see a compile fail.)
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `App/ARShader/ModDestination.swift`:
 
@@ -708,7 +708,7 @@ extension DeckID {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -719,7 +719,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Prove the blackout gate can fail**
+- [x] **Step 5: Prove the blackout gate can fail**
 
 Temporarily add `out.append(.deckOpacity(.one))`-style noise is not the mutation — the real one is
 a blackout address. Add a case `case blackout` to `ModDestination`, give it
@@ -728,7 +728,7 @@ a blackout address. Add a case `case blackout` to `ModDestination`, give it
 Expected: FAIL on both `testTheAddressableCatalogueIsExactlyTheSpecs…` assertions. Revert and
 re-run to confirm PASS. Record it in the Task 13 evidence table.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add App/ARShader/ModDestination.swift App/ARShaderTests/ModDestinationTests.swift
@@ -4872,6 +4872,12 @@ Create `docs/reports/modulation-mutation-evidence.md` and fill in every row from
 already performed. Spec §9.1 requires each gate to ship with its mutation demonstrated; this is
 where that is recorded so a reviewer can see it without re-deriving it.
 
+**The Observed-failure cells below are filled AS EACH TASK RUNS ITS MUTATION, not at Task 13.**
+The table does not exist as a file until this task, so "record it in the Task 13 evidence table"
+means *write the observed line into this template, in the plan, in the same commit as the task*.
+Task 1 did not, and its observation was gone by Task 2 — a table that can only be filled from
+memory 12 tasks later is exactly the un-failable-evidence problem §9.1 exists to prevent.
+
 ```markdown
 # Modulation layer — mutation evidence
 
@@ -4882,8 +4888,8 @@ not the intention.
 
 | Gate | Mutation applied | Test that failed | Observed failure | Task |
 |---|---|---|---|---|
-| FX stable IDs | Address by array index instead of id, then reorder | `FXStageIdentityTests.testAStageIsFoundByItsIdAcrossAReorder` | | 1 |
-| Blackout exclusion | Add a `blackout` case and put it in the catalogue | `ModDestinationTests.testTheAddressableCatalogueIsExactlyTheSpecs…` | | 2 |
+| FX stable IDs | Address by array index instead of id, then reorder | `FXStageIdentityTests.testAStageIsFoundByItsIdAcrossAReorder` | NOT RECORDED at the time of the run — re-run the mutation before Task 13 rather than inventing a line | 1 |
+| Blackout exclusion | Add a `blackout` case and put it in the catalogue | `ModDestinationTests.testTheAddressableCatalogueIsExactlyTheSpecs…` | 2 failures. L55 `XCTAssertEqual failed` — catalogue contained `ModDestination.blackout`; L62 `XCTAssertFalse failed - An expression that can kill the output mid-set is a defect with no upside` | 2 |
 | Frame coherence (registry) | Read the registry live instead of copying it | `ModSourceTests.testASnapshotIsFrozenAgainstLaterPublishes` | | 3 |
 | `since()` decay shape | Change the time constant from 0.002 to 0.02 | `ExpressionEvaluatorTests.testOneCounterDrivesAStrobeAndASwell…` | | 6 |
 | `offset` ownership | Let `offset` write the base (drop `base.value +`) | `ModulationEngineTests.testOffsetModeAddsToTheBase…` | | 7 |
