@@ -269,6 +269,55 @@ final class RemixSessionTests: XCTestCase {
         XCTAssertEqual(value.batchHistory, originalBatchHistory)
     }
 
+    func test_compatibilityInitializerAssemblesCompileEvidenceBeforeTerminalImmutability() throws {
+        let diagnostic = "line 12: bad uniform"
+        let failed = legacyNode(
+            id: "r4-0",
+            source: completeISF("compile-failure"),
+            round: 4,
+            status: .failed(diagnostic)
+        )
+        let history = RemixBatchRecord(
+            round: 4,
+            nodes: [failed],
+            requestsByNodeID: [:]
+        )
+        var value = RemixSession(
+            round: 4,
+            seedCounter: 1,
+            parentAID: "seed-0",
+            parentBID: nil,
+            parentHistory: [],
+            mode: .crossover,
+            steer: "legacy compatibility",
+            batchSize: 1,
+            currentBatch: [failed],
+            batchHistory: [history],
+            lineage: RemixLineage(),
+            workspace: RemixWorkspaceState(),
+            selectedLineageNodeID: nil,
+            crossoverSettings: RemixCrossoverSettings(),
+            activity: .idle,
+            compileDiagnosticsByNodeID: [failed.id: diagnostic],
+            pendingParentRequest: nil,
+            transcript: []
+        )
+
+        let assembledRuns = value.currentRuns + value.batchHistory.flatMap(\.runs)
+        XCTAssertEqual(assembledRuns.map(\.stage), [.failed, .failed])
+        XCTAssertEqual(assembledRuns.map(\.failureBoundary), [.compile, .compile])
+        XCTAssertEqual(assembledRuns.map(\.failureMessage), [diagnostic, diagnostic])
+        XCTAssertEqual(assembledRuns.map(\.compileDiagnostic), [diagnostic, diagnostic])
+        XCTAssertEqual(
+            assembledRuns.map(\.terminalAt),
+            [Date(timeIntervalSince1970: 0), Date(timeIntervalSince1970: 0)]
+        )
+
+        value.compileDiagnosticsByNodeID = [failed.id: "late diagnostic must not win"]
+
+        XCTAssertEqual(value.currentRuns + value.batchHistory.flatMap(\.runs), assembledRuns)
+    }
+
     func test_v1MigrationCompileDiagnosticStillOverridesGenericFailure() throws {
         let child = legacyNode(
             id: "r2-0",

@@ -243,6 +243,31 @@ struct RemixSession: Codable, Equatable {
         let requests = batchHistory.reduce(into: [String: RemixGenerationRequestSnapshot]()) {
             for (id, request) in $1.requestsByNodeID { $0[id] = request }
         }
+        let diagnostics = compileDiagnosticsByNodeID ?? [:]
+        let assembledCurrentRuns = currentBatch.enumerated().map { offset, node in
+            let run = RemixBatchRecord(
+                round: node.round,
+                nodes: [node],
+                requestsByNodeID: [
+                    node.id: requests[node.id] ?? RemixBatchRecord.fallbackRequest(for: node),
+                ]
+            ).runs[0]
+            return Self.assemblingCompatibilityCompileDiagnostic(
+                diagnostics[node.id],
+                into: run
+            )
+        }
+        let assembledHistory = batchHistory.map { batch in
+            RemixBatchRecord(
+                round: batch.round,
+                runs: batch.runs.map { run in
+                    Self.assemblingCompatibilityCompileDiagnostic(
+                        diagnostics[run.id],
+                        into: run
+                    )
+                }
+            )
+        }
         self.init(
             round: round,
             seedCounter: seedCounter,
@@ -252,16 +277,8 @@ struct RemixSession: Codable, Equatable {
             mode: mode,
             steer: steer,
             batchSize: batchSize,
-            currentRuns: currentBatch.enumerated().map { offset, node in
-                RemixBatchRecord(
-                    round: node.round,
-                    nodes: [node],
-                    requestsByNodeID: [
-                        node.id: requests[node.id] ?? RemixBatchRecord.fallbackRequest(for: node),
-                    ]
-                ).runs[0]
-            },
-            batchHistory: batchHistory,
+            currentRuns: assembledCurrentRuns,
+            batchHistory: assembledHistory,
             lineage: Self.seedArtifacts(from: lineage),
             workspace: workspace,
             selectedLineageNodeID: selectedLineageNodeID,
@@ -270,7 +287,6 @@ struct RemixSession: Codable, Equatable {
             pendingParentRequest: pendingParentRequest,
             transcript: transcript
         )
-        self.compileDiagnosticsByNodeID = compileDiagnosticsByNodeID
     }
 
     var currentBatch: [RemixNode] {
@@ -339,6 +355,21 @@ struct RemixSession: Codable, Equatable {
         run.failureMessage = diagnostic
         run.compileDiagnostic = diagnostic
         run.terminalAt = run.terminalAt ?? Date(timeIntervalSince1970: 0)
+        return run.boundedForPersistence()
+    }
+
+    private static func assemblingCompatibilityCompileDiagnostic(
+        _ diagnostic: String?,
+        into value: RemixChildRunRecord
+    ) -> RemixChildRunRecord {
+        guard let diagnostic else { return value }
+        guard value.stage == .failed else {
+            return value.stage.isTerminal ? value : applyingCompileDiagnostic(diagnostic, to: value)
+        }
+        var run = value
+        run.failureBoundary = .compile
+        run.failureMessage = diagnostic
+        run.compileDiagnostic = diagnostic
         return run.boundedForPersistence()
     }
 

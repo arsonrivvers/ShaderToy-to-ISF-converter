@@ -595,7 +595,7 @@ final class RemixStudioModelTests: XCTestCase {
 
         let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
 
-        XCTAssertEqual(restored.currentBatch[0].status, .interrupted)
+        XCTAssertEqual(restored.currentBatch[0].status, .generating)
         XCTAssertEqual(
             restored.batchHistory[0].requestsByNodeID[interrupted.id],
             request
@@ -815,10 +815,13 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(try loadedSession(fixture.store).currentBatch.first?.id, childID)
 
         restored.markCompileResult(id: childID, valid: false, error: "bad GLSL")
-        XCTAssertEqual(
-            try loadedSession(fixture.store).lineage.node(childID)?.status,
-            .failed("bad GLSL")
-        )
+        let compileFailure = try loadedSession(fixture.store)
+        let failedRun = try XCTUnwrap(compileFailure.currentRuns.first)
+        XCTAssertNil(compileFailure.lineage.node(childID))
+        XCTAssertEqual(failedRun.stage, .failed)
+        XCTAssertEqual(failedRun.failureBoundary, .compile)
+        XCTAssertEqual(failedRun.failureMessage, "bad GLSL")
+        XCTAssertEqual(failedRun.compileDiagnostic, "bad GLSL")
 
         restored.cancelGeneration()
         XCTAssertEqual(try loadedSession(fixture.store).activity, .cancelled)
@@ -868,13 +871,48 @@ final class RemixStudioModelTests: XCTestCase {
         let saved = try loadedSession(fixture.store)
         XCTAssertEqual(saved.currentBatch.first?.status, .failed("line 12: bad uniform"))
         XCTAssertEqual(saved.batchHistory.first?.nodes.first?.status, .failed("line 12: bad uniform"))
-        XCTAssertEqual(saved.lineage.node(childID)?.status, .failed("line 12: bad uniform"))
+        XCTAssertNil(saved.lineage.node(childID))
         XCTAssertEqual(saved.compileDiagnosticsByNodeID?[childID], "line 12: bad uniform")
+        XCTAssertEqual(saved.currentRuns.first?.stage, .failed)
+        XCTAssertEqual(saved.currentRuns.first?.failureBoundary, .compile)
+        XCTAssertEqual(saved.currentRuns.first?.failureMessage, "line 12: bad uniform")
+        XCTAssertEqual(saved.currentRuns.first?.compileDiagnostic, "line 12: bad uniform")
+        XCTAssertEqual(saved.batchHistory.first?.runs.first?.stage, .failed)
+        XCTAssertEqual(saved.batchHistory.first?.runs.first?.failureBoundary, .compile)
+        XCTAssertEqual(saved.batchHistory.first?.runs.first?.compileDiagnostic, "line 12: bad uniform")
 
         let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
         XCTAssertEqual(restored.compileDiagnostic(for: childID), "line 12: bad uniform")
         XCTAssertEqual(
             restored.compileSalvageActions(for: childID),
+            [
+                .viewCompileSummary,
+                .openSourceInEditorToFix,
+                .copyDiagnostic,
+                .retryThisChild,
+            ]
+        )
+    }
+
+    func test_restoredCompileFailureFindsCanonicalRunEvidenceWithoutLineageCopy() throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        var session = fixture.session
+        var failedRun = try XCTUnwrap(session.currentRuns.first)
+        XCTAssertTrue(failedRun.fail(
+            boundary: .compile,
+            message: "line 9: invalid sampler",
+            at: Date(timeIntervalSince1970: 9)
+        ))
+        session.currentRuns = [failedRun]
+        session.batchHistory = [RemixBatchRecord(round: failedRun.round, runs: [failedRun])]
+        XCTAssertNil(session.lineage.node(failedRun.id))
+        try fixture.store.save(session)
+
+        let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
+
+        XCTAssertEqual(restored.compileDiagnostic(for: failedRun.id), "line 9: invalid sampler")
+        XCTAssertEqual(
+            restored.compileSalvageActions(for: failedRun.id),
             [
                 .viewCompileSummary,
                 .openSourceInEditorToFix,

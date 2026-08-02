@@ -478,9 +478,8 @@ final class RemixStudioModel: ObservableObject {
     }
 
     func compileDiagnostic(for id: String) -> String? {
-        guard let node = lineage.node(id),
-              case .failed = node.status
-        else {
+        let storedNodes = currentBatch + batchHistory.flatMap(\.nodes) + lineage.allNodes
+        guard storedNodes.contains(where: { $0.id == id && Self.isFailed($0.status) }) else {
             return nil
         }
         return compileDiagnosticsByNodeID[id]
