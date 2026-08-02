@@ -115,6 +115,16 @@ final class RemixResponseParserTests: XCTestCase {
         XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
     }
 
+    func test_extractCandidate_rejectsMainNestedInsideAnotherFunction() {
+        let source = shader("""
+        void helper() {
+            void main() {}
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
     func test_extractCandidate_rejectsMainImageImpostor() {
         XCTAssertEqual(
             RemixResponseParser.extractCandidate(shader("void mainImage() {}")),
@@ -150,6 +160,102 @@ final class RemixResponseParserTests: XCTestCase {
         let source = shader("""
         void main() {
         #define CLOSE \\
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
+    func test_extractCandidate_treatsLineCommentsAsContinuedAcrossImmediateBackslashNewline() {
+        let source = shader("""
+        void main() { // closing brace remains commented \\
+        }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
+    func test_extractCandidate_rejectsUnterminatedBlockCommentInPreprocessorDirective() {
+        let source = shader("""
+        void main() {}
+        #define BROKEN /*{ trailing
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
+    func test_extractCandidate_rejectsUnterminatedBlockCommentInContinuedPreprocessorDirective() {
+        let source = shader("""
+        void main() {}
+        #define BROKEN \\
+        /*{ trailing
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
+    func test_extractCandidate_acceptsClosedBlockCommentsAndBracesInChainedPreprocessorDirective() {
+        let source = shader("""
+        void main() {}
+        #define CLOSED \\
+        /* { closed } */ \\
+        { ignored }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_acceptsUnterminatedBlockMarkerInsideSplicedDirectiveLineComment() {
+        let source = shader("""
+        void main() {}
+        #define X // ignored \\
+        /* no terminator
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_doesNotSpliceDirectiveLineCommentWhenBackslashHasTrailingSpaces() {
+        let source = shader("void main() {}\n#define X // ignored \\   \n/* no terminator")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
+    func test_extractCandidate_keepsMultilineDirectiveBlockCommentOpaque() {
+        let source = shader("""
+        void main() {}
+        #define X /* open
+        { ignored } */
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_keepsUnbalancedBraceInsideMultilineDirectiveBlockCommentOpaque() {
+        let source = shader("""
+        void main() {}
+        #define X /* open
+        { ignored */
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_keepsTokensOnMultilineDirectiveCommentClosingLineOpaque() {
+        let source = shader("""
+        void main() {}
+        #define X /* open
+        */ }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_countsTokensOnLineAfterMultilineDirectiveCommentCloses() {
+        let source = shader("""
+        void main() {}
+        #define X /* open
+        */
         }
         """)
 
@@ -236,6 +342,96 @@ final class RemixResponseParserTests: XCTestCase {
         let second = shader("void main() { gl_FragColor = vec4(0.0); }")
 
         XCTAssertEqual(RemixResponseParser.extractCandidate("\(first)\n\(second)"), .success(first))
+    }
+
+    func test_extractCandidate_skipsTruncatedVersionedResponseBeforeCompleteVersionedResponse() {
+        let truncated = shader("void main() {")
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_skipsVersionedResponseWithUnterminatedBodyCommentBeforeCompleteVersionedResponse() {
+        let truncated = shader("void main() {}\n/* unterminated body comment")
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_skipsVersionedResponseWithUnterminatedQuoteBeforeCompleteVersionedResponse() {
+        let truncated = shader("void main() {}\n\"unterminated body quote")
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_skipsVersionedResponseWithContinuedDirectiveBeforeCompleteVersionedResponse() {
+        let truncated = shader("void main() {}\n#define CONTINUES \\")
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_skipsNoMainResponseWithUnterminatedCommentBeforeCompleteVersionedResponse() {
+        let truncated = "/*{ \"ISFVSN\": \"2.0\" }*/\n/* unterminated body comment"
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_skipsNoMainResponseWithContinuedDirectiveBeforeCompleteVersionedResponse() {
+        let truncated = "/*{ \"ISFVSN\": \"2.0\" }*/\n#define CONTINUES \\"
+        let complete = shader("void main() { gl_FragColor = vec4(0.0); }")
+
+        XCTAssertEqual(
+            RemixResponseParser.extractCandidate("\(truncated)\n\(complete)"),
+            .success(complete)
+        )
+    }
+
+    func test_extractCandidate_keepsVersionedHeaderCommentInsidePreprocessorDirective() {
+        let source = shader("""
+        #define NOTE /*{ "ISFVSN": "2.0" }*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_keepsVersionedHeaderCommentInsideLineComment() {
+        let source = shader("""
+        // /*{ "ISFVSN": "2.0" }*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_keepsVersionedHeaderCommentsInsideAHelperBody() {
+        let source = shader("""
+        float helper() {
+            /*{ "ISFVSN": "2.0" }*/
+            return 1.0;
+        }
+        void main() { gl_FragColor = vec4(helper()); }
+        """)
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
     }
 
     func test_extractCandidate_keepsVersionlessParsedHeadersAsCompatibilityCandidates() {
