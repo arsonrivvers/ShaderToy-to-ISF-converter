@@ -107,7 +107,11 @@ targets:
         buildPhase: resources
       - path: TrueISFEditorTests/Fixtures/remix-2026-08-01-empty-result-session-v1.json
         buildPhase: resources
+      - path: TrueISFEditorTests/Fixtures/remix-schema-v2-mid-batch.json
+        buildPhase: resources
       - TrueISFEditor/Remix/RemixNode.swift
+      - TrueISFEditor/Remix/RemixChildRunRecord.swift
+      - TrueISFEditor/Remix/LegacyRemixSessionV1.swift
       - TrueISFEditor/Remix/RemixDirectives.swift
       - TrueISFEditor/Remix/RemixPrompt.swift
       - TrueISFEditor/Remix/RemixResponseParser.swift

@@ -60,7 +60,7 @@ final class RemixSessionStoreTests: XCTestCase {
     func test_store_boundsBatchHistoryAndTranscript() throws {
         var unbounded = session(round: 25)
         unbounded.batchHistory = (1...25).map {
-            RemixBatchRecord(round: $0, nodes: [], requestsByNodeID: [:])
+            RemixBatchRecord(round: $0, runs: [])
         }
         unbounded.transcript = (1...2_100).map { "line-\($0)" }
         let store = RemixSessionStore(fileURL: sessionURL)
@@ -76,6 +76,30 @@ final class RemixSessionStoreTests: XCTestCase {
         XCTAssertEqual(restored.transcript.count, 2_000)
         XCTAssertEqual(unbounded.batchHistory.count, 25)
         XCTAssertEqual(unbounded.transcript.count, 2_100)
+    }
+
+    func test_loadLiteralMidBatchSchemaV2DoesNotQuarantineOrNormalizeLiveEvidence() throws {
+        let fixtureURL = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "remix-schema-v2-mid-batch",
+            withExtension: "json"
+        ))
+        try Data(contentsOf: fixtureURL).write(to: sessionURL)
+        let store = RemixSessionStore(fileURL: sessionURL)
+
+        guard case let .session(restored) = try store.load() else {
+            return XCTFail("Expected schema-v2 session")
+        }
+
+        XCTAssertEqual(restored.currentRuns.map(\.stage), [
+            .queued, .starting, .thinking, .receiving, .retrying, .extracting, .compiling,
+        ])
+        XCTAssertEqual(restored.currentRuns[5].candidateSource, "extracting-candidate")
+        XCTAssertEqual(restored.currentRuns[6].candidateSource, "compiling-candidate")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sessionURL.path))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).allSatisfy { $0.pathExtension != "corrupt" })
     }
 
     private func siblingTemporaryFiles() throws -> [URL] {
@@ -99,7 +123,7 @@ final class RemixSessionStoreTests: XCTestCase {
             mode: .crossover,
             steer: "",
             batchSize: 5,
-            currentBatch: [],
+            currentRuns: [],
             batchHistory: [],
             lineage: RemixLineage(),
             workspace: RemixWorkspaceState(),
