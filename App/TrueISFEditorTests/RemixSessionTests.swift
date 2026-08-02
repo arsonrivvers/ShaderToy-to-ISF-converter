@@ -65,7 +65,7 @@ final class RemixSessionTests: XCTestCase {
         XCTAssertEqual(migrated.currentRuns[0].stage, .interrupted)
 
         XCTAssertEqual(migrated.currentRuns[1].stage, .compiling)
-        XCTAssertEqual(migrated.currentRuns[1].candidateSource, "current-candidate")
+        XCTAssertEqual(migrated.currentRuns[1].candidateSource, completeISF("current-candidate"))
         XCTAssertNil(migrated.currentRuns[1].artifactID)
 
         XCTAssertEqual(migrated.currentRuns[2].stage, .failed)
@@ -83,7 +83,10 @@ final class RemixSessionTests: XCTestCase {
 
         XCTAssertEqual(migrated.batchHistory[0].runs.first?.id, "r1-9")
         XCTAssertEqual(migrated.batchHistory[0].runs.first?.stage, .interrupted)
-        XCTAssertEqual(migrated.batchHistory[1].runs.first?.candidateSource, "current-candidate")
+        XCTAssertEqual(
+            migrated.batchHistory[1].runs.first?.candidateSource,
+            completeISF("current-candidate")
+        )
 
         XCTAssertEqual(migrated.lineage.allNodes.map(\.id), ["seed-0"])
         XCTAssertEqual(migrated.lineage.node("seed-0")?.status, .compiled)
@@ -141,6 +144,155 @@ final class RemixSessionTests: XCTestCase {
         XCTAssertEqual(try roundTrip(decoded), decoded)
     }
 
+    func test_v1MigrationRetainsLineageOnlyGeneratedChildrenInDeterministicRoundGroups() throws {
+        let existingHistoryNode = legacyNode(
+            id: "r1-0",
+            source: completeISF("history-r1-0"),
+            round: 1,
+            status: .compiled
+        )
+        let lineageRoundTwoFirst = legacyNode(
+            id: "r2-0",
+            source: completeISF("lineage-r2-0"),
+            round: 2,
+            status: .compiled
+        )
+        let lineageRoundOne = legacyNode(
+            id: "r1-1",
+            source: completeISF("lineage-r1-1"),
+            round: 1,
+            status: .compiled
+        )
+        let lineageRoundTwoSecond = legacyNode(
+            id: "r2-1",
+            source: completeISF("lineage-r2-1"),
+            round: 2,
+            status: .compiled
+        )
+        var lineage = RemixLineage()
+        lineage.insert(artifact(id: "seed-0", source: completeISF("seed")))
+        lineage.insert(lineageRoundTwoFirst)
+        lineage.insert(lineageRoundOne)
+        lineage.insert(lineageRoundTwoSecond)
+        let legacy = legacySession(
+            batchHistory: [
+                LegacyRemixBatchRecordV1(
+                    round: 1,
+                    nodes: [existingHistoryNode],
+                    requestsByNodeID: [:]
+                ),
+            ],
+            lineage: lineage
+        )
+
+        let migrated = try JSONDecoder().decode(
+            RemixSession.self,
+            from: JSONEncoder().encode(legacy)
+        )
+
+        XCTAssertTrue(migrated.currentRuns.isEmpty)
+        XCTAssertEqual(migrated.batchHistory.map(\.round), [1, 2])
+        XCTAssertEqual(migrated.batchHistory.map { $0.runs.map(\.id) }, [
+            ["r1-0", "r1-1"],
+            ["r2-0", "r2-1"],
+        ])
+        XCTAssertEqual(migrated.batchHistory.flatMap(\.runs).map(\.stage), [
+            .compiling, .compiling, .compiling, .compiling,
+        ])
+        XCTAssertEqual(migrated.lineage.allNodes.map(\.id), ["seed-0"])
+    }
+
+    func test_v1MigrationLeavesMalformedSavedSourceInterrupted() throws {
+        let malformed = """
+        /*{ "ISFVSN": "2.0" }*/
+        void main() {
+        """
+        let child = legacyNode(
+            id: "r2-0",
+            source: malformed,
+            round: 2,
+            status: .compiled
+        )
+        let legacy = legacySession(currentBatch: [child])
+
+        let migrated = try JSONDecoder().decode(
+            RemixSession.self,
+            from: JSONEncoder().encode(legacy)
+        )
+
+        XCTAssertEqual(migrated.currentRuns.first?.stage, .interrupted)
+        XCTAssertNil(migrated.currentRuns.first?.candidateSource)
+    }
+
+    func test_v1MigrationKeepsUnknownGenericFailureTerminalWithoutInventingBoundary() throws {
+        let child = legacyNode(
+            id: "r2-0",
+            source: "",
+            round: 2,
+            status: .failed("opaque legacy failure")
+        )
+        let legacy = legacySession(currentBatch: [child])
+
+        let migrated = try JSONDecoder().decode(
+            RemixSession.self,
+            from: JSONEncoder().encode(legacy)
+        )
+        let run = try XCTUnwrap(migrated.currentRuns.first)
+
+        XCTAssertEqual(run.stage, .failed)
+        XCTAssertEqual(run.failureMessage, "opaque legacy failure")
+        XCTAssertNil(run.failureBoundary)
+        XCTAssertNotNil(run.terminalAt)
+    }
+
+    func test_compatibilityCompileDiagnosticSetterDoesNotRewriteTerminalRuns() throws {
+        var ready = run(id: "r4-0", slot: 0, stage: .compiling)
+        ready.candidateSource = completeISF("ready")
+        XCTAssertTrue(ready.finishReady(
+            artifactID: "artifact-r4-0",
+            at: Date(timeIntervalSince1970: 2)
+        ))
+        let interrupted = run(id: "r3-0", slot: 0, stage: .interrupted)
+        var value = session(
+            currentRuns: [ready],
+            batchHistory: [RemixBatchRecord(round: 3, runs: [interrupted])]
+        )
+        let originalCurrentRuns = value.currentRuns
+        let originalBatchHistory = value.batchHistory
+
+        value.compileDiagnosticsByNodeID = [
+            ready.id: "late ready diagnostic",
+            interrupted.id: "late interrupted diagnostic",
+        ]
+
+        XCTAssertEqual(value.currentRuns, originalCurrentRuns)
+        XCTAssertEqual(value.batchHistory, originalBatchHistory)
+    }
+
+    func test_v1MigrationCompileDiagnosticStillOverridesGenericFailure() throws {
+        let child = legacyNode(
+            id: "r2-0",
+            source: completeISF("compile-failure"),
+            round: 2,
+            status: .failed("opaque legacy failure")
+        )
+        let legacy = legacySession(
+            currentBatch: [child],
+            compileDiagnosticsByNodeID: ["r2-0": "line 7: invalid uniform"]
+        )
+
+        let migrated = try JSONDecoder().decode(
+            RemixSession.self,
+            from: JSONEncoder().encode(legacy)
+        )
+        let run = try XCTUnwrap(migrated.currentRuns.first)
+
+        XCTAssertEqual(run.stage, .failed)
+        XCTAssertEqual(run.failureBoundary, .compile)
+        XCTAssertEqual(run.failureMessage, "line 7: invalid uniform")
+        XCTAssertEqual(run.compileDiagnostic, "line 7: invalid uniform")
+    }
+
     private func roundTrip(_ value: RemixSession) throws -> RemixSession {
         try JSONDecoder().decode(RemixSession.self, from: JSONEncoder().encode(value))
     }
@@ -164,6 +316,64 @@ final class RemixSessionTests: XCTestCase {
             round: 0,
             label: "Seed"
         )
+    }
+
+    private func legacyNode(
+        id: String,
+        source: String,
+        round: Int,
+        status: RemixNode.Status
+    ) -> RemixNode {
+        RemixNode(
+            id: id,
+            isfSource: source,
+            parents: ["seed-0"],
+            mode: .crossover,
+            steer: "legacy",
+            directive: "migrate",
+            round: round,
+            status: status
+        )
+    }
+
+    private func legacySession(
+        currentBatch: [RemixNode] = [],
+        batchHistory: [LegacyRemixBatchRecordV1] = [],
+        lineage suppliedLineage: RemixLineage? = nil,
+        compileDiagnosticsByNodeID: [String: String]? = nil
+    ) -> LegacyRemixSessionV1 {
+        var lineage = suppliedLineage ?? RemixLineage()
+        if suppliedLineage == nil {
+            lineage.insert(artifact(id: "seed-0", source: completeISF("seed")))
+        }
+        return LegacyRemixSessionV1(
+            schemaVersion: 1,
+            round: 2,
+            seedCounter: 1,
+            parentAID: "seed-0",
+            parentBID: nil,
+            parentHistory: [],
+            mode: .crossover,
+            steer: "legacy",
+            batchSize: max(1, currentBatch.count),
+            currentBatch: currentBatch,
+            batchHistory: batchHistory,
+            lineage: lineage,
+            workspace: RemixWorkspaceState(),
+            selectedLineageNodeID: nil,
+            crossoverSettings: RemixCrossoverSettings(),
+            activity: .idle,
+            compileDiagnosticsByNodeID: compileDiagnosticsByNodeID,
+            pendingParentRequest: nil,
+            transcript: []
+        )
+    }
+
+    private func completeISF(_ description: String) -> String {
+        """
+        /*{ "ISFVSN": "2.0", "DESCRIPTION": "\(description)" }*/
+        void main(){ gl_FragColor=vec4(1.0); }
+        """
     }
 
     private func run(
@@ -229,19 +439,19 @@ final class RemixSessionTests: XCTestCase {
           "batchSize": 5,
           "currentBatch": [
             {"id":"r2-0","isfSource":"","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"zero","round":2,"status":{"generating":{}},"label":null},
-            {"id":"r2-1","isfSource":"current-candidate","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null},
+            {"id":"r2-1","isfSource":"/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"current-candidate\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null},
             {"id":"r2-2","isfSource":"compile-candidate","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"two","round":2,"status":{"failed":{"_0":"generic legacy failure"}},"label":null},
             {"id":"r2-3","isfSource":"","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"three","round":2,"status":{"failed":{"_0":"No ISF in reply"}},"label":null},
             {"id":"r2-4","isfSource":"","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"four","round":2,"status":{"failed":{"_0":"No ISF in reply"}},"label":null}
           ],
           "batchHistory": [
             {"round":1,"nodes":[{"id":"r1-9","isfSource":"","parents":["seed-0"],"mode":"crossover","steer":"","directive":"old","round":1,"status":{"generating":{}},"label":null}],"requestsByNodeID":{}},
-            {"round":2,"nodes":[{"id":"r2-1","isfSource":"history-candidate","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null}],"requestsByNodeID":{}}
+            {"round":2,"nodes":[{"id":"r2-1","isfSource":"/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"history-candidate\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null}],"requestsByNodeID":{}}
           ],
           "lineage": {
             "nodes": {
               "seed-0":{"id":"seed-0","isfSource":"seed-source","parents":[],"mode":"crossover","steer":"","directive":"seed","round":0,"status":{"compiled":{}},"label":"Seed"},
-              "r2-1":{"id":"r2-1","isfSource":"lineage-candidate","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null}
+              "r2-1":{"id":"r2-1","isfSource":"/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"lineage-candidate\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }","parents":["seed-0"],"mode":"crossover","steer":"liquid","directive":"one","round":2,"status":{"compiled":{}},"label":null}
             },
             "order":["seed-0","r2-1"],
             "favorites":["r2-1"]

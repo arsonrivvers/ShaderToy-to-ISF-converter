@@ -298,13 +298,15 @@ struct RemixSession: Codable, Equatable {
         set {
             guard let newValue else { return }
             currentRuns = currentRuns.map { run in
-                Self.applyingCompileDiagnostic(newValue[run.id], to: run)
+                guard !run.stage.isTerminal else { return run }
+                return Self.applyingCompileDiagnostic(newValue[run.id], to: run)
             }
             batchHistory = batchHistory.map { record in
                 RemixBatchRecord(
                     round: record.round,
                     runs: record.runs.map { run in
-                        Self.applyingCompileDiagnostic(newValue[run.id], to: run)
+                        guard !run.stage.isTerminal else { return run }
+                        return Self.applyingCompileDiagnostic(newValue[run.id], to: run)
                     }
                 )
             }
@@ -374,7 +376,7 @@ struct RemixSession: Codable, Equatable {
                 transcript: legacy.transcript
             )
         }
-        batchHistory = legacy.batchHistory.map { batch in
+        var migratedHistory = legacy.batchHistory.map { batch in
             RemixBatchRecord(
                 round: batch.round,
                 runs: batch.nodes.enumerated().map { offset, node in
@@ -389,6 +391,42 @@ struct RemixSession: Codable, Equatable {
                 }
             )
         }
+        let representedRunIDs = Set(
+            legacy.currentBatch.map(\.id) + legacy.batchHistory.flatMap(\.nodes).map(\.id)
+        )
+        let lineageOnlyGeneratedNodes = legacy.lineage.allNodes.filter {
+            !$0.id.hasPrefix("seed-") && !representedRunIDs.contains($0.id)
+        }
+        for node in lineageOnlyGeneratedNodes {
+            if let batchIndex = migratedHistory.lastIndex(where: { $0.round == node.round }) {
+                let slot = RemixBatchRecord.slot(in: node.id)
+                    ?? migratedHistory[batchIndex].runs.count
+                migratedHistory[batchIndex].runs.append(Self.migratedRun(
+                    node,
+                    slot: slot,
+                    candidate: candidates[node.id],
+                    request: requests[node.id] ?? Self.fallbackRequest(for: node, in: legacy),
+                    compileDiagnostic: diagnostics[node.id],
+                    transcript: legacy.transcript
+                ))
+            } else {
+                let run = Self.migratedRun(
+                    node,
+                    slot: RemixBatchRecord.slot(in: node.id) ?? 0,
+                    candidate: candidates[node.id],
+                    request: requests[node.id] ?? Self.fallbackRequest(for: node, in: legacy),
+                    compileDiagnostic: diagnostics[node.id],
+                    transcript: legacy.transcript
+                )
+                let insertionIndex = migratedHistory.firstIndex { $0.round > node.round }
+                    ?? migratedHistory.endIndex
+                migratedHistory.insert(
+                    RemixBatchRecord(round: node.round, runs: [run]),
+                    at: insertionIndex
+                )
+            }
+        }
+        batchHistory = migratedHistory
         let allNodes = legacy.lineage.allNodes
             + legacy.currentBatch
             + legacy.batchHistory.flatMap(\.nodes)
@@ -420,14 +458,20 @@ struct RemixSession: Codable, Equatable {
 
     private static func candidatesByNodeID(in legacy: LegacyRemixSessionV1) -> [String: String] {
         var candidates: [String: String] = [:]
-        for node in legacy.lineage.allNodes where !node.isfSource.isEmpty {
-            candidates[node.id] = node.isfSource
+        for node in legacy.lineage.allNodes {
+            if let candidate = RemixResponseParser.extractISF(node.isfSource) {
+                candidates[node.id] = candidate
+            }
         }
-        for node in legacy.batchHistory.flatMap(\.nodes) where !node.isfSource.isEmpty {
-            candidates[node.id] = node.isfSource
+        for node in legacy.batchHistory.flatMap(\.nodes) {
+            if let candidate = RemixResponseParser.extractISF(node.isfSource) {
+                candidates[node.id] = candidate
+            }
         }
-        for node in legacy.currentBatch where !node.isfSource.isEmpty {
-            candidates[node.id] = node.isfSource
+        for node in legacy.currentBatch {
+            if let candidate = RemixResponseParser.extractISF(node.isfSource) {
+                candidates[node.id] = candidate
+            }
         }
         return candidates
     }
@@ -529,6 +573,8 @@ struct RemixSession: Codable, Equatable {
             } else if message.localizedCaseInsensitiveContains("extract") {
                 run.stage = .failed
                 run.failureBoundary = .extraction
+            } else {
+                run.stage = .failed
             }
         }
         return run.boundedForPersistence()
