@@ -272,8 +272,20 @@ struct SlotBankStripView: View {
     /// `.batch`, never `.interactive`: cancelling these leaves permanently blank cells that only a
     /// resize or relaunch would fill (spec, "Two consumers, two concurrency policies") — the
     /// opposite of library hover, where a superseded request is wasted work worth dropping.
-    private func loadThumbnails() async {
+    ///
+    /// **The `Task.isCancelled` guard is what makes the `.task(id:)` doc comment above TRUE**
+    /// (final-review F2). Without it, "SwiftUI restarts this task — cancelling whatever sweep was
+    /// still in flight" was false: `await`ing an actor method is not a cancellation point, and
+    /// `ThumbnailService.thumbnail` neither throws nor checks the CALLER's cancellation, so a
+    /// cancelled sweep ran to completion and issued every remaining request anyway. Three captures
+    /// in quick succession therefore left four concurrent sweeps issuing up to 4N `.batch`
+    /// renders, all serialized on one actor, with any library-hover request queued behind the lot.
+    /// Not `private`: `SlotBankStripViewDropSeamTests` drives this directly, the same "testable
+    /// seam on the view struct itself, no rendering" pattern `wouldAccept` and `recallTargets`
+    /// already use.
+    func loadThumbnails() async {
         for preset in bank.slots {
+            guard !Task.isCancelled else { return }
             guard let preset, thumbnails[preset.shaderURL] == nil else { continue }
             let result = await instrument.thumbnailService.thumbnail(
                 for: preset.shaderURL, priority: .batch)

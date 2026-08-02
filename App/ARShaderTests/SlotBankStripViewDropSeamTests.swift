@@ -70,4 +70,35 @@ final class SlotBankStripViewDropSeamTests: XCTestCase {
                        "highlighting a target that would reject the drop is worse than no "
                        + "highlight on a strip of eight visually identical cells")
     }
+
+    // MARK: loadThumbnails — cancellation (final-review F2)
+
+    /// The `.task(id: bank.slots)` doc comment claims a restart cancels the sweep still in flight.
+    /// It did not: awaiting an actor method is not a cancellation point, so a cancelled sweep ran
+    /// to completion and issued every remaining `.batch` request anyway — three quick captures put
+    /// four concurrent sweeps on one actor with hover queued behind all of them.
+    ///
+    /// Deterministic, not racy: this test is `@MainActor` and `Task { }` inherits that actor, so
+    /// the child task cannot begin until this method suspends. `cancel()` on the line after the
+    /// task is created therefore always lands BEFORE the loop's first iteration, and a correct
+    /// implementation issues exactly zero requests.
+    func testACancelledThumbnailSweepStopsRatherThanRunningToCompletion() async throws {
+        let (view, instrument) = makeView()
+        // A real fixture, not a made-up path: an unreadable URL fails before the transpile, so
+        // `compileCountForTesting` would read 0 either way and the test could not fail.
+        let url = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: "solid_red", withExtension: "fs", subdirectory: "Fixtures"))
+        instrument.slotBank.capture(
+            Preset.capturing(url: url, snapshot: ParamSnapshot(params: [:])), into: 0)
+
+        let sweep = Task { await view.loadThumbnails() }
+        sweep.cancel()
+        await sweep.value
+
+        let compiles = await instrument.thumbnailService.compileCountForTesting
+        XCTAssertEqual(compiles, 0,
+                       "a cancelled sweep must issue NO further requests — each one holds the "
+                       + "thumbnail actor for a full transpile, offscreen render and PNG encode, "
+                       + "and a library hover queues behind every one of them")
+    }
 }
