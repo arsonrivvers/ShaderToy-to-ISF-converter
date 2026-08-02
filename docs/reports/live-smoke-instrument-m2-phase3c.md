@@ -10,9 +10,31 @@ running this document runs both. 3b's leg 17 ("Hidden looks are always marked") 
 Also folds in the **phase 3a fix re-smoke** (legs 37–39, merged to master unsigned) and the phase 3b
 smoke gate in full.
 
-- **Build under test:** _(filled in at install)_
-- **Branch:** `m2-slot-bank` @ `e318f0a`, 65 commits ahead of merge-base `02fbcd4`
-- **Automated suites:** _(filled in below)_
+- **Build under test:** `~/Applications/ARShader.app`, installed 2026-08-02 from
+  `/tmp/arshader-ddata-bank` (never `/tmp/arshader-ddata` — concurrent sessions work in the main
+  checkout). It replaced a build from **2026-07-31**, which was four tasks stale.
+  Under Xcode 26 the real code is in `ARShader.debug.dylib` (5.9MB), not the 58KB
+  `Contents/MacOS/ARShader` stub. The installed dylib is byte-identical to the build product
+  (sha256 `dd796e22…`), and carries three string literals unique to this session's work:
+  `Undo clear slot`, `original bytes preserved under`, and `persistence continues normally`.
+  **Verified with `nm` and `strings`, not by assumption** — note that Swift's mangler compresses
+  repeated substrings, so a nested type like `SlotBank.UndoableSlotChange` appears as
+  `SlotBankC08UndoableE6Change`, and an exact-substring symbol probe for it returns nothing even
+  though the type is present. Long string literals are the more reliable freshness check.
+- **Branch:** `m2-slot-bank` @ `41ca066`, 66 commits ahead of merge-base `02fbcd4`
+- **Automated suites, all run 2026-08-02 in the foreground:**
+  - **ARShader: 327 tests, 326 passed, 1 failed, 0 skipped.** The one failure is
+    `testSteadyStateAllocatesNoNewTextures`, a known **pre-existing** intermittent hang (~2 of 7
+    runs) unrelated to this branch — it dates to `67048d9`, Milestone 1. It now fails fast in 30s
+    with a named message instead of stalling for minutes; root cause is filed and open
+    (`arshader-steadystate-test-intermittent-hang-20260802`). On runs where it does not trigger,
+    the suite is **327/327 in ~22s**.
+  - **TrueISFEditor: TEST SUCCEEDED**, 0 skipped.
+  - **ShadertoyISFKit: 312 tests, 0 failures.**
+  - ⚠️ **Never judge an xcodebuild run from the console tail.** After a host restart it prints a
+    per-launch summary (`Executed 175 tests, with 0 failures`) that reads as green when the run in
+    fact FAILED and the real total was 327. Use
+    `xcrun xcresulttool get test-results summary --path <bundle>.xcresult`.
 
 **No leg below has been run.** Everything in this branch is **STAGED** until you run them; nothing
 here is CONFIRMED. Five tasks in this branch have never been seen on device at all.
