@@ -409,7 +409,15 @@ struct SlotBankStripView: View {
                                          isTargeted: targetedSlot == index,
                                          isRejected: rejectedSlot == index,
                                          onRecall: { recall(index) },
-                                         onClear: { bank.clear(index) })
+                                         onClear: { bank.clear(index) },
+                                         // Handed to EVERY cell, not only the one that lost a
+                                         // look: after a clear that cell is empty and reads as
+                                         // "nothing here", so restricting the way back to it alone
+                                         // would hide the undo on the least likely cell to be
+                                         // right-clicked next. The title names the slot, so no
+                                         // cell can imply it is the one being restored.
+                                         undoTitle: bank.undoable?.menuTitle,
+                                         onUndo: { bank.undo() })
                                     .frame(width: cellWidth, height: cellWidth * 9.0 / 16.0)
                                     // The never-overwrite invariant restated for a gesture — the
                                     // single most important mutation proof in the phase: a mid-set
@@ -620,6 +628,11 @@ private struct SlotCell: View {
     let isRejected: Bool
     let onRecall: () -> Void
     let onClear: () -> Void
+    /// The title of the one restorable change, or nil when there is nothing to put back — see
+    /// `SlotBank.undoable`. Nil means the menu item is ABSENT, not disabled: a permanently greyed
+    /// "Undo clear" would be one more thing to read mid-set.
+    let undoTitle: String?
+    let onUndo: () -> Void
 
     private var state: SlotCellState { .of(preset: preset, isAvailable: isAvailable, liveOn: liveOn) }
 
@@ -703,6 +716,11 @@ private struct SlotCell: View {
         .contextMenu {
             if preset != nil {
                 Button("Clear slot", role: .destructive, action: onClear)
+            }
+            // The way back from the only permanently-destructive gesture on this strip
+            // (final-review F3). Present only while there is something to restore.
+            if let undoTitle {
+                Button(undoTitle, action: onUndo)
             }
         }
         .help(helpText)

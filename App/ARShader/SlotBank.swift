@@ -36,10 +36,51 @@ final class SlotBank: ObservableObject {
         self.slots = padded
     }
 
+    /// A look this bank destroyed, kept so exactly one of them can be put back.
+    ///
+    /// One deep, not a stack (operator ruling, 2026-08-02). The gesture being guarded is a
+    /// right-click landing on a menu with one destructive item under the pointer, mid-set; the
+    /// answer to that is a way back, not an edit history.
+    struct UndoableSlotChange: Equatable {
+        enum Kind: Equatable {
+            /// The context menu's Clear.
+            case cleared
+            /// An ⌥-drop that overwrote a filled slot.
+            case replaced
+        }
+        let index: Int
+        let preset: Preset
+        let kind: Kind
+
+        /// Reads on the menu item that restores it. Names the slot, because the operator fires this
+        /// bank by position and "Undo" alone does not say which cell is about to change.
+        var menuTitle: String {
+            switch kind {
+            case .cleared:  return "Undo clear slot \(index + 1)"
+            case .replaced: return "Undo replace slot \(index + 1)"
+            }
+        }
+    }
+
+    /// The one look that can be restored, or nil when there is nothing to put back.
+    ///
+    /// Armed by `clear` and by a `capture` that overwrote something; disarmed by `undo()` and by any
+    /// later write to the SAME index. That last rule is what keeps `undo()` from destroying
+    /// something the operator captured after the fact: the undoable always describes the most
+    /// recent destructive event at an index nothing has touched since.
+    @Published private(set) var undoable: UndoableSlotChange?
+
     private func isValid(_ index: Int) -> Bool { slots.indices.contains(index) }
 
     func capture(_ preset: Preset, into index: Int) {
         guard isValid(index) else { return }
+        if let overwritten = slots[index] {
+            undoable = UndoableSlotChange(index: index, preset: overwritten, kind: .replaced)
+        } else if undoable?.index == index {
+            // Whatever was armed here has been superseded by a fresh capture into the same slot;
+            // restoring it now would silently destroy the look just captured.
+            undoable = nil
+        }
         slots[index] = preset
         onChange?()
     }
@@ -51,9 +92,32 @@ final class SlotBank: ObservableObject {
         return slots[index]
     }
 
+    /// Arms `undoable` before emptying the slot (final-review F3). Until this, the only
+    /// permanently-destructive slot gesture in the app was the one with no guard at all: the whole
+    /// phase is organised around "a drag must never silently replace a dialled-in look" and builds
+    /// real machinery for it, while a single context-menu click called this and persisted the loss
+    /// before the menu had finished dismissing.
+    ///
+    /// No dialog and no confirmation sheet, deliberately (operator ruling): this is a live
+    /// instrument, and a modal mid-set is the thing being avoided. The way back is a second menu
+    /// item, not a gate on the way out.
     func clear(_ index: Int) {
         guard isValid(index) else { return }
+        if let cleared = slots[index] {
+            undoable = UndoableSlotChange(index: index, preset: cleared, kind: .cleared)
+        }
         slots[index] = nil
+        onChange?()
+    }
+
+    /// Puts the one undoable look back where it was. A no-op when there is nothing to restore, so
+    /// the caller needs no guard of its own.
+    ///
+    /// Disarms afterwards: one deep, and never a redo stack.
+    func undo() {
+        guard let change = undoable, isValid(change.index) else { return }
+        undoable = nil
+        slots[change.index] = change.preset
         onChange?()
     }
 

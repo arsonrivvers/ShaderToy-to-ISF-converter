@@ -317,8 +317,21 @@ final class InstrumentRenderer: @unchecked Sendable {
     /// Requires `lock` held. Only swaps if BOTH allocated: a half-resized pair would composite
     /// across mismatched targets, and the failure would look like a corrupted image rather than
     /// an error.
+    ///
+    /// **A no-op when the RESOLVED size has not moved (final-review F9).** Each setter above only
+    /// guards on its own input changing, but while `programLive` is true `liveResolutionLocked()`
+    /// ignores `renderScale` entirely — so typing into PREVIEW SCALE with the projector open, a
+    /// control task 2 deliberately made inert in exactly that state, allocated and threw away two
+    /// 1920×1080 `rgba16Float` textures (~16 MB) per keystroke and reset `masterIndex` each time.
+    /// Guarding on the resolved size rather than on each input covers `previewScale`,
+    /// `outputResolution` and `isProgramLive` with one check, and keeps `liveResolutionLocked()`
+    /// the single source of the preview/program rule.
     private func reallocateMastersLocked() {
-        let fresh = Self.makeMasterPair(device: device, resolution: liveResolutionLocked())
+        let target = liveResolutionLocked()
+        guard masters.first?.width != target.width || masters.first?.height != target.height else {
+            return
+        }
+        let fresh = Self.makeMasterPair(device: device, resolution: target)
         if fresh.count == 2 {
             masters = fresh
             masterIndex = 0
@@ -337,6 +350,23 @@ final class InstrumentRenderer: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return committedBuffers
     }
+
+    /// How many frames skipped their composite because the live render size moved mid-frame
+    /// (final-review F4). Zero in every normal frame; the `...ForTesting` naming follows
+    /// `ThumbnailService.compileCountForTesting`. Guarded by `lock` like every other counter here.
+    private var skippedStaleComposites = 0
+
+    var skippedStaleCompositeCountForTesting: Int {
+        lock.lock(); defer { lock.unlock() }
+        return skippedStaleComposites
+    }
+
+    /// Fires on the render thread in the UNLOCKED window between deck rasterisation and the master
+    /// composite — the exact window in which `isProgramLive`'s setter can reallocate `masters` out
+    /// from under the frame. Nil in production and never called there; a test sets it to drive that
+    /// race deterministically instead of hoping to hit it. There is no other seam: both halves of
+    /// the race run inside one synchronous `renderFrame()` call on one thread.
+    var didRasteriseDecksForTesting: (() -> Void)?
 
     // MARK: textures
 
@@ -444,14 +474,40 @@ final class InstrumentRenderer: @unchecked Sendable {
             }
         }
 
+        // Test-only, nil in production: see `didRasteriseDecksForTesting`. Deliberately here — in
+        // the unlocked window, after the decks have rasterised at `liveRes` and before the
+        // composite re-reads it — because that window IS the race F4 closes.
+        didRasteriseDecksForTesting?()
+
         lock.lock()
+        // The live render size can have MOVED while the lock was released above: `isProgramLive`,
+        // `previewScale` and `outputResolution` all set it from the main actor, and all three
+        // reallocate `masters` to the new size when they do. The decks just rasterised at
+        // `liveRes`, into owned textures sized for `liveRes` — compositing those into a
+        // freshly-resized master pair, and running `masterFX` at the stale `renderSize`, is one
+        // visibly wrong frame. The trigger this branch adds is the instant the projector opens,
+        // which is the instant the audience first sees anything (final-review F4).
+        //
+        // Re-read under THIS lock rather than trusting the earlier capture. No new lock is taken:
+        // `liveResolutionLocked()` is a "requires lock held" private read of two stored properties,
+        // so this cannot introduce a lock ordering or a deadlock — it is the same single lock,
+        // already held, doing one more read.
+        let compositeRes = liveResolutionLocked()
         // 2. The master begins each frame as OPAQUE BLACK (spec §7). This is what a bottom-layer
         //    blend mode blends against, and what an empty instrument shows.
         var current = 0
         clearToOpaqueBlack(masters[current], in: cb)
 
+        // On a mismatch: clear only, and skip the composite and the master FX. The result is one
+        // black frame rather than one malformed one — deliberately NOT "the previous master stays
+        // up", which is not available here: every path that can change the live size has already
+        // replaced `masters` with a freshly allocated pair whose contents are undefined, so the
+        // clear above is what makes the skipped frame black instead of garbage. The next frame
+        // renders normally at the new size.
+        let sizeIsStale = compositeRes != liveRes
+
         // 3. Composite each contributing layer, ping-ponging between the two masters.
-        if let compositor {
+        if let compositor, !sizeIsStale {
             for layer in layers {
                 guard let source = outputs[layer.deck], layer.effectiveOpacity > 0 else {
                     continue    // no shader, or faded out — the backdrop passes through untouched
@@ -470,12 +526,13 @@ final class InstrumentRenderer: @unchecked Sendable {
         //    additional memory. preserveAlpha is FALSE: the master is opaque by contract.
         //    This runs BEFORE the blackout gate deliberately: nothing may sit between the panic
         //    button and darkness, so a master chain can never keep the program alive.
-        if let compositor {
+        if let compositor, !sizeIsStale {
             let result = masterFX.encode(input: masters[current], scratch: masters[1 - current],
                                          renderSize: liveRes.size, compositor: compositor,
                                          preserveAlpha: false, in: cb)
             current = (result === masters[0]) ? 0 : 1
         }
+        if sizeIsStale { skippedStaleComposites += 1 }
         // The result may be in either master depending on how many layers contributed — track it
         // rather than assuming parity from the deck count.
         masterIndex = current

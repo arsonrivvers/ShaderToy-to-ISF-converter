@@ -107,6 +107,93 @@ final class SlotBankTests: XCTestCase {
         bank.onChange = nil
     }
 
+    // MARK: One-deep undo (final-review F3)
+
+    /// The gesture this exists for: right-click, reflexive second click, a dialled-in look gone and
+    /// persisted before the menu finished dismissing. There was no way back at all.
+    func testClearingASlotCanBeUndoneWithTheLookIntact() throws {
+        let bank = SlotBank()
+        bank.capture(preset(speed: 0.77), into: 4)
+        bank.clear(4)
+        XCTAssertNil(bank.slots[4])
+
+        bank.undo()
+        XCTAssertEqual(bank.slots[4]?.snapshot.params["speed"], .float(0.77),
+                       "the restored look must carry its dialled values, not just its URL")
+        XCTAssertNil(bank.undoable, "one deep, never a redo stack")
+    }
+
+    /// The ⌥-drop half, which falls out of the same one-deep slot. A drop onto a filled slot is the
+    /// other way a dialled-in look leaves the bank.
+    func testAnOverwritingCaptureCanBeUndoneBackToTheReplacedLook() throws {
+        let bank = SlotBank()
+        bank.capture(preset("/tmp/original.fs", speed: 0.1), into: 2)
+        bank.capture(preset("/tmp/replacement.fs", speed: 0.9), into: 2)
+
+        bank.undo()
+        XCTAssertEqual(bank.slots[2]?.shaderURL.lastPathComponent, "original.fs")
+        XCTAssertEqual(bank.slots[2]?.snapshot.params["speed"], .float(0.1))
+    }
+
+    /// Undo must never be the thing that destroys a look. A capture into the armed index supersedes
+    /// whatever was armed there, so restoring cannot silently overwrite what was just captured.
+    func testACaptureIntoTheClearedSlotDisarmsTheUndoRatherThanArmingItToOverwrite() {
+        let bank = SlotBank()
+        bank.capture(preset("/tmp/old.fs"), into: 1)
+        bank.clear(1)
+        bank.capture(preset("/tmp/new.fs"), into: 1)
+        XCTAssertNil(bank.undoable,
+                     "the cleared look at index 1 has been superseded by a fresh capture there")
+
+        bank.undo()
+        XCTAssertEqual(bank.slots[1]?.shaderURL.lastPathComponent, "new.fs",
+                       "undo must be a no-op here, not a way to destroy the new capture")
+    }
+
+    func testAFreshBankHasNothingToUndoAndUndoIsANoOp() {
+        let bank = SlotBank()
+        XCTAssertNil(bank.undoable, "nothing has been destroyed, so no menu item may appear")
+        var changes = 0
+        bank.onChange = { changes += 1 }
+        bank.undo()
+        XCTAssertEqual(changes, 0, "an empty undo must not rewrite the bank to disk mid-set")
+        XCTAssertTrue(bank.slots.allSatisfy { $0 == nil })
+        bank.onChange = nil
+    }
+
+    /// Clearing an ALREADY-empty slot must not arm anything: an undo offering to restore nothing is
+    /// a menu item that lies.
+    func testClearingAnEmptySlotArmsNothing() {
+        let bank = SlotBank()
+        bank.clear(0)
+        XCTAssertNil(bank.undoable)
+    }
+
+    /// The item's own copy, since the strip's context menu is the only way to invoke it and the
+    /// operator fires this bank by position.
+    func testTheUndoMenuTitleNamesTheSlotAndTheGestureBeingUndone() {
+        let bank = SlotBank()
+        bank.capture(preset(), into: 6)
+        bank.clear(6)
+        XCTAssertEqual(bank.undoable?.menuTitle, "Undo clear slot 7")
+
+        bank.capture(preset(), into: 0)
+        bank.capture(preset(), into: 0)
+        XCTAssertEqual(bank.undoable?.menuTitle, "Undo replace slot 1")
+    }
+
+    func testUndoPersistsLikeEveryOtherWrite() {
+        let bank = SlotBank()
+        bank.capture(preset(), into: 0)
+        bank.clear(0)
+        var changes = 0
+        bank.onChange = { changes += 1 }
+        bank.undo()
+        XCTAssertEqual(changes, 1,
+                       "a restored look that is not persisted comes back only until relaunch")
+        bank.onChange = nil
+    }
+
     // MARK: Task 7R — the model has no concept of rows at all
 
     /// `slotCount` is derived from `perRow * maxRows`, not an independent literal — if either
