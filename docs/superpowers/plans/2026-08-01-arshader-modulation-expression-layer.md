@@ -1803,7 +1803,7 @@ listed them and nothing more. The formulas below are ours. They are pinned by te
 because nothing external defines them — a later change to `spring`'s damping convention would
 silently retune every patch an operator had dialled in.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ExpressionEvaluatorTests.swift`:
 
@@ -1979,7 +1979,7 @@ final class ExpressionEvaluatorTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1990,7 +1990,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: `cannot find 'MotionFunctions' in scope`.
 
-- [ ] **Step 3: Write the motion library**
+- [x] **Step 3: Write the motion library**
 
 Create `App/ARShader/ExpressionFunctions.swift`:
 
@@ -2104,7 +2104,7 @@ enum MotionFunctions {
 }
 ```
 
-- [ ] **Step 4: Write the evaluator**
+- [x] **Step 4: Write the evaluator**
 
 Create `App/ARShader/ExpressionEvaluator.swift`:
 
@@ -2197,7 +2197,7 @@ enum ExpressionEvaluator {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -2206,9 +2206,10 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
   test -only-testing:ARShaderTests/ExpressionEvaluatorTests 2>&1 | tail -25
 ```
 
-Expected: PASS, 15 tests.
+Expected: PASS, 14 tests. (The plan said 15; the block above defines 14 test
+methods. Nothing was dropped — the count was wrong.)
 
-- [ ] **Step 6: Prove the `since()` decay-shape gate can fail**
+- [x] **Step 6: Prove the `since()` decay-shape gate can fail**
 
 Temporarily change `0.002` to `0.02` in `testOneCounterDrivesAStrobeAndASwellFromTheSameEdge`.
 Re-run Step 5.
@@ -2216,7 +2217,7 @@ Re-run Step 5.
 Expected: FAIL — `strobe` is now ~0.82, not below 0.14. Revert, re-run to confirm PASS, record it
 in the Task 13 evidence table.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add App/ARShader/ExpressionFunctions.swift App/ARShader/ExpressionEvaluator.swift \
@@ -4908,7 +4909,7 @@ not the intention.
 | FX stable IDs | Address by array index instead of id, then reorder | `FXStageIdentityTests.testAStageIsFoundByItsIdAcrossAReorder` | NOT RECORDED at the time of the run — re-run the mutation before Task 13 rather than inventing a line | 1 |
 | Blackout exclusion | Add a `blackout` case and put it in the catalogue | `ModDestinationTests.testTheAddressableCatalogueIsExactlyTheSpecs…` | 2 failures. L55 `XCTAssertEqual failed` — catalogue contained `ModDestination.blackout`; L62 `XCTAssertFalse failed - An expression that can kill the output mid-set is a defect with no upside` | 2 |
 | Frame coherence (registry) | Make `ModSnapshot` resolve `reading(_:)` from the live registry (NOT "drop the entries copy" — that mutation passes; see Task 3 Step 5) | `ModSourceTests.testASnapshotIsFrozenAgainstLaterPublishes` | L109 `XCTAssertEqual failed: ("Optional(0.8)") is not equal to ("Optional(0.2)") - The frame's snapshot is a value, not a live view of the registry` | 3 |
-| `since()` decay shape | Change the time constant from 0.002 to 0.02 | `ExpressionEvaluatorTests.testOneCounterDrivesAStrobeAndASwell…` | | 6 |
+| `since()` decay shape | Change the time constant from 0.002 to 0.02 | `ExpressionEvaluatorTests.testOneCounterDrivesAStrobeAndASwell…` | 2 failures. L65 `XCTAssertEqualWithAccuracy failed: ("0.8187307530779818") is not equal to ("0.1353352832366127") +/- ("1e-09")`; L66 `XCTAssertLessThan failed: ("0.8187307530779818") is not less than ("0.14")` | 6 |
 | `offset` ownership | Let `offset` write the base (drop `base.value +`) | `ModulationEngineTests.testOffsetModeAddsToTheBase…` | | 7 |
 | NaN containment | Remove the `isFinite` guard | `ModulationEngineTests.testNonFiniteResultsAreContainedAndFlagged` | | 7 |
 | Skipped bindings | Drop unresolvable bindings instead of reporting them | `ModulationEngineTests.testAnUnresolvableDestinationIsSkipped…` | | 7 |
