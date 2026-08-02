@@ -1396,7 +1396,7 @@ git commit -m "feat(mod): the manual source — trigger, integrated-phase LFO, t
   - `enum ExprParser { static func compile(_ text: String) throws -> ExprNode }`
   Tasks 6, 7 and 12 use exactly these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ExpressionTests.swift`:
 
@@ -1518,7 +1518,7 @@ final class ExpressionTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1529,7 +1529,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: `cannot find 'ExprParser' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `App/ARShader/Expression.swift`:
 
@@ -1750,7 +1750,7 @@ enum ExprParser {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1763,7 +1763,16 @@ Expected: PASS, 12 tests. If an offset assertion disagrees by one, fix the TEST 
 parser actually reports and note it — the caret position is a UI nicety, the message is the
 contract.
 
-- [ ] **Step 5: Commit**
+**CORRECTED 2026-08-02 — `testTheDecayIdiomParses` as written above FAILS, and the test is what is
+wrong.** The grammar binds `unary` tighter than `/` (as C, Swift and Python do), so
+`-since(x) / 0.002` parses as `divide(negate(since), 0.002)`, not the `negate(divide(...))` the
+assertion expects. Observed: `("...binary(divide, negate(call since), number(0.002))") is not equal
+to ("...negate(binary(divide, call since, number(0.002)))")`. The two trees are numerically
+identical (`-(a)/b == -(a/b)`), so the standard precedence is KEPT and the assertion corrected — the
+shipped test asserts the parser's tree. A 13th test pins the numeric equivalence so a later
+precedence change cannot silently alter what a decay evaluates to. Run count is therefore 13.
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add App/ARShader/Expression.swift App/ARShaderTests/ExpressionTests.swift
