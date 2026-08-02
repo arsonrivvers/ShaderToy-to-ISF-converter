@@ -74,6 +74,12 @@ actor ThumbnailService {
 
     private(set) var compileCountForTesting = 0
     var commandQueueForTesting: MTLCommandQueue { queue }
+    /// The directory the disk cache actually resolved to, or nil when it could not be created.
+    /// Exists so a test can pin that a harness `Instrument()` never resolves the OPERATOR's real
+    /// `~/Library/Application Support/ARShader/Thumbnails` — the defect that let a test run's
+    /// launch-time sweep evict a real 2,000-entry cache. Nothing else protected that fix
+    /// (final-review L33).
+    var cacheDirectoryForTesting: URL? { cache?.directoryForTesting }
     /// Diagnostic seam (I3): the reason the most recent shader/transient failure was not a success,
     /// so a blank cell has SOME signal beyond "not available." Test-only for now; a future UI task
     /// can surface it as a tooltip.

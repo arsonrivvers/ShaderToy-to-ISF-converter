@@ -98,6 +98,38 @@ struct LibraryPanelView: View {
     /// flashing blank every time the pointer leaves the rows for the search field, the sort
     /// picker, or the well itself.
     @State private var hoverPreview: Image?
+    /// A request is outstanding right now (final-review F7). Until this existed, the well kept the
+    /// PREVIOUS shader's still at full opacity while a new one was being resolved — looking like a
+    /// settled answer for the row under the pointer. On a cold cache a deliberate slow scan could
+    /// leave the well seconds behind and still read as correct. Smoke leg 28 exists to judge that
+    /// load behaviour on device, and judging it against a well that cannot say "still working"
+    /// wastes the leg.
+    @State private var isResolvingPreview = false
+
+    /// What the foot well should be saying, given what it holds and whether a request is out.
+    ///
+    /// A named function rather than a ternary inline in `body` because it is the only part of F7
+    /// that can be pinned by a test: the `@State` flag's lifecycle lives inside a `.task(id:)`
+    /// closure with no seam a unit test can reach, but the MAPPING — the thing that decides whether
+    /// a stale still is presented as settled — is pure. `hoverPreviewWell` calls this; there is no
+    /// second copy of the rule.
+    enum WellState: Equatable {
+        /// Nothing has resolved yet and nothing is pending.
+        case empty
+        /// Showing a still, nothing outstanding: this IS the answer for the row under the pointer.
+        case settled
+        /// A request is out. Anything on screen belongs to a PREVIOUS row and must not read as an
+        /// answer for this one.
+        case resolving
+
+        var imageOpacity: Double { self == .resolving ? 0.35 : 1 }
+        var showsProgress: Bool { self == .resolving }
+    }
+
+    static func wellState(hasPreview: Bool, isResolving: Bool) -> WellState {
+        if isResolving { return .resolving }
+        return hasPreview ? .settled : .empty
+    }
 
     init(instrument: Instrument) {
         self.instrument = instrument
@@ -118,33 +150,36 @@ struct LibraryPanelView: View {
                 .frame(width: 150)
             }
 
-            // Fix-round-1, F3 (operator ruling — overrides task 5's "removes click-to-load
-            // entirely"): a plain `Text` dropped the button trait, the activate action, and —
-            // with the picker also gone — every keyboard/VoiceOver path to load a shader anywhere
-            // in the app. Drag and tap coexist on `.draggable`, same as `SlotCell`'s Button below
-            // does with its own drop target. The tap action loads onto deck A specifically — the
-            // one target that can never overwrite a saved look, and `InstrumentView`'s historical
-            // default for the picker this task removed. Not reconfigurable: reintroducing a
-            // target picker is exactly what task 5 removed, and the ruling did not restore it.
+            // **A CLICK ON A LIBRARY ROW IS DELIBERATELY INERT. DRAG IS THE ONLY WAY TO LOAD.**
+            // Operator ruling, 2026-08-02.
+            //
+            // This SUPERSEDES fix-round-1 F3's ruling, which is kept here rather than deleted
+            // because the reasoning matters: that round restored a `Button` loading onto deck A,
+            // argued entirely on accessibility grounds — a plain `Text` drops the button trait and
+            // the activate action, and with the target picker also gone there would be no
+            // keyboard/VoiceOver path to load a shader anywhere in the app. That argument was
+            // correct on its own terms and has been WAIVED: this is a personal, mouse-and-MIDI
+            // driven instrument, and no keyboard or VoiceOver path is wanted. A click that loads is
+            // a click that can change what is on the wall by accident.
+            //
+            // Consequences accepted with the ruling: no button trait, no activate action, no
+            // keyboard load path, and smoke leg 35b ("a library row is reachable without the
+            // pointer") is struck. `.draggable`, `.help` and `.onHover` all stay, and
+            // `.contentShape` keeps the whole row draggable and hoverable rather than just its
+            // glyphs.
             List(entries) { entry in
-                Button {
-                    instrument.load(entry.url, onto: .deck(.one))
-                } label: {
-                    Text(entry.name)
-                        .font(.system(size: 12, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)   // long AR_Genuary names differ at the END
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                Text(entry.name)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)   // long AR_Genuary names differ at the END
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 .draggable(ShaderDrag(source: .library, url: entry.url, snapshot: nil))
-                // Both halves, not one replacing the other (F4): names are EXPECTED to
-                // middle-truncate (see the comment above), so the full name is the only way to
-                // read a name the row itself cut off, and the drag hint is the only place the
-                // gesture is documented at all.
-                .help("\(entry.name) — click to load onto deck A, or drag onto a deck, an FX "
-                      + "chain, or a slot")
+                // Names are EXPECTED to middle-truncate (see above), so the full name is the only
+                // way to read one the row itself cut off, and the drag hint is the only place the
+                // gesture is documented at all. The "click to load onto deck A" half is gone with
+                // the behaviour it described.
+                .help("\(entry.name) — drag onto a deck, an FX chain, or a slot")
                 // Task 7: a THIRD gesture on a row that already carries a click (the Button
                 // action) and a drag (`.draggable`). `.onHover` is a hover-tracking area, not a
                 // click/drag gesture recognizer, so it does not compete with either — verified by
@@ -188,6 +223,11 @@ struct LibraryPanelView: View {
             .task(id: hoveredURL) {
                 guard let url = hoveredURL else { return }
                 guard case .dwelled = await waitOutHoverDwell(Self.hoverDwell) else { return }
+                // Set AFTER the dwell, not before it (F7): a row merely swept past never requests
+                // anything, so flagging on hover-enter would flicker the whole well on every row
+                // the pointer crossed. This flips only once a request is genuinely going out.
+                isResolvingPreview = true
+                defer { isResolvingPreview = false }
                 let result = await instrument.thumbnailService.thumbnail(for: url, priority: .interactive)
                 guard !Task.isCancelled else { return }
                 if case .image(let data) = result, let decoded = NSImage(data: data) {
@@ -219,14 +259,23 @@ struct LibraryPanelView: View {
     /// would sit on top of exactly what the operator is scanning, and reflowing the list to make
     /// room for a preview would shift the row out from under the pointer mid-hover.
     private var hoverPreviewWell: some View {
-        ZStack {
+        // Dimming and a spinner ON TOP, never a size change: the well's `.frame(height: 120)` is
+        // unchanged in every state. "Ideal width is not minimum width" already cost this branch two
+        // fix rounds, and a well that resizes while the operator scans the list is the same class
+        // of defect on the other axis.
+        let state = Self.wellState(hasPreview: hoverPreview != nil, isResolving: isResolvingPreview)
+        return ZStack {
             if let hoverPreview {
                 hoverPreview
                     .resizable()
                     .aspectRatio(16.0 / 9.0, contentMode: .fill)
                     .clipped()
+                    .opacity(state.imageOpacity)
             } else {
                 Rectangle().fill(Color.white.opacity(0.05))
+            }
+            if state.showsProgress {
+                ProgressView().controlSize(.small)
             }
         }
         .frame(maxWidth: .infinity)

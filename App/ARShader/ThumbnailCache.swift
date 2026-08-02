@@ -13,6 +13,10 @@ struct ThumbnailCache {
 
     private let directory: URL
 
+    /// Where entries actually land. Read only through `ThumbnailService.cacheDirectoryForTesting`;
+    /// see that property for what it guards.
+    var directoryForTesting: URL { directory }
+
     init(directory: URL) throws {
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

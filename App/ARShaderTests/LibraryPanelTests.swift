@@ -74,6 +74,41 @@ final class LibraryPanelTests: XCTestCase {
         XCTAssertEqual(deck.unit.shaderName, "loadme.fs")
     }
 
+    // MARK: the hover well's loading state (final-review F7)
+
+    /// The defect: while a request was outstanding the well kept the PREVIOUS shader's still at
+    /// full opacity, presenting it as a settled answer for the row now under the pointer. On a cold
+    /// cache a deliberate slow scan could leave it seconds behind and still look correct. Smoke leg
+    /// 28 judges exactly this behaviour on device, and a well that cannot say "still working" makes
+    /// the leg unjudgeable.
+    ///
+    /// `wellState` is the production mapping — `hoverPreviewWell` calls this same function for its
+    /// opacity and its spinner, so this is a gate on the decision, not a re-derivation of it.
+    func testAStaleStillIsNotPresentedAsSettledWhileARequestIsOutstanding() {
+        XCTAssertEqual(LibraryPanelView.wellState(hasPreview: true, isResolving: true), .resolving,
+                       "holding a PREVIOUS row's still while a new request is out must never read "
+                       + "as the answer for the row under the pointer")
+        XCTAssertLessThan(LibraryPanelView.WellState.resolving.imageOpacity,
+                          LibraryPanelView.WellState.settled.imageOpacity,
+                          "and the distinction has to be visible, not merely modelled")
+        XCTAssertTrue(LibraryPanelView.WellState.resolving.showsProgress)
+    }
+
+    func testASettledStillIsShownAtFullStrength() {
+        XCTAssertEqual(LibraryPanelView.wellState(hasPreview: true, isResolving: false), .settled)
+        XCTAssertEqual(LibraryPanelView.WellState.settled.imageOpacity, 1)
+        XCTAssertFalse(LibraryPanelView.WellState.settled.showsProgress,
+                       "a spinner over a settled still would be a permanent lie")
+    }
+
+    /// An empty well with a request out must still say "working": before anything has ever
+    /// resolved, this is the operator's only signal that the hover did anything at all.
+    func testAnEmptyWellStillReportsAnOutstandingRequest() {
+        XCTAssertEqual(LibraryPanelView.wellState(hasPreview: false, isResolving: true), .resolving)
+        XCTAssertEqual(LibraryPanelView.wellState(hasPreview: false, isResolving: false), .empty)
+        XCTAssertFalse(LibraryPanelView.WellState.empty.showsProgress)
+    }
+
     func testLibraryTargetsCoverEveryDeckAndEveryChain() {
         XCTAssertEqual(LibraryTarget.allCases.count, 5,
                        "two decks, two deck chains, one master chain")

@@ -97,6 +97,35 @@ final class ThumbnailServiceTests: XCTestCase {
         let serviceQueue = await service.commandQueueForTesting
         XCTAssertFalse(serviceQueue === RenderProperties.global().renderQueue,
                        "sharing the live queue is how a thumbnail becomes a dropped frame mid-set")
+        // The POSITIVE half (final-review L33/F13a). "Not the live queue" alone passes for a
+        // service that minted its own third queue, or wired one to nil — it says what the queue
+        // is NOT. `bgCmdQueue` is the singleton's documented background queue and the one this
+        // service is supposed to be on.
+        XCTAssertTrue(serviceQueue === RenderProperties.global().bgCmdQueue,
+                      "and it must be the shared background queue specifically, not merely some "
+                      + "other queue that happens not to be the live one")
+    }
+
+    /// Nothing protected this before (final-review L33). A harness `Instrument()` that resolved the
+    /// real `~/Library/Application Support/ARShader/Thumbnails` would create it, and — before the
+    /// sweep was gated — a test run above the 2,000-entry ceiling could EVICT the operator's real
+    /// thumbnails. Pure string comparison, no I/O: the assertion is about which path was chosen.
+    @MainActor
+    func testAHarnessInstrumentNeverResolvesTheOperatorsRealThumbnailCache() async throws {
+        let instrument = Instrument()
+        let resolved = await instrument.thumbnailService.cacheDirectoryForTesting
+        let path = try XCTUnwrap(resolved).path
+
+        let temp = FileManager.default.temporaryDirectory.path
+        XCTAssertTrue(path.hasPrefix(temp),
+                      "a test instrument's cache must live under the temporary directory — got "
+                      + path)
+
+        let appSupport = try XCTUnwrap(FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first).path
+        XCTAssertFalse(path.hasPrefix(appSupport),
+                       "and must never be under Application Support, where the operator's real "
+                       + "~2,000-entry cache lives")
     }
 
     /// Hover is superseded constantly as the pointer moves; a thumbnail for a row the pointer has

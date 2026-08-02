@@ -40,10 +40,13 @@ final class SlotBankStripViewDropSeamTests: XCTestCase {
 
     /// The mutation-proof target: this must go red if `wouldAccept` stops asking about `.slot`,
     /// or stops asking whether THIS slot is filled.
+    /// `withOption: false` explicit since F8: before the defaulted parameter existed this read the
+    /// LIVE `NSEvent.modifierFlags`, so the assertion silently depended on nobody holding ⌥ while
+    /// the suite ran — the never-overwrite invariant's own gate was ambient-state-dependent.
     func testWouldRejectAFilledSlotWithoutOption() {
         let (view, instrument) = makeView()
         fill(instrument, slot: 0)
-        XCTAssertFalse(view.wouldAccept(libraryDrag, at: 0),
+        XCTAssertFalse(view.wouldAccept(libraryDrag, at: 0, withOption: false),
                        "a filled slot must reject a drop with no ⌥ held")
     }
 
@@ -56,6 +59,40 @@ final class SlotBankStripViewDropSeamTests: XCTestCase {
                      "slot 1 is still empty — slot 0 filling must not leak into its decision")
     }
 
+    // MARK: the ⌥ branch, through the view seam (final-review F8)
+
+    /// **The branch no test anywhere could reach until now.** `wouldAccept` read
+    /// `NSEvent.modifierFlags` inline, so every other assertion in this file silently depended on
+    /// nobody holding ⌥ while the suite ran, and the "⌥ held → overwrite" path was covered only as
+    /// a pure function (`ShaderDragTests`), never at the call site the drop actually uses.
+    ///
+    /// This is the never-overwrite invariant's OTHER half: ⌥ is the deliberate "I mean it", and if
+    /// it stopped working the operator would have no way at all to replace a slot by drag.
+    func testAFilledSlotAcceptsAnOverwriteWhenOptionIsHeld() {
+        let (view, instrument) = makeView()
+        fill(instrument, slot: 0)
+        XCTAssertTrue(view.wouldAccept(libraryDrag, at: 0, withOption: true),
+                      "⌥ held is the deliberate overwrite gesture — the one way to replace a "
+                      + "filled slot by drag since task 5 removed ⌥-click")
+    }
+
+    /// The highlight must agree with the drop about ⌥, not just about fill state: a filled cell the
+    /// operator is ⌥-dragging onto WILL accept, so it must ring.
+    func testAFilledSlotHighlightsWhenOptionIsHeld() {
+        let (view, instrument) = makeView()
+        fill(instrument, slot: 0)
+        XCTAssertTrue(view.wouldHighlight(at: 0, withOption: true),
+                      "the ring is the operator's only pre-drop signal on a strip of eight "
+                      + "visually identical cells; it must track ⌥ as well as fill state")
+    }
+
+    /// ⌥ must not become a blanket yes: the empty-slot answer is unchanged by it.
+    func testOptionDoesNotChangeAnEmptySlotsAnswer() {
+        let (view, _) = makeView()
+        XCTAssertTrue(view.wouldAccept(libraryDrag, at: 0, withOption: true))
+        XCTAssertTrue(view.wouldAccept(libraryDrag, at: 0, withOption: false))
+    }
+
     // MARK: wouldHighlight — must agree with wouldAccept, not re-derive it
 
     func testWouldHighlightAnEmptySlot() {
@@ -66,7 +103,7 @@ final class SlotBankStripViewDropSeamTests: XCTestCase {
     func testWouldNotHighlightAFilledSlotWithoutOption() {
         let (view, instrument) = makeView()
         fill(instrument, slot: 0)
-        XCTAssertFalse(view.wouldHighlight(at: 0),
+        XCTAssertFalse(view.wouldHighlight(at: 0, withOption: false),
                        "highlighting a target that would reject the drop is worse than no "
                        + "highlight on a strip of eight visually identical cells")
     }

@@ -73,6 +73,16 @@ final class ShaderUnit: ObservableObject {
 
     func load(url: URL) {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            // Supersede whatever is in flight (final-review F13d). This path failed WITHOUT
+            // bumping the generation, so an earlier load's compile could still land afterwards,
+            // clear the error this just reported, swap the deck AND stamp `sourceURL` — lighting
+            // the wrong slot's live badge. Newly reachable from three call sites this branch added
+            // (library click, library drag→deck, FX drag): click row A while its compile is in
+            // flight, click a deleted row B, and A arrives to overwrite B's error.
+            loadGeneration += 1
+            // Nothing is in flight for the CURRENT generation any more, so the spinner must not be
+            // left up by the load this call just superseded.
+            isLoading = false
             compileError = "Could not read \(url.lastPathComponent)."
             onCompileFinished?()
             return

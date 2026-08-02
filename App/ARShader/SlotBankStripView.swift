@@ -143,9 +143,22 @@ struct SlotBankStripView: View {
     /// Not `private`: `SlotBankStripViewDropSeamTests` calls this directly, the same "testable
     /// seam on the view struct itself" pattern `recallTargets` and `InstrumentView.liveResolution`
     /// already use — no rendering, no view-drop simulation, just a pure call.
-    func wouldAccept(_ drag: ShaderDrag, at index: Int) -> Bool {
+    /// **`option` is a defaulted parameter, not an inline read (final-review F8).** It used to read
+    /// `NSEvent.modifierFlags` inside the body, which made the ⌥ branch unreachable from a test:
+    /// every assertion in `SlotBankStripViewDropSeamTests` silently depended on nobody holding ⌥
+    /// while the suite ran, and NOTHING anywhere covered "⌥ held → a filled slot accepts and
+    /// overwrites" *through the view seam* (only through `ShaderDrag.accepts` as a pure function).
+    /// Production call sites are unchanged — the default is evaluated at each call, so the drop and
+    /// the highlight still sample the live modifier state exactly as before.
+    ///
+    /// The OTHER half of F8 — that `targetedSlot` samples ⌥ once at hover-ENTER while the drop
+    /// re-reads it, so a dark cell can still accept and overwrite — is deliberately NOT fixed here.
+    /// Whether a filled slot should show a distinct "will replace" ring is an operator judgement
+    /// and is deferred to a device leg.
+    func wouldAccept(_ drag: ShaderDrag, at index: Int,
+                     withOption option: Bool = NSEvent.modifierFlags.contains(.option)) -> Bool {
         ShaderDrag.accepts(drag, on: .slot, isSlotFilled: bank.slots[index] != nil,
-                           withOption: NSEvent.modifierFlags.contains(.option))
+                           withOption: option)
     }
 
     /// The `isTargeted` highlight's version of the same question, asked before SwiftUI has
@@ -157,9 +170,10 @@ struct SlotBankStripView: View {
     /// source (`.library`, `.deck` — see `accepts(source:on:isSlotFilled:withOption:)`'s own
     /// switch), so which placeholder source is used here never changes the answer, and this stays
     /// a genuine call into the shared rule rather than a second implementation of it.
-    func wouldHighlight(at index: Int) -> Bool {
+    func wouldHighlight(at index: Int,
+                        withOption option: Bool = NSEvent.modifierFlags.contains(.option)) -> Bool {
         wouldAccept(ShaderDrag(source: .library, url: Self.highlightProbeURL, snapshot: nil),
-                   at: index)
+                    at: index, withOption: option)
     }
 
     /// The slot a compatible AND acceptable drag is currently hovering — set only when

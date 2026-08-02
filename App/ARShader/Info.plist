@@ -14,7 +14,7 @@
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
-      <key>UTTypeIdentifier</key><string>com.arshader.shader-drag</string>
+      <key>UTTypeIdentifier</key><string>com.arsonrivvers.ARShader.shader-drag</string>
       <key>UTTypeDescription</key><string>ARShader shader drag payload</string>
       <key>UTTypeConformsTo</key>
       <array>

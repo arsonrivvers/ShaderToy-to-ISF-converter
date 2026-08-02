@@ -65,5 +65,5 @@ struct ShaderDrag: Codable, Transferable, Sendable {
 }
 
 extension UTType {
-    static let arshaderDrag = UTType(exportedAs: "com.arshader.shader-drag")
+    static let arshaderDrag = UTType(exportedAs: "com.arsonrivvers.ARShader.shader-drag")
 }

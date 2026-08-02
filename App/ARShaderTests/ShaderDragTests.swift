@@ -1,4 +1,5 @@
 import XCTest
+import UniformTypeIdentifiers   // UTType — the exported drag identifier assertion below
 @testable import ARShader
 
 @MainActor
@@ -138,5 +139,32 @@ final class ShaderDragTests: XCTestCase {
     /// composite has no shader of its own to hand back.
     func testMonitorDragPayloadIsNilForProgram() {
         XCTAssertNil(MonitorTile.dragPayload(for: .master, instrument: Instrument()))
+    }
+
+    // MARK: the exported UTI (final-review F13c / L79)
+
+    /// The drag type is EXPORTED — `UTType(exportedAs:)` plus a `UTExportedTypeDeclarations` entry
+    /// — which means an installed build registers it with LaunchServices for the whole system. It
+    /// was declared as `com.arshader.shader-drag`, a reverse-DNS prefix this app does not own, and
+    /// the next step in the plan installs the app. Apple's rule is that an exported identifier must
+    /// sit under a domain the declarer controls; the bundle's own is `com.arsonrivvers.ARShader`.
+    ///
+    /// Asserts against the HOST APP's real `Info.plist`, not against a literal repeated in the test:
+    /// the failure this guards is the code and the plist drifting apart, and a test that only
+    /// checked the Swift constant could not see that at all. `Bundle.main` is the ARShader host app
+    /// under XCTest (`TEST_HOST` in `project.yml`).
+    func testTheExportedDragUTIIsDeclaredUnderTheAppsOwnBundleIdentifier() throws {
+        let bundleID = try XCTUnwrap(Bundle.main.bundleIdentifier)
+        XCTAssertTrue(UTType.arshaderDrag.identifier.hasPrefix(bundleID + "."),
+                      "an exported UTI must sit under a reverse-DNS prefix this app owns — "
+                      + "\(UTType.arshaderDrag.identifier) is not under \(bundleID)")
+
+        let declarations = try XCTUnwrap(
+            Bundle.main.object(forInfoDictionaryKey: "UTExportedTypeDeclarations") as? [[String: Any]],
+            "the app must still EXPORT the type, not merely name it in Swift")
+        let declared = declarations.compactMap { $0["UTTypeIdentifier"] as? String }
+        XCTAssertTrue(declared.contains(UTType.arshaderDrag.identifier),
+                      "the code's identifier and the exported declaration must not drift apart — "
+                      + "Swift says \(UTType.arshaderDrag.identifier), Info.plist says \(declared)")
     }
 }
