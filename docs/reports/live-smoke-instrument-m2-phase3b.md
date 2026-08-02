@@ -1,6 +1,19 @@
 # Live smoke — ARShader Milestone 2, phase 3b (slot bank)
 
-**Status: PENDING — suites green, legs written and UNRUN.**
+> **⚠️ SUPERSEDED 2026-08-02 by `live-smoke-instrument-m2-phase3c.md`. Do not run this document.**
+>
+> Phase 3c's leg list **reuses these legs verbatim** — 3b's 1–16, 18 and 19 are 3c's 1–16, 18 and 19,
+> same numbers, same titles. They are not a separate pass to run afterwards; running the 3c report
+> runs these too, against a build five tasks newer.
+>
+> **Leg 17 ("Hidden looks are always marked") was signed on device 2026-07-31** and is deliberately
+> absent from the 3c list. That signature was never written back into the table below — the table
+> still reads UNRUN for it, and is wrong on that one row.
+>
+> Kept for the build-provenance record (the `nm` verification of the 2026-07-31 install) and for the
+> leg text's own history.
+
+**Status: SUPERSEDED — originally PENDING, suites green, legs written and UNRUN.**
 
 Phase 3b builds the slot bank: a resizable, collapsible strip of look slots sitting under the
 monitor row, always visible. A slot holds a **look** — a shader *plus the values dialled into it* —
