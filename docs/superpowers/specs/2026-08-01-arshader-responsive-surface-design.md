@@ -20,7 +20,16 @@ evidence for both — because this surface has now been burned once in each dire
 — fill the available width, i.e. 1/8 of the viewport — with `.aspectRatio(16/9, .fit)`. On a real
 window that made each cell ~207pt wide, and because the aspect ratio couples the axes, **width
 percentage drove height**: ~116pt per row, two rows ≈ 244pt. The operator's reaction on device: *"I
-can see us shrinking this bar a lot."* Vertical space is the scarce resource on this surface — the
+can see us shrinking this bar a lot."*
+
+> **CORRECTION, 2026-08-02 — the ~207pt / ~116pt figures above are WRONG.** They were read off a
+> screenshot IMAGE's pixel width, not logical points. Task 3's actual chain gives ≈164pt cells at
+> the operator's real display (16" MacBook Pro, Default scaling, 1728×1117 logical points). Kept in
+> place rather than silently rewritten because the numbers were quoted onward into the plan and the
+> task-4 review, and a reader who meets them elsewhere needs to find this correction. **The
+> argument this section makes is unaffected** — a percentage still cannot express "grow with the
+> window but do not eat my monitors", which is why the ceiling exists. Only the magnitude was
+> overstated. Authoritative version: `SurfaceMetrics.maxCellWidth`'s doc comment. Vertical space is the scarce resource on this surface — the
 monitor row is above and the deck strips below — and a percentage cannot express *"grow with the
 window but do not eat my monitors."*
 

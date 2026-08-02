@@ -986,7 +986,11 @@ final class SlotRecallTargetTests: XCTestCase {
         XCTAssertEqual(targets.count, 2, "A slot loads a deck. There is no third answer.")
     }
 
-    /// Falsifiable companion: if someone widens the picker back to LibraryTarget, this catches it.
+    /// SUPERSEDED 2026-08-02 (final-review F10) — DELETED from the shipped suite, do not restore.
+    /// It could not fail: `LibraryTarget.deck(deck)` is `.deck` by construction, so the `if case`
+    /// matched for every possible input and the `XCTFail` below was unreachable. The comment
+    /// calling it a "falsifiable companion" was simply wrong. `testRecallTargetsAreDecksOnly`'s
+    /// `count == 2` already carries the falsifiable content.
     func testNoRecallTargetIsAnFXChain() {
         for deck in SlotBankStripView.recallTargets {
             let asLibraryTarget = LibraryTarget.deck(deck)
@@ -1204,6 +1208,13 @@ extension UTType {
     static let arshaderDrag = UTType(exportedAs: "com.arshader.shader-drag")
 }
 ```
+
+> **SUPERSEDED 2026-08-02 (final-review F13c) — do not copy the identifier above.** The shipped
+> value is `com.arsonrivvers.ARShader.shader-drag`. This is an EXPORTED type, so an installed build
+> registers it with LaunchServices for the whole system, and `com.arshader.*` is a reverse-DNS
+> prefix this app does not own. Pinned by
+> `ShaderDragTests.testTheExportedDragUTIIsDeclaredUnderTheAppsOwnBundleIdentifier`, which asserts
+> against the host app's real `Info.plist` so the Swift constant and the declaration cannot drift.
 
 The custom `UTType` must also be declared in the app target's `Info.plist` under
 `UTExportedTypeDeclarations`, or the drag will silently never register. `App/project.yml` generates
@@ -1522,8 +1533,8 @@ git commit -m "docs(3c): combined live smoke report — 3b's remaining legs fold
 | 33 | Deck monitor to slot captures the look | Dial deck B well off defaults, drag B's monitor to an empty slot, change B, then fire the slot: the dialled values come back |
 | 34 | Rejected drops are visibly rejected | Drag a deck monitor onto MASTER FX, and onto another deck. Both refuse, visibly. Drag a slot anywhere: nothing drags at all |
 | 34b | The stray hover highlights are tolerable | **Added 2026-08-01 by operator ruling — a known, accepted limitation, not a defect to report.** Step 7 required that the hover highlight never fire for a target that would reject the drag. That holds for slots — the only target that can destroy a dialled-in look — but NOT for the other five: drag a deck monitor slowly across the surface and both FX chains, master FX and the other deck will all light up on the way, then refuse the drop. Fixing it means rolling back to `DropDelegate`/`NSItemProvider`, which the plan explicitly ruled out. **This leg asks whether it actually bothers you mid-set.** If it does, the fix is a real piece of work and should be filed, not improvised |
-| 35 | Clicking a library row loads deck A, and only deck A | **REWRITTEN 2026-08-01 — the original leg asserted the opposite** ("clicking does nothing") and was invalidated by an operator ruling during the task-5/6 review. The brief's row snippet had replaced the row `Button` with a plain `Text`, which removed the button trait, the activate action and — with click-to-load also gone — every keyboard and VoiceOver path to load a shader anywhere in the app. Operator ruled the row stays a `Button`; drag and tap coexist on `.draggable`. A click must load onto **deck A** (the historical `libraryTarget` default, and the one target that can never overwrite a saved look) and nowhere else. If a click reaches a slot, an FX chain or deck B, the target resolution is wrong |
-| 35b | A library row is reachable without the pointer | The reason leg 35 exists. Tab to a library row and activate it, or drive it with VoiceOver: the shader loads onto deck A. Drag-and-drop is not keyboard-operable, so this is the only non-pointer path to load a shader in the app |
+| 35 | Clicking a library row does NOTHING | **REWRITTEN AGAIN 2026-08-02 — reverts to the original assertion, superseding the 2026-08-01 rewrite.** The 2026-08-01 version required a click to load onto deck A, on the reasoning that a plain `Text` drops the button trait, the activate action and every keyboard/VoiceOver path to load a shader anywhere in the app. **The operator has waived that argument (ruling, 2026-08-02): this is a personal, mouse-and-MIDI-driven instrument and no keyboard or VoiceOver path is wanted; a click that loads is a click that can change the wall by accident.** Drag is now the ONLY pointer path to load. Click a library row repeatedly: no deck changes, no FX stage appends, nothing at all happens. Then drag the same row onto deck A: it loads |
+| ~~35b~~ | ~~A library row is reachable without the pointer~~ | **STRUCK 2026-08-02 by the same operator ruling that rewrote leg 35.** It asserted keyboard/VoiceOver reachability, which is exactly the property the ruling waived. Left in place, struck rather than removed, because legs 3a/3b and several cross-references depend on the numbering — do not renumber |
 | 36 | Projector is never soft | Open the output on the external display. Set PREVIEW SCALE to 25%. **The projected image stays sharp** while the app's monitor tiles get cheap. Close the output: the saving comes back. This is the phase's behavioural correction and the one leg with a wall as its assertion |
 | 37 | Panel has a ceiling, not just a floor | **Phase 3a fix, merged to master unsigned.** Drag the panel divider hard right, past the window edge: the panel stops at a ceiling clamped against the window rather than starving the deck strips and pushing the mixer off-screen |
 | 38 | Window minimum holds | **Phase 3a fix, unsigned.** Shrink the window as far as macOS allows: the mixer strip still fits and nothing is clipped |
@@ -1788,7 +1799,14 @@ percentage. Executes after Task 4 closes and before Task 4B. Full responsive pas
 **Why.** This surface has now been burned at both extremes in the space of two tasks. Task 3 shipped
 `.frame(minWidth: 96, maxWidth: .infinity)` — a floor with infinite growth — and because
 `.aspectRatio(16/9)` couples the axes, width percentage drove height: ~207pt cells, ~116pt rows, and
-the operator's *"I can see us shrinking this bar a lot."* Task 4 fixed it with
+the operator's *"I can see us shrinking this bar a lot."*
+**CORRECTION, 2026-08-02 — the ~207pt / ~116pt figure is WRONG and must not be re-derived from.**
+It was read off a screenshot IMAGE's pixel width rather than logical points. Task 3's actual chain
+gives ≈164pt cells at the operator's real display (16" MacBook Pro, Default scaling, 1728×1117
+logical points), not 207. The operator's complaint and this task's fix both stand regardless — only
+that specific number was wrong. See `SurfaceMetrics.maxCellWidth`'s doc comment, which carries the
+same correction at the constant it actually governs.
+Task 4 fixed it with
 `.frame(width: 96, height: 54)` — exact, forever — which the reviewer immediately flagged as *"cell
 area drops ~4.6× in one step to a size never seen on device."* On a large display that is a tiny
 strip with dead space beside it.
