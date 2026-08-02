@@ -756,7 +756,7 @@ git commit -m "feat(mod): the destination address space, with blackout structura
     `increment(_:now:)`, `heartbeat(_:now:)`, `snapshot(now:dt:frame:)`, `descriptors()`
   Tasks 4, 6, 7, 8 and 12 use exactly these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ModSourceTests.swift`:
 
@@ -875,7 +875,7 @@ final class ModSourceTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -886,7 +886,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: `cannot find 'ModSourceRegistry' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `App/ARShader/ModSource.swift`:
 
@@ -1046,7 +1046,7 @@ final class ModSourceRegistry: @unchecked Sendable {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -1057,16 +1057,24 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: PASS, 8 tests.
 
-- [ ] **Step 5: Prove the frame-coherence gate can fail**
+- [x] **Step 5: Prove the frame-coherence gate can fail**
 
-Temporarily change `snapshot` to capture nothing and read live — replace the `let current = entries`
-copy with a stored reference by making `readings` compute from `entries` after the unlock (i.e.
-move `lock.unlock()` above the loop and iterate `entries` directly). Re-run Step 4.
+**CORRECTED 2026-08-02 — the originally prescribed mutation does not fail this test.** It said to
+drop the `let current = entries` copy and iterate `entries` directly after the unlock. That was
+run: it PASSES, 8/8. The copy buys THREAD safety, not frame coherence — either way `readings` is
+still built eagerly inside `snapshot()`, so a publish that happens afterwards cannot reach it. A
+mutation that passes is not evidence, and recording it as proven would have been exactly the
+un-failable-gate problem §9.1 exists to catch.
+
+The gate's real subject is that `ModSnapshot` holds a **value**. So mutate it into a live view:
+give `ModSnapshot` a `private let live: ModSourceRegistry?`, have `reading(_:)` prefer
+`live.liveReading(address, now: now)` (a lock-guarded lookup that recomputes from `entries`), and
+pass `live: self` from `snapshot(now:dt:frame:)`. Re-run Step 4.
 
 Expected: FAIL on `testASnapshotIsFrozenAgainstLaterPublishes` — the snapshot reports `0.8`. Revert,
 re-run to confirm PASS, and record it in the Task 13 evidence table.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add App/ARShader/ModSource.swift App/ARShaderTests/ModSourceTests.swift
@@ -4890,7 +4898,7 @@ not the intention.
 |---|---|---|---|---|
 | FX stable IDs | Address by array index instead of id, then reorder | `FXStageIdentityTests.testAStageIsFoundByItsIdAcrossAReorder` | NOT RECORDED at the time of the run — re-run the mutation before Task 13 rather than inventing a line | 1 |
 | Blackout exclusion | Add a `blackout` case and put it in the catalogue | `ModDestinationTests.testTheAddressableCatalogueIsExactlyTheSpecs…` | 2 failures. L55 `XCTAssertEqual failed` — catalogue contained `ModDestination.blackout`; L62 `XCTAssertFalse failed - An expression that can kill the output mid-set is a defect with no upside` | 2 |
-| Frame coherence (registry) | Read the registry live instead of copying it | `ModSourceTests.testASnapshotIsFrozenAgainstLaterPublishes` | | 3 |
+| Frame coherence (registry) | Make `ModSnapshot` resolve `reading(_:)` from the live registry (NOT "drop the entries copy" — that mutation passes; see Task 3 Step 5) | `ModSourceTests.testASnapshotIsFrozenAgainstLaterPublishes` | L109 `XCTAssertEqual failed: ("Optional(0.8)") is not equal to ("Optional(0.2)") - The frame's snapshot is a value, not a live view of the registry` | 3 |
 | `since()` decay shape | Change the time constant from 0.002 to 0.02 | `ExpressionEvaluatorTests.testOneCounterDrivesAStrobeAndASwell…` | | 6 |
 | `offset` ownership | Let `offset` write the base (drop `base.value +`) | `ModulationEngineTests.testOffsetModeAddsToTheBase…` | | 7 |
 | NaN containment | Remove the `isFinite` guard | `ModulationEngineTests.testNonFiniteResultsAreContainedAndFlagged` | | 7 |
