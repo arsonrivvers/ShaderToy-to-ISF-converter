@@ -395,13 +395,29 @@ final class SurfaceGeometryTests: XCTestCase {
     /// duplicated so `measuredCellWidth`/`measuredRowPitch` below share one construction path. No
     /// panel open — the widest the cells region ever gets at a given window width — matching
     /// `testEightCellsFitAtTheMinimumWindowWidthWithNoPanelOpen`'s own scenario.
-    private func slotBankSurface(instrument: Instrument, layout: SurfaceLayout) -> some View {
-        InstrumentSurface(layout: layout) {
+    ///
+    /// **`isFilled` defaults to TRUE (final-review F6).** Both geometry tests built `Instrument()`,
+    /// which under `TestHarness.isActive` gets an `InMemoryKeyValueStore` — so every one of the
+    /// forty slots was empty, and `SlotCell`'s filled branch (the name plate, the 0.22 fill plate,
+    /// the `state.borderColor` overlay, the `.offset`/`.animation` shake, the help text and the
+    /// accessibility label) had never been laid out by ANY test. Row 0 / column 0 is the cell
+    /// `RenderedCellWidthKey` reports from, so with this default every rendered-geometry assertion
+    /// in this file now measures a FILLED cell rather than an empty one.
+    private func slotBankSurface(instrument: Instrument, layout: SurfaceLayout,
+                                 isFilled: Bool = true) -> some View {
+        if isFilled {
+            instrument.slotBank.capture(
+                Preset.capturing(url: URL(fileURLWithPath: "/tmp/harness-filled-slot.fs"),
+                                 snapshot: ParamSnapshot(params: [:])),
+                into: 0)
+        }
+        return InstrumentSurface(layout: layout) {
             Color.gray
         } monitors: {
             Color.blue.frame(minHeight: Self.stubMonitorIdealHeight, maxHeight: .infinity)
         } slots: {
             SlotBankStripView(instrument: instrument, layout: layout)
+                .measured("slots", in: Self.space)
         } strips: {
             Color.green.frame(minWidth: SurfaceMetrics.stripsMinWidth, minHeight: 300)
         } mixer: {
@@ -490,6 +506,67 @@ final class SurfaceGeometryTests: XCTestCase {
                        + "own computed ceiling — a mismatch means the frame has come loose from "
                        + "cellWidth")
     }
+
+    /// **The axis the operator actually rejected** (final-review F5). `maxCellWidth`'s own doc
+    /// comment ends by saying that nothing in this suite bounds the strip's resulting HEIGHT at any
+    /// window width. Task 3's shipped defect was `.aspectRatio(16/9)` turning window WIDTH into row
+    /// HEIGHT — "I can see us shrinking this bar a lot" — and task 4C then added two real
+    /// rendered-geometry gates, both on width. A future change to `maxCellWidth`, to
+    /// `slotStripCellSpacing`, to the header padding, or to `bankRows`' default could reintroduce a
+    /// tall bar at wide windows with this suite fully green, and the operator would find it on
+    /// device for the third time.
+    ///
+    /// Measures the WHOLE `slots()` region — the real `SlotBankStripView` inside the real
+    /// `InstrumentSurface` at 2560pt, via `.measured("slots",…)` — against the ceiling that is
+    /// supposed to bound it: one row of cells at `maxCellWidth`, plus the strip's own named chrome
+    /// budget. Both terms are named constants, so this reads as "the ceiling bounds the STRIP", not
+    /// as "the strip is whatever it happened to be the day this was written."
+    /// Everything the strip spends on HEIGHT that is not the cell: the row-resize handle, the
+    /// header row (its 9pt label plus vertical padding) and the content padding above and below the
+    /// cells row. **Measured at 41pt** at the time of writing (a 131pt strip at 2560pt, of which
+    /// `maxCellWidth * 9/16` = 90pt is the cell); budgeted at 56 so ordinary text-metric drift does
+    /// not fail the gate. A named, explicit number rather than a silently accepted one — the same
+    /// tripwire treatment as `knownCellOverflow`.
+    ///
+    /// Test-local rather than a `SurfaceMetrics` constant: nothing in production reads it, and a
+    /// production constant with only a test consumer is coverage of dead code wearing the costume
+    /// of a shared value.
+    private static let slotStripChromeBudget: CGFloat = 56
+
+    func testTheStripsHeightIsBoundedByTheCellCeilingAtAWideWindow() throws {
+        let frames = SurfaceRenderHarness.frames(
+            slotBankSurface(instrument: Instrument(), layout: SurfaceLayout()),
+            size: CGSize(width: 2560, height: SurfaceMetrics.minWindowHeight))
+        let strip = try XCTUnwrap(frames["slots"], "harness reported no frames")
+
+        let ceiling = SurfaceMetrics.maxCellWidth * 9.0 / 16.0 + Self.slotStripChromeBudget
+        XCTAssertLessThanOrEqual(strip.height, ceiling,
+                                 "At 2560pt the one-row strip must still be bounded by the cell "
+                                 + "ceiling plus its own chrome. A strip that keeps growing with "
+                                 + "the window is the exact defect the operator rejected on device.")
+        XCTAssertGreaterThan(strip.height, SurfaceMetrics.minCellWidth * 9.0 / 16.0,
+                             "…and it must still be at least a cell tall, or this gate would pass "
+                             + "just as happily on a strip that had collapsed to nothing")
+    }
+
+    // F6 adds NO new test here, deliberately, and that is a correction to the review that asked for
+    // one. The review's proposed assertion was "seed a slot, then assert `measuredRenderedCellWidth`
+    // is unchanged from the empty case." **That assertion cannot fail.** `SlotCell` is sized by
+    // `.frame(width: cellWidth, height: cellWidth * 9/16)` applied at the `ForEach` call site,
+    // OUTSIDE the cell; `.frame(width:height:)` with both dimensions non-nil reports exactly that
+    // size to its parent regardless of what the child does, so no change inside `SlotCell` — not an
+    // overflowing `.fill` thumbnail, not a padded ZStack, not a taller name plate — can move the
+    // number. Verified by mutation, not by argument: `.padding(preset == nil ? 0 : 20)` inside the
+    // cell left every assertion in this file green. Writing it anyway would have been the seventh
+    // instance of this phase's tests-that-cannot-fail class.
+    //
+    // What F6 DOES buy, and what the mutation proof in the fix-wave report demonstrates: every
+    // rendered-geometry assertion in this file now lays out a FILLED cell (row 0 / column 0 is both
+    // the seeded slot and the cell `RenderedCellWidthKey` reports from), so the name plate, the
+    // 0.22 fill plate, the `state.borderColor` overlay, the shake modifiers, the help text and the
+    // accessibility label are executed on every run instead of never. A trap or a crash in that
+    // branch is now caught here; its GEOMETRY is structurally unobservable, which is a property of
+    // the pinned frame rather than a gap in this suite.
 
     /// The row height must follow the DRAWN cell, not a constant, or the resize drag desyncs from
     /// what it is dragging. Task 4 found the drag reading 60 against a real ~122pt pitch.
