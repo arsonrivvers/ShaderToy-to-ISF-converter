@@ -54,12 +54,21 @@ enum RemixResponseParser {
     }
 
     private static func candidates(in text: String) -> CandidateScan {
-        let headers = headerCandidates(in: text)
+        var hasPriorCandidateEvidence = false
+        let headers = headerCandidates(in: text).filter { header in
+            // An initial candidate must begin outside lexical content. After any real candidate
+            // evidence, retain the incident-recovery exception for a physically line-leading,
+            // semantic header; independent completeness still gates its later promotion.
+            if header.isLexicallyStandalone {
+                hasPriorCandidateEvidence = true
+                return true
+            }
+            return hasPriorCandidateEvidence
+                && header.isContractHeader
+                && header.isLineLeading
+        }
         guard !headers.isEmpty else {
-            return CandidateScan(
-                source: nil,
-                errors: text.contains("/*{") ? [.invalidHeader(malformedHeaderMessage)] : []
-            )
+            return CandidateScan(source: nil, errors: [])
         }
 
         var errors: [RemixResponseError] = []
@@ -112,7 +121,8 @@ enum RemixResponseParser {
 
     private static func hasCompleteShaderBody(_ source: String) -> Bool {
         guard let headerRange = ISFHeader.blockRange(in: source) else { return false }
-        let scan = glslScan(in: source[headerRange.upperBound...])
+        let logicalBody = phase2Spliced(source[headerRange.upperBound...]).text
+        let scan = glslScan(in: logicalBody[...])
         guard scan.isComplete, hasBalancedBraces(scan.tokens) else { return false }
         let tokens = scan.tokens
 
@@ -217,6 +227,7 @@ enum RemixResponseParser {
         let headerRange: Range<String.Index>?
         let isContractHeader: Bool
         let isLineLeading: Bool
+        let isLexicallyStandalone: Bool
     }
 
     private struct FenceRegions {
@@ -274,6 +285,10 @@ enum RemixResponseParser {
 
         while let opening = text.range(of: "/*", range: cursor..<text.endIndex) {
             let bodyStart = opening.upperBound
+            let isLexicallyStandalone = isCandidateStartLexicallyStandalone(
+                opening.lowerBound,
+                in: text
+            )
             guard let closing = text.range(of: "*/", range: bodyStart..<text.endIndex) else {
                 if text[bodyStart...]
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -282,7 +297,8 @@ enum RemixResponseParser {
                         location: opening.lowerBound,
                         headerRange: nil,
                         isContractHeader: false,
-                        isLineLeading: isLineLeading(opening.lowerBound, in: text)
+                        isLineLeading: isLineLeading(opening.lowerBound, in: text),
+                        isLexicallyStandalone: isLexicallyStandalone
                     ))
                 }
                 break
@@ -298,7 +314,8 @@ enum RemixResponseParser {
                         location: opening.lowerBound,
                         headerRange: range,
                         isContractHeader: parsedHeader.extra["ISFVSN"] != nil,
-                        isLineLeading: isLineLeading(opening.lowerBound, in: text)
+                        isLineLeading: isLineLeading(opening.lowerBound, in: text),
+                        isLexicallyStandalone: isLexicallyStandalone
                     ))
                     cursor = closing.upperBound
                     continue
@@ -307,7 +324,8 @@ enum RemixResponseParser {
                     location: opening.lowerBound,
                     headerRange: nil,
                     isContractHeader: false,
-                    isLineLeading: isLineLeading(opening.lowerBound, in: text)
+                    isLineLeading: isLineLeading(opening.lowerBound, in: text),
+                    isLexicallyStandalone: isLexicallyStandalone
                 ))
             }
             // A malformed opener may contain a later real header before the next `*/`.
@@ -335,6 +353,42 @@ enum RemixResponseParser {
     private struct GLSLScan {
         let tokens: [GLSLToken]
         let isComplete: Bool
+    }
+
+    private struct Phase2Text {
+        let text: String
+        let markerOffset: Int?
+    }
+
+    /// Removes strict backslash-newline pairs before any lexical classification while retaining
+    /// an optional original-source position in the resulting logical character stream.
+    private static func phase2Spliced(
+        _ source: Substring,
+        marking marker: String.Index? = nil
+    ) -> Phase2Text {
+        var characters: [Character] = []
+        characters.reserveCapacity(source.count)
+        var markerOffset: Int?
+        var cursor = source.startIndex
+
+        while cursor < source.endIndex {
+            if cursor == marker {
+                markerOffset = characters.count
+            }
+
+            let next = source.index(after: cursor)
+            if source[cursor] == "\\", next < source.endIndex, source[next] == "\n" {
+                cursor = source.index(after: next)
+                continue
+            }
+
+            characters.append(source[cursor])
+            cursor = next
+        }
+        if marker == source.endIndex {
+            markerOffset = characters.count
+        }
+        return Phase2Text(text: String(characters), markerOffset: markerOffset)
     }
 
     private static func glslScan(in text: Substring) -> GLSLScan {
@@ -466,19 +520,12 @@ enum RemixResponseParser {
         let endedAtNewline: Bool
     }
 
-    /// GLSL follows the C phase-2 splice rule: only a backslash immediately before a newline
-    /// removes that newline. A `//` comment therefore continues across each such physical line.
+    /// Scans a line comment in the already phase-2-spliced logical character stream.
     private static func scanLineComment(
         in text: Substring,
         startingAt start: String.Index
     ) -> LineCommentScan {
-        var searchStart = start
-
-        while let newline = text.range(of: "\n", range: searchStart..<text.endIndex)?.lowerBound {
-            if newline > searchStart, text[text.index(before: newline)] == "\\" {
-                searchStart = text.index(after: newline)
-                continue
-            }
+        if let newline = text.range(of: "\n", range: start..<text.endIndex)?.lowerBound {
             return LineCommentScan(end: text.index(after: newline), endedAtNewline: true)
         }
         return LineCommentScan(end: text.endIndex, endedAtNewline: false)
@@ -534,10 +581,6 @@ enum RemixResponseParser {
                 guard next < text.endIndex else {
                     return PreprocessorDirectiveScan(end: text.endIndex, isComplete: false)
                 }
-                if text[next] == "\n" {
-                    cursor = text.index(after: next)
-                    continue
-                }
             }
             if character == "\n" {
                 return PreprocessorDirectiveScan(end: next, isComplete: true)
@@ -584,9 +627,95 @@ enum RemixResponseParser {
         })?.lowerBound ?? text.endIndex
     }
 
+    private static func isCandidateStartLexicallyStandalone(
+        _ location: String.Index,
+        in text: String
+    ) -> Bool {
+        let logical = phase2Spliced(text[...], marking: location)
+        guard let markerOffset = logical.markerOffset else { return false }
+        let boundary = logical.text.index(logical.text.startIndex, offsetBy: markerOffset)
+        var cursor = logical.text.startIndex
+
+        while cursor < boundary {
+            let character = logical.text[cursor]
+            let next = logical.text.index(after: cursor)
+
+            if character == "/", next < boundary, logical.text[next] == "/" {
+                let lineComment = scanLineComment(
+                    in: logical.text[cursor...],
+                    startingAt: cursor
+                )
+                guard lineComment.endedAtNewline, lineComment.end <= boundary else { return false }
+                cursor = lineComment.end
+                continue
+            }
+            if character == "/", next < boundary, logical.text[next] == "*" {
+                guard let closing = logical.text.range(
+                    of: "*/",
+                    range: next..<logical.text.endIndex
+                ), closing.upperBound <= boundary else { return false }
+                cursor = closing.upperBound
+                continue
+            }
+            if character == "\"" || character == "'" {
+                let quote = character
+                cursor = next
+                var ended = false
+                while cursor < boundary {
+                    if logical.text[cursor] == "\\" {
+                        cursor = logical.text.index(after: cursor)
+                        guard cursor < boundary else { return false }
+                        cursor = logical.text.index(after: cursor)
+                    } else if logical.text[cursor] == quote {
+                        cursor = logical.text.index(after: cursor)
+                        ended = true
+                        break
+                    } else if logical.text[cursor] == "\n" {
+                        cursor = logical.text.index(after: cursor)
+                        ended = true
+                        break
+                    } else {
+                        cursor = logical.text.index(after: cursor)
+                    }
+                }
+                guard ended else { return false }
+                continue
+            }
+            if character == "#" {
+                let directive = scanPreprocessorDirective(
+                    in: logical.text[cursor...],
+                    startingAt: cursor
+                )
+                guard directive.isComplete, directive.end <= boundary else { return false }
+                cursor = directive.end
+                continue
+            }
+            cursor = next
+        }
+        return true
+    }
+
     private static func isTopLevelBoundary(
         _ boundary: String.Index,
         in text: String,
+        after start: String.Index
+    ) -> Bool {
+        let logical = phase2Spliced(text[start...], marking: boundary)
+        guard let markerOffset = logical.markerOffset else { return false }
+        let logicalBoundary = logical.text.index(
+            logical.text.startIndex,
+            offsetBy: markerOffset
+        )
+        return isTopLevelBoundary(
+            logicalBoundary,
+            inPhase2Text: logical.text,
+            after: logical.text.startIndex
+        )
+    }
+
+    private static func isTopLevelBoundary(
+        _ boundary: String.Index,
+        inPhase2Text text: String,
         after start: String.Index
     ) -> Bool {
         var cursor = start
@@ -598,15 +727,18 @@ enum RemixResponseParser {
 
             if character == "/", next < boundary, text[next] == "/" {
                 let lineComment = scanLineComment(
-                    in: text[cursor..<boundary],
+                    in: text[cursor...],
                     startingAt: cursor
                 )
-                guard lineComment.endedAtNewline else { return false }
+                guard lineComment.endedAtNewline, lineComment.end <= boundary else { return false }
                 cursor = lineComment.end
                 continue
             }
             if character == "/", next < boundary, text[next] == "*" {
-                guard let closing = text.range(of: "*/", range: next..<boundary) else { return false }
+                guard let closing = text.range(
+                    of: "*/",
+                    range: next..<text.endIndex
+                ), closing.upperBound <= boundary else { return false }
                 cursor = closing.upperBound
                 continue
             }

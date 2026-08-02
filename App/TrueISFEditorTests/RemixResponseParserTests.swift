@@ -194,6 +194,12 @@ final class RemixResponseParserTests: XCTestCase {
         XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
     }
 
+    func test_extractCandidate_splicesBeforeRecognizingBlockComments() {
+        let source = shader("void main() {}\n#define BROKEN /\\\n* unterminated")
+
+        XCTAssertEqual(RemixResponseParser.extractCandidate(source), .failure(.incompleteSource))
+    }
+
     func test_extractCandidate_acceptsClosedBlockCommentsAndBracesInChainedPreprocessorDirective() {
         let source = shader("""
         void main() {}
@@ -420,6 +426,23 @@ final class RemixResponseParserTests: XCTestCase {
         """)
 
         XCTAssertEqual(RemixResponseParser.extractCandidate(source), .success(source))
+    }
+
+    func test_extractCandidate_doesNotPromoteContractHeaderTextFromCommentsOrDirectives() {
+        let responses = [
+            "// continued \\\n/*{ \"ISFVSN\": \"2.0\" }*/\nvoid main() {}",
+            "#define NOTE \\\n/*{ \"ISFVSN\": \"2.0\" }*/\nvoid main() {}",
+            "// /*{ \"ISFVSN\": \"2.0\" }*/\nvoid main() {}",
+            "#define NOTE /*{ \"ISFVSN\": \"2.0\" }*/\nvoid main() {}"
+        ]
+
+        for response in responses {
+            XCTAssertEqual(
+                RemixResponseParser.extractCandidate(response),
+                .failure(.noISFFound),
+                "Expected embedded contract text to remain non-candidate source: \(response)"
+            )
+        }
     }
 
     func test_extractCandidate_keepsVersionedHeaderCommentsInsideAHelperBody() {
