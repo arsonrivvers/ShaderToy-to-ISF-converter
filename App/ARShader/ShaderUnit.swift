@@ -34,6 +34,32 @@ final class ShaderUnit: ObservableObject {
     @Published private(set) var sourceURL: URL?
     @Published private(set) var compileError: String?
     @Published private(set) var compileErrorLine: Int?
+
+    /// The file name of the most recent load that FAILED, or nil when the last attempt succeeded.
+    ///
+    /// Separate from `compileError` because the two answer different questions and only one of them
+    /// was being answered. `compileError` says what went wrong in the GLSL, precisely, with a line
+    /// number — and never says WHICH FILE. Meanwhile the failure path in `apply()` deliberately
+    /// leaves `shaderName` naming the shader that is STILL RENDERING, which is the right call for
+    /// the render and the wrong one for the reader: the operator saw a compiler dump sitting under
+    /// a deck that was working fine, and the only available reading was "this deck is broken."
+    ///
+    /// Found by the 2026-08-03 Client Success review of the instrument surface.
+    @Published private(set) var failedLoadName: String?
+
+    /// One line naming what failed and what is still playing, or nil when the last load succeeded.
+    ///
+    /// A pure derivation with no SwiftUI in it, so the sentence a performer actually reads mid-set
+    /// is reachable by a test with no view in play — the same reason `ShaderDrag.accepts` and
+    /// `DeckControlModel.rows` are shaped this way.
+    var loadFailureSummary: String? {
+        guard let failedLoadName else { return nil }
+        // Two genuinely different situations. With a shader still up, the load-bearing fact is
+        // that the deck did NOT change; with an empty deck there is nothing to still be on, and
+        // claiming otherwise would be the same misattribution one step removed.
+        guard let shaderName else { return "\(failedLoadName) failed to compile" }
+        return "\(failedLoadName) failed — still on \(shaderName)"
+    }
     @Published private(set) var inputs: [ISFPreviewInput] = []
     @Published private(set) var isLoading = false
 
@@ -84,6 +110,7 @@ final class ShaderUnit: ObservableObject {
             // left up by the load this call just superseded.
             isLoading = false
             compileError = "Could not read \(url.lastPathComponent)."
+            failedLoadName = url.lastPathComponent
             onCompileFinished?()
             return
         }
@@ -113,11 +140,15 @@ final class ShaderUnit: ObservableObject {
             // FAILURE PATH: report, change nothing else. The previous scene keeps rendering.
             compileError = result.errorMessage ?? "Shader failed to compile."
             compileErrorLine = result.errorLine
+            // The one thing the failure path used to throw away. `name` is the only place the
+            // attempted file survives — `shaderName` must keep naming what is still on screen.
+            failedLoadName = name
             onCompileFinished?()
             return
         }
         compileError = nil
         compileErrorLine = nil
+        failedLoadName = nil
         shaderName = name
         sourceURL = pendingSourceURL
         inputs = result.inputs
@@ -137,6 +168,7 @@ final class ShaderUnit: ObservableObject {
         sourceURL = nil
         inputs = []
         compileError = nil
+        failedLoadName = nil
         params.resetAll()
     }
 

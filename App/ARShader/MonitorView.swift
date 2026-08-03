@@ -274,9 +274,13 @@ struct MonitorTile: View {
                                       lineWidth: 2)
                 )
             ))
-            HStack(spacing: 6) {
-                Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button).controlSize(.small)
-                Toggle("Off", isOn: $isOff).toggleStyle(.button).controlSize(.small)
+            // `Off` kills a deck and `Freeze` does not — a destructive/non-destructive pair, side
+            // by side, hit in the dark. They were 16–18pt tall with a 6pt gap between them.
+            HStack(spacing: 12) {
+                Toggle("Freeze", isOn: $isFrozen).toggleStyle(.button)
+                    .frame(minHeight: SurfaceMetrics.stageTarget)
+                Toggle("Off", isOn: $isOff).toggleStyle(.button)
+                    .frame(minHeight: SurfaceMetrics.stageTarget)
             }
             .font(.system(size: 11))
         }

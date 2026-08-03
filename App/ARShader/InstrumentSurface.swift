@@ -38,6 +38,25 @@ enum SurfaceMetrics {
     /// open, which is also the only time the panel competes for width.
     static let resizeHandleWidth: CGFloat = 6
 
+    /// Minimum height for a control that gets hit **during** a set, in the dark, without looking.
+    ///
+    /// 44 is this project's stated floor and the platform HIG's. Nothing in the instrument met it
+    /// before 2026-08-03 — the 2026-08-03 Client Success review found the entire sizing inventory
+    /// running at 39–59% of it, and no `44` constant existed anywhere outside the panel rail's
+    /// width. Note what automated a11y checking does NOT cover: axe and its equivalents have no
+    /// target-size rule, so this can only ever be held by a named constant and a reviewer's eye.
+    ///
+    /// **BLACKOUT and SHOW MODE deliberately do NOT use this yet.** Their current 26/22 came from
+    /// an explicit operator decision on 2026-07-30 (the 56pt slab was reverted as wasted space,
+    /// on the reasoning that ⌘B and Escape are how blackout actually gets hit). The review argues
+    /// that reasoning holds only while the operator's hands are on the keyboard. That is a live
+    /// question for the operator, not something to settle by editing a constant.
+    static let stageTarget: CGFloat = 44
+
+    /// Minimum height for controls used while setting up rather than while playing — Clear, Set,
+    /// the scale fields. Still well above a `.controlSize(.small)` 16pt, still not stage-sized.
+    static let secondaryTarget: CGFloat = 32
+
     /// The deck strips' own minimum. Below this they clip rather than shrink.
     ///
     /// **A hand-chosen usability floor, NOT a measured one — and this has been tried and reverted

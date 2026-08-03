@@ -63,6 +63,15 @@ struct DeckStripView: View {
             .count
     }
 
+    /// `CollapsibleSection`'s own rule is that collapsing may hide detail but must never hide the
+    /// fact that detail exists. A compiler error IS detail living in this section, so a bare count
+    /// while one is present is exactly the failure that component was built to prevent.
+    private var parametersSummary: String {
+        unit.loadFailureSummary == nil
+            ? "\(parameterCount)"
+            : "⚠ compile error · \(parameterCount)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // ── Performance controls. These never collapse. ──
@@ -71,13 +80,28 @@ struct DeckStripView: View {
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                 Spacer()
                 if unit.isLoading { ProgressView().controlSize(.small) }
-                Button("Clear") { unit.unload() }.controlSize(.small)
+                Button("Clear") { unit.unload() }
+                    .frame(minHeight: SurfaceMetrics.secondaryTarget)
             }
             Text(unit.shaderName ?? "—")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(unit.shaderName == nil ? .secondary : .primary)
                 .lineLimit(1).truncationMode(.middle)
                 .help(unit.shaderName ?? "No shader loaded")
+
+            // A failed load changes nothing else on this deck — by design, so the show never drops
+            // for a bad shader. That made it invisible: the header kept the old name, the monitor
+            // kept the old image, and the compiler output went into PARAMETERS, which is usually
+            // collapsed and, when open, reads as an indictment of the shader still playing.
+            // This is the whole feedback channel for a refused load, so it does NOT collapse.
+            if let failure = unit.loadFailureSummary {
+                Text("⚠ \(failure)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("The compiler output is in PARAMETERS. The deck did not change.")
+            }
 
             HStack {
                 Text("Opacity").font(.system(size: 11))
@@ -130,7 +154,7 @@ struct DeckStripView: View {
             }
 
             Divider()
-            CollapsibleSection(title: "PARAMETERS", summary: "\(parameterCount)",
+            CollapsibleSection(title: "PARAMETERS", summary: parametersSummary,
                                key: .deck(id, .parameters), layout: layout) {
                 ShaderControlsView(unit: unit)
             }

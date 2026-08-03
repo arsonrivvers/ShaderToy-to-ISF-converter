@@ -667,4 +667,38 @@ final class SurfaceGeometryTests: XCTestCase {
             XCTFail("Baselines were RE-RECORDED, not verified. Sentinel consumed — re-run to gate.")
         }
     }
+
+    // MARK: - Stage target sizes (2026-08-03 Client Success review)
+
+    /// **What this covers and what it does not.** It covers that the stage-tier controls are still
+    /// *asking* for `SurfaceMetrics.stageTarget`. It does NOT measure a rendered height — the
+    /// committed baselines render `stubSurfaceForBaselines`, a stub of the panel/rail geometry, so
+    /// the real `MonitorView` control row is not in any of them and this change moved no baseline.
+    /// Rendered size stays STAGED until seen on device.
+    ///
+    /// A source guard rather than nothing, because the alternative is the pattern this project
+    /// keeps paying for: `Freeze`/`Off` sat at `.controlSize(.small)` — a destructive and a
+    /// non-destructive control, adjacent, at ~39% of the stated 44pt floor — through five reviews,
+    /// and no test anywhere could have noticed. Automated a11y tooling cannot help: axe and its
+    /// equivalents have no target-size rule at all.
+    func testTheStageTierControlsStillAskForTheStageTarget() throws {
+        let source = try String(contentsOf: Self.monitorViewSource, encoding: .utf8)
+
+        // Positive control FIRST: if this fails, the two assertions below are passing because the
+        // guard is reading the wrong file, not because the sizing is right.
+        XCTAssertTrue(source.contains("Toggle(\"Freeze\"") && source.contains("Toggle(\"Off\""),
+                      "Guard is not reading MonitorView — the assertions below would be vacuous")
+
+        XCTAssertEqual(source.components(separatedBy: "SurfaceMetrics.stageTarget").count - 1, 2,
+                       "Freeze and Off must each carry the stage target")
+        XCTAssertFalse(source.contains("controlSize(.small)"),
+                       "A 16pt system control is not a stage target. This is what regressed before.")
+    }
+
+    private static var monitorViewSource: URL {
+        URL(fileURLWithPath: #filePath)      // .../App/ARShaderTests/SurfaceGeometryTests.swift
+            .deletingLastPathComponent()      // .../App/ARShaderTests
+            .deletingLastPathComponent()      // .../App
+            .appendingPathComponent("ARShader/MonitorView.swift")
+    }
 }
