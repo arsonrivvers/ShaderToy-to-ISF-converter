@@ -2248,7 +2248,7 @@ git commit -m "feat(mod): the math and motion vocabulary, and the evaluator over
   - `ModTargetMode.default(for: ModDestination) -> ModTargetMode`
   Tasks 8–12 use exactly these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `App/ARShaderTests/ModulationEngineTests.swift`:
 
@@ -2454,7 +2454,7 @@ final class ModulationEngineTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -2465,7 +2465,7 @@ xcodebuild -project App/TrueISFEditor.xcodeproj -scheme ARShader \
 
 Expected: `cannot find 'ModulationEngine' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `App/ARShader/ModulationEngine.swift`:
 
@@ -2588,7 +2588,7 @@ enum ModulationEngine {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd App && xcodegen generate && cd ..
@@ -2601,7 +2601,7 @@ Expected: PASS, 12 tests. If `testSelfReadsThePreviousFrame…` fails only on fl
 representation, compare element-wise with `accuracy: 1e-12` instead of `XCTAssertEqual` on the
 array — the CONTRACT is one step per frame, not the exact bit pattern.
 
-- [ ] **Step 5: Prove four gates can fail**
+- [x] **Step 5: Prove four gates can fail**
 
 Run each mutation, confirm the named test fails, revert, confirm PASS. Record all four in the
 Task 13 evidence table.
@@ -2613,7 +2613,7 @@ Task 13 evidence table.
 | Replace `outcome.skipped.insert` with `continue` alone | `testAnUnresolvableDestinationIsSkipped…` |
 | Use `outcome.values[destination] ?? base.value` for `selfValue` | `testSelfReadsThePreviousFrame…` |
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add App/ARShader/ModulationEngine.swift App/ARShaderTests/ModulationEngineTests.swift
@@ -4910,10 +4910,10 @@ not the intention.
 | Blackout exclusion | Add a `blackout` case and put it in the catalogue | `ModDestinationTests.testTheAddressableCatalogueIsExactlyTheSpecs…` | 2 failures. L55 `XCTAssertEqual failed` — catalogue contained `ModDestination.blackout`; L62 `XCTAssertFalse failed - An expression that can kill the output mid-set is a defect with no upside` | 2 |
 | Frame coherence (registry) | Make `ModSnapshot` resolve `reading(_:)` from the live registry (NOT "drop the entries copy" — that mutation passes; see Task 3 Step 5) | `ModSourceTests.testASnapshotIsFrozenAgainstLaterPublishes` | L109 `XCTAssertEqual failed: ("Optional(0.8)") is not equal to ("Optional(0.2)") - The frame's snapshot is a value, not a live view of the registry` | 3 |
 | `since()` decay shape | Change the time constant from 0.002 to 0.02 | `ExpressionEvaluatorTests.testOneCounterDrivesAStrobeAndASwell…` | 2 failures. L65 `XCTAssertEqualWithAccuracy failed: ("0.8187307530779818") is not equal to ("0.1353352832366127") +/- ("1e-09")`; L66 `XCTAssertLessThan failed: ("0.8187307530779818") is not less than ("0.14")` | 6 |
-| `offset` ownership | Let `offset` write the base (drop `base.value +`) | `ModulationEngineTests.testOffsetModeAddsToTheBase…` | | 7 |
-| NaN containment | Remove the `isFinite` guard | `ModulationEngineTests.testNonFiniteResultsAreContainedAndFlagged` | | 7 |
-| Skipped bindings | Drop unresolvable bindings instead of reporting them | `ModulationEngineTests.testAnUnresolvableDestinationIsSkipped…` | | 7 |
-| Cycle latency | Read this frame's value for `self` instead of the previous | `ModulationEngineTests.testSelfReadsThePreviousFrame…` | | 7 |
+| `offset` ownership | Let `offset` write the base (drop `base.value +`) | `ModulationEngineTests.testOffsetModeAddsToTheBase…` | 2 failures. L50 `("0.25") is not equal to ("0.85") +/- ("1e-12")`; L56 same at `("0.45")` | 7 |
+| NaN containment | Remove the `isFinite` guard | `ModulationEngineTests.testNonFiniteResultsAreContainedAndFlagged` | 3 failures. L84 `("Optional(nan)") is not equal to ("Optional(0.42)")`; L87 + L88 `XCTAssertTrue failed` | 7 |
+| Skipped bindings | Drop unresolvable bindings instead of reporting them | `ModulationEngineTests.testAnUnresolvableDestinationIsSkipped…` | L109 `XCTAssertTrue failed` — `skipped` is empty | 7 |
+| Cycle latency | Read this frame's value for `self` instead of the previous | `ModulationEngineTests.testSelfReadsThePreviousFrame…` | L156 `("[0.1, 0.1, 0.1, 0.1]") is not equal to ("[0.1, 0.2, 0.30000000000000004, 0.4]")` | 7 |
 | One tick per frame | Tick a second time in `renderFrame` | `ModulationWiringTests.testExactlyOneTickHappensPerRenderedFrame` | | 10 |
 | Silent driver clearing | Clear the driver from a gesture on an absolute-driven control | `DrivenControlTests.testAGestureOnADrivenControlLeavesTheDriverIntact` | | 11 |
 
