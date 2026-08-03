@@ -15,8 +15,11 @@ smoke gate in full.
   checkout). It replaced a build from **2026-07-31**, which was four tasks stale.
   Under Xcode 26 the real code is in `ARShader.debug.dylib` (5.9MB), not the 58KB
   `Contents/MacOS/ARShader` stub. The installed dylib is byte-identical to the build product
-  (sha256 `dd796e22…`), and carries three string literals unique to this session's work:
-  `Undo clear slot`, `original bytes preserved under`, and `persistence continues normally`.
+  (sha256 `06f4aea8…`), and carries three string literals unique to this session's work:
+  `Undo clear slot`, `original bytes preserved under`, and `persistence continues normally`,
+  plus Task 9's `deckAUnit`/`deckBUnit` observation properties (24 symbols each, `nm`).
+  **Reinstalled at `b61658c`** — an earlier install at `1839027` predated Task 9's live-badge fix,
+  so leg 22 run against it would have "confirmed" a bug that was already fixed.
   **Verified with `nm` and `strings`, not by assumption** — note that Swift's mangler compresses
   repeated substrings, so a nested type like `SlotBank.UndoableSlotChange` appears as
   `SlotBankC08UndoableE6Change`, and an exact-substring symbol probe for it returns nothing even
