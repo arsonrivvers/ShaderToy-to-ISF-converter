@@ -389,6 +389,44 @@ final class ClaudeCodeRunnerTests: XCTestCase {
                           "post-exit pipe drain must be bounded, not wait out the orphan")
     }
 
+    /// Production regression (2026-08-03): Claude emitted its complete terminal result object
+    /// without a trailing newline, then kept the pipe open. Newline-only delivery hid completion
+    /// from the runner until the 420-second timeout forced EOF. A complete JSON frame must stream
+    /// immediately so the runner can arm its short teardown grace.
+    func testRealProcessStreamsCompleteJSONWithoutTrailingNewlineWhilePipeStaysOpen() throws {
+        let process = RealProcess()
+        let lines = EventBox()
+        let start = Date()
+        let out = try process.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            args: ["-c", #"printf '{\"type\":\"result\",\"result\":\"ok\"}'; sleep 30"#],
+            timeout: 2,
+            onLine: { line in
+                lines.append(line)
+                process.cancel()
+            }
+        )
+
+        XCTAssertEqual(lines.lines, [#"{"type":"result","result":"ok"}"#])
+        XCTAssertNotEqual(out.exitCode, 0)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "complete JSON must stream before the timeout; RealProcess may then use its bounded 3s pipe drain")
+    }
+
+    /// If the CLI later finishes its delimiter as CRLF in separate writes, the eagerly emitted
+    /// terminal frame must not be followed by a synthetic raw `"\r"` event.
+    func testRealProcessConsumesSplitCRLFAfterUnterminatedTerminalFrame() throws {
+        let lines = EventBox()
+        _ = try RealProcess().run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            args: ["-c", #"printf '{\"type\":\"result\",\"result\":\"ok\"}'; sleep 0.1; printf '\r'; sleep 0.1; printf '\n'"#],
+            timeout: 2,
+            onLine: { lines.append($0) }
+        )
+
+        XCTAssertEqual(lines.lines, [#"{"type":"result","result":"ok"}"#])
+    }
+
     /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
     /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
     /// the main actor that the @MainActor runner body needs to execute.

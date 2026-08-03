@@ -444,6 +444,17 @@ final class RealProcess: ProcessLifecycleReporting, @unchecked Sendable {
     private let lifecycleLock = NSLock()
     private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
 
+    /// Claude's terminal stream-json object is occasionally complete but not newline-terminated.
+    /// Recognize only the terminal protocol frame here; nonterminal JSON remains newline-framed so
+    /// chunk boundaries cannot manufacture extra events.
+    private static func isCompleteTerminalFrame(_ data: Data) -> Bool {
+        guard !data.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return object["type"] as? String == "result"
+    }
+
     func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
         lifecycleLock.lock(); lifecycleHandler = handler; lifecycleLock.unlock()
     }
@@ -519,15 +530,43 @@ final class RealProcess: ProcessLifecycleReporting, @unchecked Sendable {
         q.async {
             let h = outPipe.fileHandleForReading
             var pending = Data()
+            var awaitingTerminalDelimiter = false
             while true {
                 let chunk = h.availableData
                 if chunk.isEmpty { break }
                 outBox.append(chunk); pending.append(chunk)
+                if awaitingTerminalDelimiter {
+                    while pending.first == 0x20 || pending.first == 0x09 { pending.removeFirst() }
+                    if pending.isEmpty { continue }
+                    if pending.first == 0x0A {
+                        pending.removeFirst()
+                        awaitingTerminalDelimiter = false
+                    } else if pending.first == 0x0D {
+                        guard pending.count > 1 else { continue }
+                        let second = pending.index(after: pending.startIndex)
+                        if pending[second] == 0x0A {
+                            pending.removeSubrange(pending.startIndex...second)
+                        }
+                        awaitingTerminalDelimiter = false
+                    } else {
+                        awaitingTerminalDelimiter = false
+                    }
+                }
                 while let nl = pending.firstIndex(of: 0x0A) {
                     let lineData = pending.subdata(in: pending.startIndex..<nl)
                     pending.removeSubrange(pending.startIndex...nl)
                     if let s = String(data: lineData, encoding: .utf8) { onLine(s) }
                 }
+                if Self.isCompleteTerminalFrame(pending),
+                   let s = String(data: pending, encoding: .utf8) {
+                    pending.removeAll(keepingCapacity: true)
+                    awaitingTerminalDelimiter = true
+                    onLine(s)
+                }
+            }
+            if awaitingTerminalDelimiter,
+               pending.allSatisfy({ $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }) {
+                pending.removeAll()
             }
             if !pending.isEmpty, let s = String(data: pending, encoding: .utf8) { onLine(s) }
             group.leave()
