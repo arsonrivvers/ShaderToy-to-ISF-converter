@@ -207,6 +207,7 @@ final class RemixGenerator {
         records: [RemixChildRunRecord],
         controller: RemixBatchRunController,
         onUpdate: @escaping (RemixPipelineUpdate) -> Void,
+        onInitialSlotScheduled: ((Int) -> Void)? = nil,
         onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }
     ) async {
         guard !records.isEmpty else { return }
@@ -224,9 +225,9 @@ final class RemixGenerator {
                 }
             }
 
-            @MainActor func launchNext() {
+            @MainActor func launchNext(onScheduled: ((Int) -> Void)? = nil) -> Bool {
                 guard nextIndex < records.count, controller.canLaunch, !Task.isCancelled else {
-                    return
+                    return false
                 }
                 let record = records[nextIndex]
                 nextIndex += 1
@@ -238,6 +239,8 @@ final class RemixGenerator {
                         onLog: onLog
                     )
                 }
+                onScheduled?(record.slot)
+                return true
             }
 
             guard controller.canLaunch, !Task.isCancelled else {
@@ -245,11 +248,11 @@ final class RemixGenerator {
                 return
             }
             while nextIndex < min(maxConcurrent, records.count) {
-                launchNext()
+                guard launchNext(onScheduled: onInitialSlotScheduled) else { break }
             }
             while await group.next() != nil {
                 if controller.canLaunch, !Task.isCancelled {
-                    launchNext()
+                    _ = launchNext()
                 }
             }
             cancelUnlaunched()

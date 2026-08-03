@@ -262,6 +262,30 @@ final class RemixBatchRunControllerTests: XCTestCase {
         assertSettled(updates)
     }
 
+    func test_gateClosesDuringInitialFill_stopsFillingAndSettlesEveryRun() async {
+        let harness = DetailedProviderHarness()
+        let generator = makeGenerator(harness: harness, compiler: ImmediatePipelineCompiler())
+        let records = makeRecords(count: 5)
+        let updates = PipelineUpdateCollector(records: records)
+        let controller = RemixBatchRunController()
+        var scheduledSlots: [Int] = []
+
+        await generator.generate(
+            records: records,
+            controller: controller,
+            onUpdate: updates.receive,
+            onInitialSlotScheduled: { slot in
+                scheduledSlots.append(slot)
+                controller.stop()
+            }
+        )
+
+        XCTAssertEqual(scheduledSlots, [0])
+        XCTAssertEqual(harness.providers.count, 0)
+        XCTAssertTrue(updates.finalRecords.allSatisfy { $0.stage == .cancelled })
+        assertSettled(updates)
+    }
+
     func test_stopWithTwoActiveAndThreeQueued_cancelsOnlyActiveAndNeverBackfills() async {
         let harness = DetailedProviderHarness()
         let generator = makeGenerator(harness: harness, compiler: ImmediatePipelineCompiler())
