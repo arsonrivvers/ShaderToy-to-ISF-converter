@@ -1,6 +1,8 @@
 # Live smoke — ARShader Milestone 2, phase 3c (thumbnails, drag-and-drop, hover preview)
 
-**Status: PENDING — suites green, legs written and UNRUN.**
+**Status: TIER 1 SIGNED 2026-08-02 — 13 PASS, 2 SKIP (no external display), 1 open question.**
+No FAILs. The two skips (47, 36) are the projector legs and need hardware that was not available;
+they remain owed. Leg 14 is an open question, not a defect — see "Leg 14" below. Tier 2 is unrun.
 
 **This report supersedes `live-smoke-instrument-m2-phase3b.md`.** Phase 3b's legs are not a separate
 list to run afterwards — 3c's numbering reuses them (legs 1–16, 18, 19 are 3b's, verbatim), so
@@ -42,8 +44,25 @@ smoke gate in full.
     fact FAILED and the real total was 327. Use
     `xcrun xcresulttool get test-results summary --path <bundle>.xcresult`.
 
-**No leg below has been run.** Everything in this branch is **STAGED** until you run them; nothing
-here is CONFIRMED. Five tasks in this branch have never been seen on device at all.
+**Tier 1 was run on device 2026-08-02.** 13 PASS, 0 FAIL, 2 SKIP (projector legs 47 and 36 — no
+external display that sitting), 1 open question (leg 14). The branch is **CONFIRMED for merge** on
+that basis. Two things remain owed and are tracked, not forgotten: the projector pair, and Tier 2's
+regression sweep.
+
+### Leg 14 — the open question, and what it turned into
+
+The operator reported *"I only see one row."* That is the strip at its one-row default: rows are
+grown by dragging the strip's **top edge upward**, up to `SlotBank.maxRows = 5`
+(`SlotBankStripView.swift:556-588`; the cursor becomes a vertical resize arrow over the handle). So
+leg 14 was not run as written, and it is not a defect.
+
+But the report is worth more than the leg. **The model always holds all 40 slots**
+(`SlotBank.swift:18`, `slotCount = perRow * maxRows`) — rows are purely a view concern, which is
+exactly *why* leg 14's "shrinking never destroys a look" can be true at all. The operator proposed a
+**`+` / `−` control instead of the drag**, which is a closer match to that model than the drag
+gesture is, and is discoverable where the drag demonstrably is not: the person who commissioned the
+feature could not find it. Filed as real work rather than argued here
+(`arshader-slotbank-row-control-discoverability-20260802`).
 
 ---
 
@@ -101,22 +120,22 @@ Destructive paths, the new gesture layer, and everything a fix wave touched.
 
 | # | Leg | Hypothesis | Result |
 |---|---|---|---|
-| 32 | **A drag never destroys a look** | Dial a look, capture it, then drag a DIFFERENT library shader onto that filled slot. **The drop is refused, the slot is unchanged, and you see it refuse** — cursor during the drag, and a shake on the attempt. Then ⌥-drag the same shader: now it replaces | UNRUN |
-| 46 | **Clearing a slot is undoable** | **New — added by the merge-gate review.** Right-click a filled slot ▸ Clear. Then right-click ▸ **Undo clear**: the look returns, to the SAME pad, with its dialled values. Also worth your eye: the Undo item appears on **every** cell's menu, not only the one you cleared. That is deliberate — say if it reads wrong | UNRUN |
-| 4 | Recall never overwrites | Click a filled slot ten times. It recalls ten times and its contents never change | UNRUN |
-| 5 | Replace and Clear are deliberate | ⌥-click replaces; hover ▸ Replace replaces; hover ▸ Clear empties. The hover-revealed Replace sits OUTSIDE the recall click target | UNRUN |
-| 14 | Shrinking never destroys a look | Capture into row 2, shrink to one row, grow back: the look is there, unchanged | UNRUN |
-| 18 | A failed compile does not corrupt a slot | Recall a slot whose shader has been edited into something that will not compile. The previous shader keeps playing, its dialled values are NOT overwritten, and a subsequent capture names the shader actually PLAYING | UNRUN |
-| 8 | The bank persists | Quit and relaunch: every captured look is back, and so are the row count and the collapsed state | UNRUN |
-| 19 | The suite never touches the real bank | After running the automated suite, relaunch: the operator's bank is untouched | UNRUN |
-| 35 | Clicking a library row does NOTHING | Click a library row repeatedly: no deck changes, no FX stage appends, nothing at all happens. Then drag the same row onto deck A: it loads. **Both are now the only ways the library works** — a regression in either breaks the panel outright, and neither has ever been run | UNRUN |
-| 47 | **Opening the projector shows ONE black frame** | **New — added by the merge-gate review (F4).** Set PREVIEW SCALE to 25%, then open the projector on the external display. You should see **exactly one black frame** — never a small image sitting in the corner of a black frame. A corner image means the fix did not hold | UNRUN |
-| 48 | **The hover well never lies** | **New — added by the merge-gate review (F7).** With a COLD thumbnail cache, rest on a library row, then move to another and rest again. The "still working" state must stay up **continuously** until the correct still appears. If the indicator appears, vanishes, and leaves you looking at the PREVIOUS row's picture, that is the bug this leg exists for | UNRUN |
-| 28 | Thumbnails never cost a frame | With the instrument playing and output OPEN, sweep the pointer down the whole library. **FPS must not drop and the program feed must not hitch.** This is the leg the entire GPU-queue isolation exists for | UNRUN |
-| 36 | Projector is never soft | Open the output on the external display. Set PREVIEW SCALE to 25%. **The projected image stays sharp** while the app's monitor tiles get cheap. Close the output: the saving comes back. This is the phase's behavioural correction and the one leg with a wall as its assertion | UNRUN |
-| 23 | Idle vs live survives a photo | **The finding-8 leg.** Use a near-monochrome shader (an ASCII one) AND a fully saturated one. Both must read as clearly live-vs-idle. Saturation is no longer the carrier — if you cannot tell, that is a real defect, not a preference. **Load-bearing: the slot bank has no automated colour/contrast coverage at all, so this leg is the only thing standing behind it** | UNRUN |
-| 24 | Unavailable is obvious and keeps its picture | Rename a captured shader's file, relaunch: that cell is dimmed with a warning glyph, **still shows its last thumbnail**, and does not fire. You can tell WHICH look is broken | UNRUN |
-| 33 | Deck monitor to slot captures the look | Dial deck B well off defaults, drag B's monitor to an empty slot, change B, then fire the slot: the dialled values come back | UNRUN |
+| 32 | **A drag never destroys a look** | Dial a look, capture it, then drag a DIFFERENT library shader onto that filled slot. **The drop is refused, the slot is unchanged, and you see it refuse** — cursor during the drag, and a shake on the attempt. Then ⌥-drag the same shader: now it replaces | **PASS** 2026-08-02 |
+| 46 | **Clearing a slot is undoable** | **New — added by the merge-gate review.** Right-click a filled slot ▸ Clear. Then right-click ▸ **Undo clear**: the look returns, to the SAME pad, with its dialled values. Also worth your eye: the Undo item appears on **every** cell's menu, not only the one you cleared. That is deliberate — say if it reads wrong | **PASS** 2026-08-02 |
+| 4 | Recall never overwrites | Click a filled slot ten times. It recalls ten times and its contents never change | **PASS** 2026-08-02 |
+| 5 | Replace and Clear are deliberate | ⌥-click replaces; hover ▸ Replace replaces; hover ▸ Clear empties. The hover-revealed Replace sits OUTSIDE the recall click target | **PASS** 2026-08-02 |
+| 14 | Shrinking never destroys a look | Capture into row 2, shrink to one row, grow back: the look is there, unchanged | **QUESTION** 2026-08-02 — operator sees only one row; rows are grown by dragging the strip's TOP EDGE upward (max 5). Not yet a pass or a fail — see follow-up |
+| 18 | A failed compile does not corrupt a slot | Recall a slot whose shader has been edited into something that will not compile. The previous shader keeps playing, its dialled values are NOT overwritten, and a subsequent capture names the shader actually PLAYING | **PASS** 2026-08-02 |
+| 8 | The bank persists | Quit and relaunch: every captured look is back, and so are the row count and the collapsed state | **PASS** 2026-08-02 |
+| 19 | The suite never touches the real bank | After running the automated suite, relaunch: the operator's bank is untouched | **PASS** 2026-08-02 |
+| 35 | Clicking a library row does NOTHING | Click a library row repeatedly: no deck changes, no FX stage appends, nothing at all happens. Then drag the same row onto deck A: it loads. **Both are now the only ways the library works** — a regression in either breaks the panel outright, and neither has ever been run | **PASS** 2026-08-02 |
+| 47 | **Opening the projector shows ONE black frame** | **New — added by the merge-gate review (F4).** Set PREVIEW SCALE to 25%, then open the projector on the external display. You should see **exactly one black frame** — never a small image sitting in the corner of a black frame. A corner image means the fix did not hold | SKIP 2026-08-02 — no external display available this sitting |
+| 48 | **The hover well never lies** | **New — added by the merge-gate review (F7).** With a COLD thumbnail cache, rest on a library row, then move to another and rest again. The "still working" state must stay up **continuously** until the correct still appears. If the indicator appears, vanishes, and leaves you looking at the PREVIOUS row's picture, that is the bug this leg exists for | **PASS** 2026-08-02 |
+| 28 | Thumbnails never cost a frame | With the instrument playing and output OPEN, sweep the pointer down the whole library. **FPS must not drop and the program feed must not hitch.** This is the leg the entire GPU-queue isolation exists for | **PASS** 2026-08-02 |
+| 36 | Projector is never soft | Open the output on the external display. Set PREVIEW SCALE to 25%. **The projected image stays sharp** while the app's monitor tiles get cheap. Close the output: the saving comes back. This is the phase's behavioural correction and the one leg with a wall as its assertion | SKIP 2026-08-02 — no external display available this sitting |
+| 23 | Idle vs live survives a photo | **The finding-8 leg.** Use a near-monochrome shader (an ASCII one) AND a fully saturated one. Both must read as clearly live-vs-idle. Saturation is no longer the carrier — if you cannot tell, that is a real defect, not a preference. **Load-bearing: the slot bank has no automated colour/contrast coverage at all, so this leg is the only thing standing behind it** | **PASS** 2026-08-02 |
+| 24 | Unavailable is obvious and keeps its picture | Rename a captured shader's file, relaunch: that cell is dimmed with a warning glyph, **still shows its last thumbnail**, and does not fire. You can tell WHICH look is broken | **PASS** 2026-08-02 |
+| 33 | Deck monitor to slot captures the look | Dial deck B well off defaults, drag B's monitor to an empty slot, change B, then fire the slot: the dialled values come back | **PASS** 2026-08-02 |
 
 ---
 
@@ -138,7 +157,7 @@ Destructive paths, the new gesture layer, and everything a fix wave touched.
 | 16 | Collapse remembers the rows | Three rows, collapse, expand: three rows come back | UNRUN |
 | 20 | Slots show pictures | Every filled slot draws a still frame of its shader, not a name-only cell. A slot captured this session gets one within a second or two, not on next launch | UNRUN |
 | 21 | The still is not black | Sample time is 2.0s specifically because many shaders are black at t=0. Fill eight slots with visually different shaders: eight distinguishable, non-black stills | UNRUN |
-| 22 | Live reads as live at a glance — **and lights immediately** | **Assertion tightened by Task 9.** Click a slot to recall it: the coloured border and the **A** badge appear **at once, without touching RECALL TO and without waiting**. Load the same shader on B: the badge follows. This must be readable without leaning in. A badge that only appears after you toggle RECALL TO is the exact defect Task 9 fixed — report it as a regression | UNRUN |
+| 22 | Live reads as live at a glance — **and lights immediately** | **Assertion tightened by Task 9.** Click a slot to recall it: the coloured border and the **A** badge appear **at once, without touching RECALL TO and without waiting**. Load the same shader on B: the badge follows. This must be readable without leaning in. A badge that only appears after you toggle RECALL TO is the exact defect Task 9 fixed — report it as a regression | **PASS** 2026-08-02 — Task 9's fix CONFIRMED on device |
 | 25 | Thumbnails survive relaunch | Quit and relaunch: stills appear immediately from cache, not regenerated | UNRUN |
 | 26 | A broken shader does not stutter | Point a slot at a shader that will not compile. Hover and re-hover its library row repeatedly: no repeated hitch. It compiles once and the failure is remembered | UNRUN |
 | 27 | Fixing a shader on disk retries it | Fix that shader in an editor and save. Its thumbnail regenerates rather than staying a permanent placeholder | UNRUN |
