@@ -104,6 +104,26 @@ struct SlotBankStripView: View {
     @ObservedObject private var bank: SlotBank
     @ObservedObject var layout: SurfaceLayout
 
+    /// Deck A's and deck B's shaders, observed directly. `Deck` is deliberately NOT
+    /// `ObservableObject` (see its own doc comment: "views observe unit"), and until this fix
+    /// nothing in this view held a subscription to either unit's publisher — `liveDeck(for:)`
+    /// read `sourceURL` correctly, but SwiftUI had no dependency telling it this view was stale
+    /// when a load changed it. The live badge only updated when something ELSE incidentally
+    /// redrew the strip (toggling `RECALL TO`, or `RenderStatsModel`'s ~2x/sec republish) —
+    /// reported on device 2026-08-02: clicking a slot did not light the badge until an unrelated
+    /// redraw happened to land.
+    ///
+    /// `InstrumentView.swift`'s `DeckStripView` hit and fixed the identical defect class
+    /// (2026-07-30, see that type's own doc comment): a sibling view holding `@ObservedObject var
+    /// unit: ShaderUnit` updated correctly while one built from a plain `Deck` local froze on
+    /// stale data. Same mechanism here, confirmed by that precedent rather than re-derived.
+    ///
+    /// Held unconditionally as two named properties, not derived from `DeckID.allCases` — the
+    /// two-deck assumption is already baked into this file (`SlotCellState.borderColor`'s
+    /// `.live(.one)`/`.live(.two)` switch) and everywhere else in the app.
+    @ObservedObject private var deckAUnit: ShaderUnit
+    @ObservedObject private var deckBUnit: ShaderUnit
+
     /// See `SlotBankContentColumnWidthKey`'s doc comment for why this is handed down rather than
     /// self-measured.
     @Environment(\.slotBankContentColumnWidth) private var contentColumnWidth: CGFloat
@@ -227,6 +247,8 @@ struct SlotBankStripView: View {
         self.instrument = instrument
         self.bank = instrument.slotBank
         self.layout = layout
+        self.deckAUnit = instrument.deck(.one).unit
+        self.deckBUnit = instrument.deck(.two).unit
     }
 
     /// Filled slots the strip is not drawing. Never lost: growing the rows back reveals them
@@ -311,11 +333,17 @@ struct SlotBankStripView: View {
     /// Which deck, if any, is playing this slot's shader right now. Compares `sourceURL`, which is
     /// stamped only on a SUCCESSFUL compile — so a slot whose recall failed to compile does not
     /// light up as live while the previous shader is still on screen.
-    private func liveDeck(for preset: Preset?) -> DeckID? {
+    ///
+    /// Reads `deckAUnit`/`deckBUnit` — the OBSERVED stored properties — not
+    /// `instrument.deck($0).unit`, so the value this returns stays in step with the same
+    /// subscription that invalidates `body` (see those properties' doc comment). Not `private`:
+    /// `DeckObservationSeamTests` calls this directly, the same "testable seam on the view struct
+    /// itself, no rendering" pattern `wouldAccept`/`loadThumbnails` already use.
+    func liveDeck(for preset: Preset?) -> DeckID? {
         guard let preset else { return nil }
-        return DeckID.allCases.first {
-            instrument.deck($0).unit.sourceURL == preset.shaderURL
-        }
+        if deckAUnit.sourceURL == preset.shaderURL { return .one }
+        if deckBUnit.sourceURL == preset.shaderURL { return .two }
+        return nil
     }
 
     private var header: some View {

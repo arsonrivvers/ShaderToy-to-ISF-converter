@@ -181,6 +181,20 @@ struct MonitorTile: View {
     @ObservedObject private var elementStats: ElementStatsModel
     @ObservedObject private var renderStats: RenderStatsModel
 
+    /// Deck A's and B's shaders, observed directly — same defect class and same fix as
+    /// `SlotBankStripView.deckAUnit`/`deckBUnit` (see that doc comment) and `DeckStripView.unit`.
+    /// Without this, `dragPayload` — which reads `instrument.currentPreset(of:)`, itself reading
+    /// `unit.sourceURL` — kept returning the PREVIOUS deck's preset (or nil) for up to ~500ms
+    /// after a load landed, until `renderStats`' ~2x/sec republish incidentally redrew this tile:
+    /// a freshly loaded deck was not draggable for a moment with no visible cue why.
+    ///
+    /// `MonitorSource.master` has no single deck behind it — `dragPayload` already returns nil
+    /// for it regardless — so both are held unconditionally rather than derived from `source`;
+    /// the PROGRAM tile just redraws harmlessly on a deck load too, the same order of magnitude
+    /// of churn it already gets from `renderStats`.
+    @ObservedObject private var deckAUnit: ShaderUnit
+    @ObservedObject private var deckBUnit: ShaderUnit
+
     init(instrument: Instrument, source: MonitorSource, label: String,
          drivesClock: Bool = false) {
         self.instrument = instrument
@@ -189,6 +203,8 @@ struct MonitorTile: View {
         self.drivesClock = drivesClock
         self.elementStats = instrument.elementStats
         self.renderStats = instrument.renderStats
+        self.deckAUnit = instrument.deck(.one).unit
+        self.deckBUnit = instrument.deck(.two).unit
     }
 
     /// This tile's own GPU cost. Absent, not zero — a tile shows nothing rather than claiming an
