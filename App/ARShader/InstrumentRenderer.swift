@@ -135,6 +135,23 @@ final class InstrumentRenderer: @unchecked Sendable {
     private var deckRasterSizes: [DeckID: MTLSize] = [:]
     /// Test observability: how many command buffers this renderer has committed.
     private var committedBuffers = 0
+    /// Monotonic count of COMPOSITED FRAMES — exactly one per `renderFrame()` that reaches the
+    /// commit.
+    ///
+    /// Deliberately NOT `committedBuffers`, which steps by `1 + meteredBuffers.count` and so
+    /// advances by 3 on a two-deck frame (`FrameGraphTests.testFrameStillEncodesNoReadback...`).
+    /// A liveness consumer that read that number would see "3 frames" for one frame — usable as a
+    /// *proxy* for "is it ticking", a lie the moment it is called a frame index. Two consumers
+    /// wanting two different numbers is why this is a second counter rather than a rename.
+    private var renderedFrames: UInt64 = 0
+    /// When the most recent frame was committed, on `CACurrentMediaTime()` — the same monotonic
+    /// clock `stats` already uses, so the two can be reasoned about together.
+    ///
+    /// `nil` means **no frame has ever been composited**, which is deliberately distinct from "a
+    /// frame happened long ago": there is no honest "seconds since the last frame" before there
+    /// has been one, and inventing one (0, or now-minus-launch) is the fabricated-measurement
+    /// failure `ControlFacade`'s obligation 3 exists to forbid.
+    private var lastFrameAt: CFTimeInterval?
     /// Program-output resolution. Changing it reallocates both masters — rare, operator-driven,
     /// and never in the steady-state frame.
     private var masterResolution: RenderSize = .default
@@ -351,6 +368,21 @@ final class InstrumentRenderer: @unchecked Sendable {
         return committedBuffers
     }
 
+    /// The renderer's two liveness signals, read together under ONE lock acquisition.
+    ///
+    /// Together is the whole point: two separate properties would each be individually correct and
+    /// still let a caller pair a frame count with a timestamp from a different frame, which is the
+    /// one reading that makes a healthy renderer look stalled (or the reverse). Sampling this
+    /// twice, a frame period apart, is what makes a stalled renderer detectable at all — before
+    /// this existed there was nothing to observe.
+    ///
+    /// `lastFrameAt` is `nil` until the first frame commits; see the stored property for why that
+    /// is not reported as zero.
+    var renderLiveness: (frames: UInt64, lastFrameAt: CFTimeInterval?) {
+        lock.lock(); defer { lock.unlock() }
+        return (renderedFrames, lastFrameAt)
+    }
+
     /// How many frames skipped their composite because the live render size moved mid-frame
     /// (final-review F4). Zero in every normal frame; the `...ForTesting` naming follows
     /// `ThumbnailService.compileCountForTesting`. Guarded by `lock` like every other counter here.
@@ -539,6 +571,8 @@ final class InstrumentRenderer: @unchecked Sendable {
         deckOutputs = outputs
         deckRasterSizes = rasterSizes
         committedBuffers += 1 + meteredBuffers.count
+        renderedFrames &+= 1
+        lastFrameAt = CACurrentMediaTime()
         let views = monitors.allObjects
         lock.unlock()
 

@@ -490,4 +490,66 @@ final class FrameGraphTests: XCTestCase {
         XCTAssertEqual(rgb.x, 1.0, accuracy: 0.02)
         XCTAssertLessThan(rgb.y, 0.02)
     }
+
+    // MARK: render liveness (Spyglass stall detection)
+
+    /// The reason `renderedFrames` exists as a SECOND counter rather than a rename.
+    ///
+    /// `committedBufferCount` advances by `1 + meteredBuffers.count` — three on this two-deck
+    /// frame, as `testFrameStillEncodesNoReadbackAndCommitsPerElementOnly` asserts directly above.
+    /// Anything reporting that number as a frame index claims three frames happened when one did.
+    /// This test pins both numbers on the SAME frame, so a future "simplification" that folds one
+    /// counter into the other cannot pass.
+    func testRenderedFramesCountsFramesWhereCommittedBuffersCountsBuffers() throws {
+        try load(.one, "solid_red")
+        try load(.two, "solid_green")
+        let buffersBefore = renderer.committedBufferCount
+        let framesBefore = renderer.renderLiveness.frames
+
+        renderer.renderFrame()
+
+        XCTAssertEqual(renderer.renderLiveness.frames - framesBefore, 1,
+                       "One renderFrame() is one frame, whatever the buffer count does")
+        XCTAssertEqual(renderer.committedBufferCount - buffersBefore, 3,
+                       "Two decks plus the master — the number that must NOT be read as frames")
+    }
+
+    /// Obligation 3 of `ControlFacade`, at its source: a renderer that has never composited must
+    /// not present a last-frame time, because there is no honest value for it. Reporting `0` here
+    /// would read downstream as "a frame, at time zero" — a fabricated measurement that looks
+    /// like a wedged renderer, which is precisely the confusion the facade exists to end.
+    func testLivenessHasNoLastFrameTimeBeforeTheFirstFrame() throws {
+        XCTAssertEqual(renderer.renderLiveness.frames, 0, "Nothing has been composited yet")
+        XCTAssertNil(renderer.renderLiveness.lastFrameAt,
+                     "No frame has happened, so there is no time at which one did")
+    }
+
+    /// The signal a stall check actually reads: the stamp must move when a frame lands, or
+    /// "seconds since the last frame" grows without bound on a perfectly healthy renderer.
+    func testTheLastFrameStampAdvancesWhenAFrameLands() throws {
+        try load(.one, "solid_red")
+        renderer.renderFrame()
+        let first = try XCTUnwrap(renderer.renderLiveness.lastFrameAt)
+
+        renderer.renderFrame()
+        let second = try XCTUnwrap(renderer.renderLiveness.lastFrameAt)
+
+        XCTAssertGreaterThan(second, first, "Each committed frame restamps the clock")
+    }
+
+    /// Both signals must describe the SAME frame. They are returned from one lock acquisition for
+    /// this reason; read separately they could be paired across a frame boundary, which is the one
+    /// combination that makes a live renderer look stalled.
+    func testBothLivenessSignalsAdvanceTogetherOnOneFrame() throws {
+        try load(.one, "solid_red")
+        renderer.renderFrame()
+        let (framesA, stampA) = renderer.renderLiveness
+
+        renderer.renderFrame()
+        let (framesB, stampB) = renderer.renderLiveness
+
+        XCTAssertEqual(framesB - framesA, 1)
+        XCTAssertGreaterThan(try XCTUnwrap(stampB), try XCTUnwrap(stampA),
+                             "A frame that bumps the counter must also restamp the clock")
+    }
 }
