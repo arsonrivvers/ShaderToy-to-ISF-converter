@@ -7,13 +7,26 @@ import SwiftUI
 /// struggling mid-set) and the OUTPUT destination picker (used when a cable is kicked, per M1
 /// smoke legs 17-18). Each is reached for at a bad moment, and a panel-open gesture then is the
 /// wrong cost.
+///
+/// **BLACKOUT and SHOW MODE are the deliberate exception to that rule** (operator, 2026-08-03).
+/// Blackout is the most bad-moment control in the instrument, so on the rule as stated it belongs
+/// in the rail — but the rule's premise is a *gesture* cost, and there is no gesture: ⌘B and
+/// Escape are how it is reached, always, and they run off `BlackoutKeyMonitor`'s app-wide event
+/// monitor rather than off anything rendered here. A button nobody presses was paying rail space.
+/// What did NOT move is blackout STATE, which is on the PROGRAM tile — see
+/// `MonitorTile.showsBlackoutBadge`. Moving the button without that would have made a cut output
+/// indistinguishable from a dark shader.
 struct SettingsPanelView: View {
     let instrument: Instrument
+    @ObservedObject private var mixer: MixerState
+    @ObservedObject private var layout: SurfaceLayout
     @State private var widthField = ""
     @State private var heightField = ""
 
     init(instrument: Instrument) {
         self.instrument = instrument
+        self.mixer = instrument.mixer
+        self.layout = instrument.surfaceLayout
     }
 
     var body: some View {
@@ -21,6 +34,8 @@ struct SettingsPanelView: View {
             Text("SETTINGS").font(.system(size: 12, weight: .bold, design: .monospaced))
             Divider()
             outputResolution
+            Divider()
+            stageControls
             Spacer()
         }
         .padding(10)
@@ -59,6 +74,41 @@ struct SettingsPanelView: View {
             .font(.system(size: 11, design: .monospaced))
             Text(String(format: "%.1f MP", instrument.renderer.outputResolution.megapixels))
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Both at `stageTarget` even though they now live behind a panel: the height floor is about
+    /// hitting a control without looking, and opening a panel does not make the hand steadier.
+    private var stageControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("STAGE").font(.system(size: 11, weight: .bold, design: .monospaced))
+
+            Button { layout.toggleShowMode() } label: {
+                Text(layout.showMode ? "SHOW MODE ON" : "SHOW MODE")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: SurfaceMetrics.stageTarget)
+            }
+            .buttonStyle(.bordered)
+            .tint(layout.showMode ? .accentColor : .gray)
+            .help("⌘⇧P collapses every section and closes the panel, so the monitors take the "
+                  + "space. Press it again to restore. Touching a section while in show mode "
+                  + "leaves show mode and keeps your change.")
+
+            Button { mixer.toggleBlackoutLatch() } label: {
+                Text(mixer.isBlackedOut ? "BLACKOUT ON" : "BLACKOUT")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity, minHeight: SurfaceMetrics.stageTarget)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(mixer.isBlackedOut ? .red : .gray)
+            .help("⌘B latches blackout. Hold Escape for a momentary blackout. Both work with this "
+                  + "panel closed — they do not depend on this button being on screen.")
+
+            Text("Both are keyboard-first: ⌘B latch · hold ESC momentary · ⌘⇧P show mode. "
+                 + "The keys work from anywhere, including with this panel closed.")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

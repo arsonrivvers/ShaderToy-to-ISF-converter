@@ -13,6 +13,33 @@ final class MonitorViewTests: XCTestCase {
         renderer = InstrumentRenderer(device: device, queue: queue, mixer: MixerState())
     }
 
+    // MARK: - Blackout readout (operator moved the button to Settings, 2026-08-03)
+
+    /// The button that used to say `BLACKOUT ON` was the ONLY place in the whole UI that showed
+    /// blackout state. It now lives behind a panel, so this badge is what stops a cut output from
+    /// being indistinguishable from a dark shader or an empty deck — all three render a black tile.
+    func testTheProgramTileSaysWhenTheOutputIsCut() {
+        XCTAssertTrue(MonitorTile.showsBlackoutBadge(source: .master, isBlackedOut: true))
+    }
+
+    func testTheProgramTileSaysNothingWhenTheOutputIsLive() {
+        XCTAssertFalse(MonitorTile.showsBlackoutBadge(source: .master, isBlackedOut: false),
+                       "A permanent badge would be wallpaper by the second set")
+    }
+
+    /// The asymmetry is the render's, not a display choice: blackout gates the program feed only,
+    /// and `monitorTexture` routes deck monitors to `deckTexture`, so the cue tiles keep showing
+    /// what is being lined up while the room is dark. Badging them would claim they had gone dark
+    /// when they had not — and would remove the operator's ability to cue during a blackout, which
+    /// is most of what a blackout is for.
+    func testTheCueTilesAreNotBadgedBecauseTheyAreNotBlackedOut() {
+        for deck in DeckID.allCases {
+            XCTAssertFalse(
+                MonitorTile.showsBlackoutBadge(source: .deck(deck), isBlackedOut: true),
+                "Deck \(deck.displayName) still shows its cue while the program is cut")
+        }
+    }
+
     func testRegisteredMonitorsAreDrawnOncePerFrame() throws {
         let monitor = CountingPresentingView(device: device, queue: queue)
         renderer.registerMonitor(monitor)

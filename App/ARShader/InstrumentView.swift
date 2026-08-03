@@ -373,31 +373,14 @@ struct InstrumentView: View {
             Spacer()
             statsReadout
 
-            Button { layout.toggleShowMode() } label: {
-                Text(layout.showMode ? "SHOW MODE ON" : "SHOW MODE")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .frame(maxWidth: .infinity, minHeight: 22)
-            }
-            .buttonStyle(.bordered)
-            .tint(layout.showMode ? .accentColor : .gray)
-            .help("⌘⇧P collapses every section and closes the panel, so the monitors take the "
-                  + "space. Press it again to restore. Touching a section while in show mode "
-                  + "leaves show mode and keeps your change.")
-
-            Button {
-                mixer.toggleBlackoutLatch()
-            } label: {
-                // Full width and bold, but a normal control height. The 56pt slab was sized as a
-                // stage-lighting hit target; in practice ⌘B and Escape are how it gets hit, and it
-                // was eating room the FX chains now need (operator, 2026-07-30).
-                Text(mixer.isBlackedOut ? "BLACKOUT ON" : "BLACKOUT")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .frame(maxWidth: .infinity, minHeight: 26)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(mixer.isBlackedOut ? .red : .gray)
-            .help("⌘B latches blackout. Hold Escape for a momentary blackout.")
-
+            // BLACKOUT and SHOW MODE moved to the settings panel (operator, 2026-08-03): both are
+            // driven by keyboard in practice, so the buttons were paying rail space for a gesture
+            // that never happens. The KEYS are unaffected — ⌘B and Escape live in
+            // `BlackoutKeyMonitor`, an app-wide NSEvent monitor deliberately independent of focus
+            // and of which panel is open, and ⌘⇧P rides the always-rendered `shortcuts` carrier.
+            // Blackout STATE did not move: it is on the PROGRAM tile, which is the only reason
+            // removing this button does not make a cut output indistinguishable from a dark one.
+            // The hint line stays here, because the keys it documents work from anywhere.
             Text("⌘B latch · hold ESC · ⌘⇧F output · ⌘⇧P show")
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

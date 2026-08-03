@@ -195,8 +195,26 @@ struct MonitorTile: View {
     @ObservedObject private var deckAUnit: ShaderUnit
     @ObservedObject private var deckBUnit: ShaderUnit
 
+    /// Observed because this tile is now the instrument's ONLY at-a-glance blackout readout — see
+    /// `showsBlackoutBadge`.
+    @ObservedObject private var mixer: MixerState
+
+    /// Whether this tile should say the output is cut.
+    ///
+    /// A pure function, so the rule survives without a view in play — the same reason
+    /// `ShaderDrag.accepts` has no SwiftUI import.
+    ///
+    /// **PROGRAM only, and that asymmetry is the render's, not a choice made here.** Blackout is a
+    /// final gate on the program feed; `monitorTexture` routes deck monitors to `deckTexture`, so
+    /// the cue tiles keep showing what is being lined up while the room is dark. A badge on those
+    /// would claim they had gone dark when they had not.
+    static func showsBlackoutBadge(source: MonitorSource, isBlackedOut: Bool) -> Bool {
+        source == .master && isBlackedOut
+    }
+
     init(instrument: Instrument, source: MonitorSource, label: String,
          drivesClock: Bool = false) {
+        self.mixer = instrument.mixer
         self.instrument = instrument
         self.source = source
         self.label = label
@@ -255,6 +273,24 @@ struct MonitorTile: View {
                                     + "its shader render, its copy, and its FX chain.\n\nFPS is "
                                     + "the same on every tile by construction — one clock drives "
                                     + "one frame for the whole instrument.")
+                    }
+                }
+                // The instrument's only at-a-glance blackout readout, since the button moved to
+                // Settings (operator, 2026-08-03). Costs nothing at rest — which is the space the
+                // move was for — and on a tile that is now deliberately black it removes the one
+                // ambiguity that matters: a dark shader, an empty deck and a cut output all look
+                // identical otherwise. Centred rather than tucked in a corner because this is the
+                // one thing that must be readable without looking for it.
+                .overlay(alignment: .center) {
+                    if Self.showsBlackoutBadge(source: source, isBlackedOut: mixer.isBlackedOut) {
+                        Text("BLACKOUT")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(.red, in: Capsule())
+                            .accessibilityIdentifier("monitor.blackoutBadge")
+                            .help("The program output is cut. ⌘B toggles the latch; "
+                                  + "hold Escape for a momentary blackout.")
                     }
                 }
                 // An outline, because a black tile showing a black frame has no visible bounds at
