@@ -23,4 +23,21 @@ struct RemixLineage: Codable, Equatable {
     var allNodes: [RemixNode] {
         order.compactMap { nodes[$0] }
     }
+
+    /// Seeds are durable inputs. Generated nodes are durable artifacts only when a Ready run names
+    /// their ID, so restored placeholder or failed-node copies cannot leak into lineage UI.
+    func retainingArtifacts(withIDs artifactIDs: Set<String>) -> RemixLineage {
+        var retained = RemixLineage()
+        for node in allNodes where node.id.hasPrefix("seed-") || artifactIDs.contains(node.id) {
+            retained.insert(node)
+            if isFavorite(node.id) {
+                retained.toggleFavorite(node.id)
+            }
+        }
+        return retained
+    }
+
+    var artifacts: [RemixNode] {
+        allNodes.filter { $0.status == .compiled }
+    }
 }

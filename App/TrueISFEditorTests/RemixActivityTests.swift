@@ -2,6 +2,51 @@ import XCTest
 @testable import TrueISFEditor
 
 final class RemixActivityTests: XCTestCase {
+    func test_runSummaryCountsStableStagesAndUsesOnlyTerminalFractionForProgress() {
+        let request = request()
+        let queuedAt = Date(timeIntervalSince1970: 10)
+        let records = (0..<5).map { slot -> RemixChildRunRecord in
+            RemixChildRunRecord(
+                id: "r1-\(slot)",
+                round: 1,
+                slot: slot,
+                request: request,
+                stage: slot < 3 ? .queued : .receiving,
+                queuedAt: queuedAt,
+                startedAt: slot < 3 ? nil : Date(timeIntervalSince1970: Double(20 + slot)),
+                lastEventAt: slot < 3 ? nil : Date(timeIntervalSince1970: Double(30 + slot))
+            )
+        }
+
+        let summary = RemixRunSummary(records: records)
+
+        XCTAssertEqual(summary.stageCounts[.queued], 3)
+        XCTAssertEqual(summary.stageCounts[.receiving], 2)
+        XCTAssertEqual(summary.terminalCount, 0)
+        XCTAssertEqual(summary.totalCount, 5)
+        XCTAssertEqual(summary.activeWorkerCount, 2)
+        XCTAssertEqual(summary.queueCount, 3)
+        XCTAssertEqual(summary.earliestStart, Date(timeIntervalSince1970: 23))
+        XCTAssertEqual(summary.latestProviderActivity, Date(timeIntervalSince1970: 34))
+        XCTAssertEqual(summary.terminalProgress, 0)
+    }
+
+    func test_runSummaryTerminalProgressIgnoresUnequalIntermediateStages() {
+        let stages: [RemixChildRunRecord.Stage] = [.ready, .failed, .compiling, .receiving]
+        let records = stages.enumerated().map { slot, stage in
+            RemixChildRunRecord(
+                id: "r2-\(slot)",
+                round: 2,
+                slot: slot,
+                request: request(),
+                stage: stage,
+                queuedAt: Date(timeIntervalSince1970: 1),
+                terminalAt: stage.isTerminal ? Date(timeIntervalSince1970: 2) : nil
+            )
+        }
+        XCTAssertEqual(RemixRunSummary(records: records).terminalProgress, 0.5)
+    }
+
     private let requestID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
     private let eventDate = Date(timeIntervalSince1970: 1_721_844_000)
 
@@ -88,5 +133,16 @@ final class RemixActivityTests: XCTestCase {
 
         XCTAssertEqual(summary.compactStatus, "Ready")
         XCTAssertEqual(summary.accessibilityAnnouncement, "Remix Studio is ready.")
+    }
+
+    private func request() -> RemixGenerationRequestSnapshot {
+        RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-0"],
+            parentSources: ["parent"],
+            mode: .mutate,
+            steer: "",
+            directive: "test",
+            settings: RemixCrossoverSettings()
+        )
     }
 }

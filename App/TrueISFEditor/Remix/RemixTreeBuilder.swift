@@ -15,7 +15,7 @@ enum RemixTreeBuilder {
     static func flatten(_ lineage: RemixLineage,
                         collapsed: Set<String>,
                         favoritesOnly: Bool) -> [RemixTreeRow] {
-        let visible = lineage.order.compactMap { lineage.node($0) }.filter { $0.status == .compiled }
+        let visible = lineage.artifacts
         if favoritesOnly {
             return visible.filter { lineage.isFavorite($0.id) }
                 .map { RemixTreeRow(id: $0.id, depth: 0, secondaryParentID: secondary($0)) }
@@ -34,8 +34,7 @@ enum RemixTreeBuilder {
     /// drives the view's disclosure triangle. Children where this node is only the secondary
     /// parent render elsewhere and don't count.
     static func hasRenderedChildren(_ lineage: RemixLineage, id: String) -> Bool {
-        lineage.order.compactMap { lineage.node($0) }
-            .contains { $0.parents.first == id && $0.status == .compiled }
+        lineage.artifacts.contains { $0.parents.first == id }
     }
 
     private static func secondary(_ n: RemixNode) -> String? {

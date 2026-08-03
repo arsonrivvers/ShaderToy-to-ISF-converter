@@ -345,6 +345,28 @@ final class RemixGenerator {
         return finalNode ?? Self.legacyNode(from: finalRecord)
     }
 
+    /// Resumes only parser/native-compiler work from durable candidate evidence. This path never
+    /// constructs a provider and intentionally shares the same local pipeline as a live response.
+    func resumeLocal(
+        record: RemixChildRunRecord,
+        onUpdate: @escaping (RemixPipelineUpdate) -> Void
+    ) async {
+        guard !record.stage.isTerminal,
+              record.stage == .extracting || record.stage == .compiling,
+              let candidate = record.candidateSource,
+              !candidate.isEmpty
+        else {
+            return
+        }
+        let state = RemixChildPipelineState(
+            record: record,
+            controller: RemixBatchRunController(),
+            onUpdate: onUpdate
+        )
+        state.emitProviderNotAlive()
+        await runLocalPipeline(state: state, extractionInput: candidate)
+    }
+
     private func runChild(
         record: RemixChildRunRecord,
         controller: RemixBatchRunController,
@@ -435,7 +457,14 @@ final class RemixGenerator {
 
         state.acceptProviderResult(result)
         guard state.beginExtraction() else { return }
-        let extraction = await extractCandidate(result.response)
+        await runLocalPipeline(state: state, extractionInput: result.response)
+    }
+
+    private func runLocalPipeline(
+        state: RemixChildPipelineState,
+        extractionInput: String
+    ) async {
+        let extraction = await extractCandidate(extractionInput)
         let candidate: String
         switch extraction {
         case .success(let source):
@@ -449,7 +478,11 @@ final class RemixGenerator {
             return
         }
 
-        guard state.beginCompilation() else { return }
+        if state.record.stage == .extracting {
+            guard state.beginCompilation() else { return }
+        } else {
+            guard state.record.stage == .compiling else { return }
+        }
         let compileResult = await compiler.compile(candidate)
         guard compileResult.isValid else {
             state.fail(

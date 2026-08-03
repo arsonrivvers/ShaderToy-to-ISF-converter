@@ -220,7 +220,7 @@ struct RemixChildrenCanvasView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.currentBatch.isEmpty {
+        if model.childViewItems.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "sparkles.rectangle.stack")
                     .font(.largeTitle)
@@ -251,13 +251,13 @@ struct RemixChildrenCanvasView: View {
         GeometryReader { geometry in
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(Array(model.currentBatch.enumerated()), id: \.element.id) { index, node in
-                        card(node, index: index, coordinator: nil, previewID: nil)
+                    ForEach(Array(model.childViewItems.enumerated()), id: \.element.id) { index, item in
+                        card(item, index: index, coordinator: nil, previewID: nil)
                             .focusable()
-                            .focused($focusedChildID, equals: node.id)
+                            .focused($focusedChildID, equals: item.id)
                             .onTapGesture {
-                                focusedChildID = node.id
-                                model.workspace.focus(node.id)
+                                focusedChildID = item.id
+                                model.workspace.focus(item.id)
                             }
                     }
                 }
@@ -270,7 +270,7 @@ struct RemixChildrenCanvasView: View {
 
     @ViewBuilder
     private var comparisonView: some View {
-        let selected = model.workspace.comparedChildIDs.compactMap(node)
+        let selected = model.workspace.comparedChildIDs.compactMap(item)
         if selected.count == 2 {
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
@@ -299,12 +299,12 @@ struct RemixChildrenCanvasView: View {
     @ViewBuilder
     private var heroView: some View {
         if let id = model.workspace.heroChildID ?? model.workspace.focusedChildID,
-           let node = node(id) {
-            card(node, index: index(of: node), coordinator: nil, previewID: nil)
+           let item = item(id) {
+            card(item, index: index(of: item), coordinator: nil, previewID: nil)
                 .padding(16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusable()
-                .focused($focusedChildID, equals: node.id)
+                .focused($focusedChildID, equals: item.id)
         } else {
             emptyMode(
                 title: "Choose a Hero",
@@ -315,21 +315,22 @@ struct RemixChildrenCanvasView: View {
     }
 
     private func card(
-        _ node: RemixNode,
+        _ item: RemixChildViewItem,
         index: Int,
         coordinator: RemixComparisonCoordinator?,
         previewID: String?
     ) -> some View {
         RemixChildCardView(
             model: model,
-            node: node,
+            run: item.run,
+            artifact: item.artifact,
             position: index + 1,
-            total: model.currentBatch.count,
+            total: model.childViewItems.count,
             openInEditor: openInEditor,
             comparisonCoordinator: coordinator,
             comparisonPreviewID: previewID,
             showCompileSummary: {
-                diagnosticSummary = model.compileSummary(for: node.id)
+                diagnosticSummary = model.compileSummary(for: item.id)
             }
         )
     }
@@ -352,17 +353,17 @@ struct RemixChildrenCanvasView: View {
         model.workspace.previewsPaused || (reduceMotion && !model.reduceMotionPlaybackEnabled)
     }
 
-    private func node(_ id: String) -> RemixNode? {
-        model.currentBatch.first { $0.id == id }
+    private func item(_ id: String) -> RemixChildViewItem? {
+        model.childViewItems.first { $0.id == id }
     }
 
-    private func index(of node: RemixNode) -> Int {
-        model.currentBatch.firstIndex { $0.id == node.id } ?? 0
+    private func index(of item: RemixChildViewItem) -> Int {
+        model.childViewItems.firstIndex { $0.id == item.id } ?? 0
     }
 
     private func restoreFocus() {
         if model.workspace.focusedChildID == nil {
-            model.workspace.focusedChildID = model.currentBatch.first?.id
+            model.workspace.focusedChildID = model.childViewItems.first?.id
         }
         focusedChildID = model.workspace.focusedChildID
         DispatchQueue.main.async {
@@ -372,9 +373,12 @@ struct RemixChildrenCanvasView: View {
     }
 
     private func configureComparison() {
-        let selected = model.workspace.comparedChildIDs.compactMap(node)
-        guard selected.count == 2 else { return }
-        comparison.configure(leftISF: selected[0].isfSource, rightISF: selected[1].isfSource)
+        let selected = model.workspace.comparedChildIDs.compactMap(item)
+        guard selected.count == 2,
+              let left = selected[0].artifact,
+              let right = selected[1].artifact
+        else { return }
+        comparison.configure(leftISF: left.isfSource, rightISF: right.isfSource)
         comparison.setPaused(model.workspace.previewsPaused)
     }
 

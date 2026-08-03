@@ -63,6 +63,18 @@ final class RemixThumbnailTests: XCTestCase {
         XCTAssertFalse(RemixThumbnailView.shouldPushFrozenFrame(wasAnimating: false, animating: true))
     }
 
+    func testPreviewReloadIsScopedToSourceChangeOrAttemptIncrement() {
+        XCTAssertTrue(RemixThumbnailView.shouldReloadPreview(
+            previousAttempt: 0, newAttempt: 1, sourceChanged: false
+        ))
+        XCTAssertTrue(RemixThumbnailView.shouldReloadPreview(
+            previousAttempt: 1, newAttempt: 1, sourceChanged: true
+        ))
+        XCTAssertFalse(RemixThumbnailView.shouldReloadPreview(
+            previousAttempt: 1, newAttempt: 1, sourceChanged: false
+        ))
+    }
+
     func testFailureAfterSuccessfulCompileIsPreviewFailureNotCompileFailure() {
         XCTAssertEqual(
             RemixThumbnailView.classifyReport(

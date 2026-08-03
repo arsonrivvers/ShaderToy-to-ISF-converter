@@ -134,6 +134,30 @@ enum RemixLineagePresentation {
         }
     }
 
+    static func failureRows(records: [RemixChildRunRecord])
+        -> [RemixActivityFailurePresentation]
+    {
+        records.compactMap { record in
+            guard record.stage == .failed else { return nil }
+            let compileDiagnostic = record.failureBoundary == .compile
+                ? record.compileDiagnostic
+                : nil
+            return RemixActivityFailurePresentation(
+                id: record.id,
+                title: record.id,
+                message: compileDiagnostic ?? record.failureMessage ?? "Failed",
+                actions: compileDiagnostic == nil
+                    ? ["Retry This Child"]
+                    : [
+                        "View Compile Summary",
+                        "Copy Diagnostic",
+                        "Open Source in Editor to Fix",
+                        "Retry This Child",
+                    ]
+            )
+        }
+    }
+
     private static func actionNames(
         for node: RemixNode,
         favorite: Bool,

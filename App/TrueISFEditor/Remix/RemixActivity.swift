@@ -18,6 +18,55 @@ struct RemixActivitySummary: Equatable {
     let accessibilityAnnouncement: String
 }
 
+struct RemixRunSummary: Equatable {
+    let stageCounts: [RemixChildRunRecord.Stage: Int]
+    let terminalCount: Int
+    let totalCount: Int
+    let activeWorkerCount: Int
+    let queueCount: Int
+    let earliestStart: Date?
+    let latestProviderActivity: Date?
+
+    init(records: [RemixChildRunRecord]) {
+        stageCounts = records.reduce(into: [:]) { counts, record in
+            counts[record.stage, default: 0] += 1
+        }
+        terminalCount = records.filter(\.stage.isTerminal).count
+        totalCount = records.count
+        queueCount = stageCounts[.queued, default: 0]
+        activeWorkerCount = records.filter {
+            !$0.stage.isTerminal && $0.stage != .queued
+        }.count
+        earliestStart = records.compactMap(\.startedAt).min()
+        latestProviderActivity = records.compactMap(\.lastEventAt).max()
+    }
+
+    var terminalProgress: Double {
+        guard totalCount > 0 else { return 0 }
+        return Double(terminalCount) / Double(totalCount)
+    }
+
+    func activitySummary(activeProviderCount: Int) -> RemixActivitySummary {
+        guard totalCount > 0 else {
+            return RemixActivitySummary(
+                compactStatus: "Ready",
+                accessibilityAnnouncement: "Remix Studio is ready."
+            )
+        }
+        let compact = "\(terminalCount) of \(totalCount) complete · \(activeWorkerCount) active · \(queueCount) queued"
+        let providerClause = activeProviderCount == 1
+            ? "One provider process is alive."
+            : "\(activeProviderCount) provider processes are alive."
+        return RemixActivitySummary(
+            compactStatus: compact,
+            accessibilityAnnouncement:
+                "\(terminalCount) of \(totalCount) children are terminal. "
+                + "\(activeWorkerCount) workers are active and \(queueCount) are queued. "
+                + providerClause
+        )
+    }
+}
+
 enum RemixCompileSalvageAction: String, Codable, Equatable {
     case viewCompileSummary = "View Compile Summary"
     case openSourceInEditorToFix = "Open Source in Editor to Fix"

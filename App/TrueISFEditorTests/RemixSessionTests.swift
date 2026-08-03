@@ -144,6 +144,23 @@ final class RemixSessionTests: XCTestCase {
         XCTAssertEqual(try roundTrip(decoded), decoded)
     }
 
+    func test_v1EmptyResultFixturePromotesOnlyCompleteChildTaggedCandidatesForLocalResume() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "remix-2026-08-01-empty-result-session-v1",
+            withExtension: "json"
+        ))
+        let decoded = try JSONDecoder().decode(RemixSession.self, from: Data(contentsOf: url))
+
+        XCTAssertEqual(decoded.currentRuns.map(\.stage), [
+            .extracting, .extracting, .interrupted, .extracting, .interrupted,
+        ])
+        XCTAssertEqual(decoded.currentRuns.compactMap(\.candidateSource), [
+            completeISF("Recovered r1-0"),
+            completeISF("Recovered r1-1"),
+            completeISF("Recovered r1-3"),
+        ])
+    }
+
     func test_v1MigrationRetainsLineageOnlyGeneratedChildrenInDeterministicRoundGroups() throws {
         let existingHistoryNode = legacyNode(
             id: "r1-0",

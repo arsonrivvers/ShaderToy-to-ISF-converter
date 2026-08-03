@@ -106,7 +106,7 @@ struct RemixBatchRecord: Codable, Equatable {
         }
         return RemixNode(
             id: run.id,
-            isfSource: run.candidateSource ?? "",
+            isfSource: run.stage == .ready ? (run.candidateSource ?? "") : "",
             parents: run.request.parentIDs,
             mode: run.request.mode,
             steer: run.request.steer,
@@ -180,6 +180,7 @@ struct RemixSession: Codable, Equatable {
     var activity: RemixActivityState
     var pendingParentRequest: RemixParentRequestSnapshot?
     var transcript: [String]
+    var previewStates: [String: RemixPreviewState]
 
     init(
         round: Int,
@@ -198,7 +199,8 @@ struct RemixSession: Codable, Equatable {
         crossoverSettings: RemixCrossoverSettings,
         activity: RemixActivityState,
         pendingParentRequest: RemixParentRequestSnapshot?,
-        transcript: [String]
+        transcript: [String],
+        previewStates: [String: RemixPreviewState] = [:]
     ) {
         self.round = round
         self.seedCounter = seedCounter
@@ -217,6 +219,7 @@ struct RemixSession: Codable, Equatable {
         self.activity = activity
         self.pendingParentRequest = pendingParentRequest
         self.transcript = transcript
+        self.previewStates = previewStates
     }
 
     /// Temporary source compatibility until Task 7 replaces the legacy studio-model state.
@@ -238,7 +241,8 @@ struct RemixSession: Codable, Equatable {
         activity: RemixActivityState,
         compileDiagnosticsByNodeID: [String: String]? = nil,
         pendingParentRequest: RemixParentRequestSnapshot?,
-        transcript: [String]
+        transcript: [String],
+        previewStates: [String: RemixPreviewState] = [:]
     ) {
         let requests = batchHistory.reduce(into: [String: RemixGenerationRequestSnapshot]()) {
             for (id, request) in $1.requestsByNodeID { $0[id] = request }
@@ -285,7 +289,8 @@ struct RemixSession: Codable, Equatable {
             crossoverSettings: crossoverSettings,
             activity: activity,
             pendingParentRequest: pendingParentRequest,
-            transcript: transcript
+            transcript: transcript,
+            previewStates: previewStates
         )
     }
 
@@ -485,6 +490,7 @@ struct RemixSession: Codable, Equatable {
         activity = legacy.activity
         pendingParentRequest = legacy.pendingParentRequest
         transcript = legacy.transcript
+        previewStates = [:]
     }
 
     private static func candidatesByNodeID(in legacy: LegacyRemixSessionV1) -> [String: String] {
@@ -547,7 +553,9 @@ struct RemixSession: Codable, Equatable {
         }
         var candidate = selectedCandidate?.isEmpty == false ? selectedCandidate : nil
         var recoveredFromTranscript = false
-        if legacyFailure == "No ISF in reply", candidate == nil,
+        let isLegacyUnfinished = node.status == .generating || node.status == .interrupted
+        if candidate == nil,
+           (legacyFailure == "No ISF in reply" || isLegacyUnfinished),
            let recovered = RemixLegacyRecovery.candidate(childID: node.id, transcript: transcript) {
             candidate = recovered
             recoveredFromTranscript = true
@@ -578,7 +586,7 @@ struct RemixSession: Codable, Equatable {
             }
         case .generating, .interrupted:
             if candidate != nil {
-                run.stage = .compiling
+                run.stage = recoveredFromTranscript ? .extracting : .compiling
                 run.terminalAt = nil
                 run.failureMessage = nil
             }
@@ -631,6 +639,7 @@ struct RemixSession: Codable, Equatable {
         case schemaVersion, round, seedCounter, parentAID, parentBID, parentHistory
         case mode, steer, batchSize, currentRuns, batchHistory, lineage, workspace
         case selectedLineageNodeID, crossoverSettings, activity, pendingParentRequest, transcript
+        case previewStates
     }
 
     init(from decoder: Decoder) throws {
@@ -683,7 +692,11 @@ struct RemixSession: Codable, Equatable {
                 RemixParentRequestSnapshot.self,
                 forKey: .pendingParentRequest
             ),
-            transcript: try versionContainer.decode([String].self, forKey: .transcript)
+            transcript: try versionContainer.decode([String].self, forKey: .transcript),
+            previewStates: try versionContainer.decodeIfPresent(
+                [String: RemixPreviewState].self,
+                forKey: .previewStates
+            ) ?? [:]
         )
     }
 
@@ -708,5 +721,6 @@ struct RemixSession: Codable, Equatable {
         try container.encode(bounded.activity, forKey: .activity)
         try container.encodeIfPresent(bounded.pendingParentRequest, forKey: .pendingParentRequest)
         try container.encode(bounded.transcript, forKey: .transcript)
+        try container.encode(bounded.previewStates, forKey: .previewStates)
     }
 }

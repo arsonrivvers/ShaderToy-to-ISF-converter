@@ -55,6 +55,81 @@ private final class DeterministicAutosaveScheduler {
 }
 
 @MainActor
+private final class StudioDetailedProvider: AssistProvider, AssistDetailedProvider {
+    private var continuation: CheckedContinuation<AssistRunResult, Error>?
+    private var eventHandler: (@Sendable (AssistRunEvent) -> Void)?
+    private(set) var isReady = false
+
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
+             onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
+        (try await runDetailed(
+            prompt: prompt, system: system, model: model, timeout: timeout,
+            onEvent: { _ in }, onRawLine: onEvent
+        )).response
+    }
+
+    func runDetailed(
+        prompt: String,
+        system: String,
+        model: String?,
+        timeout: TimeInterval,
+        onEvent: @escaping @Sendable (AssistRunEvent) -> Void,
+        onRawLine: @escaping @Sendable (String) -> Void
+    ) async throws -> AssistRunResult {
+        eventHandler = onEvent
+        isReady = true
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation = $0 }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel() }
+        }
+    }
+
+    func emit(_ event: AssistRunEvent) { eventHandler?(event) }
+
+    func succeed(_ response: String) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(returning: AssistRunResult(
+            provider: .claude,
+            response: response,
+            source: .assistantMessage,
+            observedSuccessfulResult: true,
+            completeAssistantResponse: response,
+            successfulResultText: nil,
+            receivedBytes: response.utf8.count,
+            eventCount: 1
+        ))
+    }
+
+    private func cancel() {
+        guard let continuation else { return }
+        self.continuation = nil
+        eventHandler?(.cancelled)
+        continuation.resume(throwing: CancellationError())
+    }
+}
+
+@MainActor
+private final class StudioProviderHarness {
+    private(set) var providers: [StudioDetailedProvider] = []
+    func makeProvider() -> AssistProvider {
+        let provider = StudioDetailedProvider()
+        providers.append(provider)
+        return provider
+    }
+}
+
+@MainActor
+private final class StudioCompiler: RemixCompiling {
+    private(set) var sources: [String] = []
+    func compile(_ source: String) async -> RemixCompileResult {
+        sources.append(source)
+        return RemixCompileResult(isValid: true, diagnostic: nil, errorLine: nil)
+    }
+}
+
+@MainActor
 final class RemixStudioModelTests: XCTestCase {
     private let isf = "/*{ \"ISFVSN\":\"2.0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }"
     private func model(_ scripts: [Result<String, Error>]) -> RemixStudioModel {
@@ -68,6 +143,244 @@ final class RemixStudioModelTests: XCTestCase {
                 fileURL: directory.appendingPathComponent("session.json")
             )
         )
+    }
+
+    func test_pipelineUpdatesPreserveStableSlotsFirstTerminalWinsAndTrackOnlyTypedLiveness() {
+        let m = model([.success(isf)])
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-0"],
+            parentSources: [isf],
+            mode: .mutate,
+            steer: "",
+            directive: "test",
+            settings: RemixCrossoverSettings()
+        )
+        var first = RemixChildRunRecord(
+            id: "r1-0", round: 1, slot: 0, request: request,
+            stage: .receiving, queuedAt: Date(timeIntervalSince1970: 1)
+        )
+        let second = RemixChildRunRecord(
+            id: "r1-1", round: 1, slot: 1, request: request,
+            stage: .receiving, queuedAt: Date(timeIntervalSince1970: 1)
+        )
+        m.applyPipelineUpdate(.record(first))
+        m.applyPipelineUpdate(.record(second))
+        XCTAssertEqual(m.currentRuns.map(\.id), ["r1-0", "r1-1"])
+        XCTAssertTrue(m.activeProviderChildIDs.isEmpty)
+
+        m.applyPipelineUpdate(.processLiveness(childID: "r1-0", isAlive: true))
+        XCTAssertEqual(m.activeProviderChildIDs, ["r1-0"])
+        m.applyPipelineUpdate(.processLiveness(childID: "r1-1", isAlive: false))
+        XCTAssertEqual(m.activeProviderChildIDs, ["r1-0"])
+
+        _ = first.fail(boundary: .provider, message: "first terminal", at: Date())
+        m.applyPipelineUpdate(.record(first))
+        XCTAssertTrue(m.activeProviderChildIDs.isEmpty)
+
+        var lateReady = first
+        lateReady.candidateSource = isf
+        lateReady.stage = .compiling
+        lateReady.terminalAt = nil
+        _ = lateReady.finishReady(artifactID: "r1-0", at: Date())
+        let lateArtifact = RemixNode(
+            artifactID: "r1-0", isfSource: isf, parents: ["seed-0"],
+            mode: .mutate, steer: "", directive: "test", round: 1
+        )
+        m.applyPipelineUpdate(.artifact(lateArtifact, record: lateReady))
+        XCTAssertEqual(m.currentRuns[0].stage, .failed)
+        XCTAssertNil(m.lineage.node("r1-0"))
+    }
+
+    func test_providerExitTimeoutAndCancellationLivenessUpdatesAllClearTransientLiveSet() {
+        let m = model([.success(isf)])
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-0"], parentSources: [isf], mode: .mutate,
+            steer: "", directive: "test", settings: RemixCrossoverSettings()
+        )
+        let record = RemixChildRunRecord(
+            id: "r1-0", round: 1, slot: 0, request: request,
+            stage: .receiving, queuedAt: Date(timeIntervalSince1970: 1)
+        )
+        m.applyPipelineUpdate(.record(record))
+
+        for terminalProviderEvent in ["process exit", "timeout", "cancellation"] {
+            m.applyPipelineUpdate(.processLiveness(childID: record.id, isAlive: true))
+            XCTAssertEqual(m.activeProviderChildIDs, [record.id], terminalProviderEvent)
+            m.applyPipelineUpdate(.processLiveness(childID: record.id, isAlive: false))
+            XCTAssertTrue(m.activeProviderChildIDs.isEmpty, terminalProviderEvent)
+        }
+    }
+
+    func test_generationPublishesStableSlotsShowsFirstReadyPayoffAndStopSettlesEverySlot() async throws {
+        let harness = StudioProviderHarness()
+        let compiler = StudioCompiler()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-stable-runs-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: harness.makeProvider,
+                model: nil,
+                maxConcurrent: 2,
+                compiler: compiler
+            ),
+            sessionStore: RemixSessionStore(
+                fileURL: directory.appendingPathComponent("session.json")
+            )
+        )
+        m.mode = .mutate
+        m.setParent(.a, isf: isf)
+        m.batchSize = 5
+        m.startGeneration()
+
+        try await waitUntil { harness.providers.count == 2 }
+        try await waitUntil { m.runSummary.stageCounts[.thinking] == 2 }
+        try await waitUntil { harness.providers.allSatisfy(\.isReady) }
+        harness.providers.forEach {
+            $0.emit(.processStarted(pid: 42))
+            $0.emit(.textDelta(messageID: "m", blockIndex: 0, text: "chunk"))
+        }
+        try await waitUntil { m.runSummary.stageCounts[.receiving] == 2 }
+        XCTAssertEqual(m.currentRuns.map(\.id), ["r1-0", "r1-1", "r1-2", "r1-3", "r1-4"])
+        XCTAssertEqual(m.runSummary.stageCounts[.queued], 3)
+        XCTAssertEqual(
+            m.runSummary.stageCounts[.receiving],
+            2,
+            "stages: \(m.currentRuns.map(\.stage))"
+        )
+        XCTAssertNil(m.lineage.node("r1-0"))
+
+        harness.providers[0].succeed("```glsl\n\(isf)\n```")
+        try await waitUntil { m.currentRuns.first?.stage == .ready }
+        XCTAssertTrue(m.isGenerating)
+        XCTAssertNotNil(m.lineage.node("r1-0"))
+
+        m.cancelGeneration()
+        try await waitUntil { !m.isGenerating }
+        XCTAssertTrue(m.currentRuns.allSatisfy(\.stage.isTerminal))
+    }
+
+    func test_restoreV1EmptyResultRecoversThreeArtifactsInStableSlotOrderWithoutProvider() async throws {
+        let fixtureURL = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "remix-2026-08-01-empty-result-session-v1",
+            withExtension: "json"
+        ))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-v1-local-recovery-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let sessionURL = directory.appendingPathComponent("session.json")
+        try FileManager.default.copyItem(at: fixtureURL, to: sessionURL)
+        let provider = FakeProvider([.success(isf)])
+        let compiler = StudioCompiler()
+
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: { provider },
+                model: nil,
+                compiler: compiler
+            ),
+            sessionStore: RemixSessionStore(fileURL: sessionURL)
+        )
+
+        try await waitUntil {
+            ["r1-0", "r1-1", "r1-3"].allSatisfy { id in
+                m.currentRuns.first(where: { $0.id == id })?.stage == .ready
+            }
+        }
+        XCTAssertEqual(compiler.sources, [
+            "/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }",
+            "/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-1\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }",
+            "/*{ \"ISFVSN\": \"2.0\", \"DESCRIPTION\": \"Recovered r1-3\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }",
+        ])
+        XCTAssertTrue(provider.prompts.isEmpty)
+        XCTAssertNotNil(m.lineage.node("r1-0"))
+        XCTAssertNotNil(m.lineage.node("r1-1"))
+        XCTAssertNotNil(m.lineage.node("r1-3"))
+    }
+
+    func test_restoreSchemaV2InterruptsProviderStagesAndResumesOnlyCompleteLocalCandidates() async throws {
+        let fixtureURL = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "remix-schema-v2-mid-batch",
+            withExtension: "json"
+        ))
+        var session = try JSONDecoder().decode(
+            RemixSession.self,
+            from: Data(contentsOf: fixtureURL)
+        )
+        session.currentRuns[5].candidateSource = completeISF("extracting restore")
+        session.currentRuns[6].candidateSource = completeISF("compiling restore")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-v2-local-recovery-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = RemixSessionStore(fileURL: directory.appendingPathComponent("session.json"))
+        try store.save(session)
+        let provider = FakeProvider([.success(isf)])
+        let compiler = StudioCompiler()
+
+        let m = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: { provider }, model: nil, compiler: compiler
+            ),
+            sessionStore: store
+        )
+
+        try await waitUntil { m.currentRuns.allSatisfy(\.stage.isTerminal) }
+        XCTAssertEqual(m.currentRuns.map(\.stage), [
+            .interrupted, .interrupted, .interrupted, .interrupted, .interrupted, .ready, .ready,
+        ])
+        XCTAssertEqual(compiler.sources, [
+            completeISF("extracting restore"),
+            completeISF("compiling restore"),
+        ])
+        XCTAssertTrue(provider.prompts.isEmpty)
+        XCTAssertTrue(m.activeProviderChildIDs.isEmpty)
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        _ condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("timed out")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func completeISF(_ description: String) -> String {
+        "/*{ \"ISFVSN\":\"2.0\", \"DESCRIPTION\":\"\(description)\" }*/\n"
+            + "void main(){ gl_FragColor=vec4(1.0); }"
+    }
+
+    private func installCompileFailure(
+        on model: RemixStudioModel,
+        id: String = "r1-0",
+        message: String
+    ) {
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-0"],
+            parentSources: [isf],
+            mode: .mutate,
+            steer: "",
+            directive: "test",
+            settings: RemixCrossoverSettings()
+        )
+        var run = RemixChildRunRecord(
+            id: id,
+            round: 1,
+            slot: 0,
+            request: request,
+            stage: .compiling,
+            queuedAt: Date(timeIntervalSince1970: 1),
+            candidateSource: isf
+        )
+        XCTAssertTrue(run.fail(boundary: .compile, message: message, at: Date()))
+        model.applyPipelineUpdate(.record(run))
     }
 
     func test_setParent_createsSeedNode_inLineage() {
@@ -103,16 +416,16 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertFalse(m.isGenerating)
     }
 
-    func test_markCompileResult_updatesStatus_inBatchAndLineage() async {
+    func test_rendererFailureDoesNotRewriteReadyRunOrArtifact() async {
         let m = model([.success("```glsl\n\(isf)\n```")])
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/"); m.batchSize = 1
         await m.generate()
         let id = m.currentBatch[0].id
-        m.markCompileResult(id: id, valid: false, error: "bad GLSL")
-        XCTAssertEqual(m.currentBatch[0].status, .failed("bad GLSL"))
-        XCTAssertEqual(m.lineage.node(id)?.status, .failed("bad GLSL"))
-        m.markCompileResult(id: id, valid: true, error: nil)
+        m.markPreviewFailed(artifactID: id, diagnostic: "renderer failed")
         XCTAssertEqual(m.currentBatch[0].status, .compiled)
+        XCTAssertEqual(m.currentRuns[0].stage, .ready)
+        XCTAssertEqual(m.lineage.node(id)?.status, .compiled)
+        XCTAssertEqual(m.previewStates[id]?.stage, .failed)
     }
 
     func test_favorites_toggle_throughModel() async {
@@ -139,7 +452,7 @@ final class RemixStudioModelTests: XCTestCase {
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
         m.batchSize = 6; m.maxLivePreviews = 4
         await m.generate()
-        for n in m.currentBatch { m.markCompileResult(id: n.id, valid: true, error: nil) }
+        for n in m.currentBatch { m.markPreviewAvailable(artifactID: n.id) }
         let ids = m.currentBatch.map(\.id)
         m.workspace.heroChildID = ids[0]
         m.workspace.comparedChildIDs = [ids[1], ids[2]]
@@ -156,11 +469,11 @@ final class RemixStudioModelTests: XCTestCase {
         m.mode = .mutate; m.setParent(.a, isf: "/*{A}*/")
         m.batchSize = 4; m.maxLivePreviews = 4
         await m.generate()
-        for n in m.currentBatch { m.markCompileResult(id: n.id, valid: true, error: nil) }
+        for n in m.currentBatch { m.markPreviewAvailable(artifactID: n.id) }
         let ids = m.currentBatch.map(\.id)
 
         m.setPreviewFrozen(true, for: ids[0])
-        m.markCompileResult(id: ids[1], valid: false, error: "bad")
+        m.markPreviewFailed(artifactID: ids[1], diagnostic: "bad")
         XCTAssertFalse(m.livePreviewIDs(reduceMotion: false).contains(ids[0]))
         XCTAssertFalse(m.livePreviewIDs(reduceMotion: false).contains(ids[1]))
         XCTAssertTrue(m.livePreviewIDs(reduceMotion: true).isEmpty)
@@ -476,6 +789,41 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertFalse(provider.prompts.last?.contains("original steer") == true)
     }
 
+    func test_retryChildClearsCurrentCompileDiagnosticWithoutRewritingOriginalHistory() async throws {
+        let fixture = try restorationFixture(saveInitialSession: false)
+        var session = fixture.session
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-4"], parentSources: [isf], mode: .mutate,
+            steer: "original", directive: "original", settings: session.crossoverSettings
+        )
+        var failed = RemixChildRunRecord(
+            id: "r7-1", round: 7, slot: 1, request: request, stage: .compiling,
+            queuedAt: Date(timeIntervalSince1970: 1), candidateSource: isf
+        )
+        XCTAssertTrue(failed.fail(
+            boundary: .compile, message: "old compile failure", at: Date(timeIntervalSince1970: 2)
+        ))
+        session.currentRuns = [failed]
+        session.batchHistory = [RemixBatchRecord(round: 7, runs: [failed])]
+        try fixture.store.save(session)
+        let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])
+        let model = RemixStudioModel(
+            generator: RemixGenerator(makeProvider: { provider }, model: nil),
+            sessionStore: fixture.store,
+            defaults: fixture.defaults
+        )
+        XCTAssertEqual(model.compileDiagnostic(for: failed.id), "old compile failure")
+
+        await model.retryChild(id: failed.id)
+
+        XCTAssertEqual(model.currentRuns.first?.stage, .ready)
+        XCTAssertNil(model.compileDiagnostic(for: failed.id))
+        XCTAssertEqual(
+            model.batchHistory.first?.runs.first?.compileDiagnostic,
+            "old compile failure"
+        )
+    }
+
     func test_activeBatchPersistsRequestSnapshotsBeforeAnyReply() async throws {
         let fixture = try restorationFixture(saveInitialSession: false)
         let provider = SuspendedProvider()
@@ -508,39 +856,30 @@ final class RemixStudioModelTests: XCTestCase {
     func test_retryFailedAndInterruptedBatch_touchOnlyTheirScopedStatuses() async throws {
         let fixture = try restorationFixture()
         var session = fixture.session
-        let compiled = session.currentBatch[0]
-        var failed = compiled
-        failed = RemixNode(
-            id: "r7-1", isfSource: "", parents: compiled.parents, mode: .mutate,
-            steer: "failed steer", directive: "failed directive", round: 7,
-            status: .failed("provider failed")
+        let request = RemixGenerationRequestSnapshot(
+            parentIDs: ["seed-4"], parentSources: ["RESTORED_PARENT"], mode: .mutate,
+            steer: "original steer", directive: "original directive",
+            settings: session.crossoverSettings
         )
-        let interrupted = RemixNode(
-            id: "r7-2", isfSource: "", parents: compiled.parents, mode: .mutate,
-            steer: "interrupted steer", directive: "interrupted directive", round: 7,
-            status: .interrupted
+        var ready = RemixChildRunRecord(
+            id: "r7-0", round: 7, slot: 0, request: request, stage: .compiling,
+            queuedAt: Date(timeIntervalSince1970: 1), candidateSource: isf
         )
-        let requests = Dictionary(uniqueKeysWithValues: [compiled, failed, interrupted].map { node in
-            (
-                node.id,
-                RemixGenerationRequestSnapshot(
-                    parentIDs: node.parents,
-                    parentSources: ["RESTORED_PARENT"],
-                    mode: node.mode,
-                    steer: node.steer,
-                    directive: node.directive,
-                    settings: session.crossoverSettings
-                )
-            )
-        })
-        session.currentBatch = [compiled, failed, interrupted]
-        session.batchHistory = [
-            RemixBatchRecord(round: 7, nodes: session.currentBatch, requestsByNodeID: requests)
-        ]
-        var restoredLineage = session.lineage
-        restoredLineage.insert(failed)
-        restoredLineage.insert(interrupted)
-        session.lineage = restoredLineage
+        XCTAssertTrue(ready.finishReady(artifactID: "r7-0", at: Date(timeIntervalSince1970: 2)))
+        var failed = RemixChildRunRecord(
+            id: "r7-1", round: 7, slot: 1, request: request, stage: .receiving,
+            queuedAt: Date(timeIntervalSince1970: 1)
+        )
+        XCTAssertTrue(failed.fail(
+            boundary: .provider, message: "provider failed", at: Date(timeIntervalSince1970: 2)
+        ))
+        let interrupted = RemixChildRunRecord(
+            id: "r7-2", round: 7, slot: 2, request: request, stage: .interrupted,
+            queuedAt: Date(timeIntervalSince1970: 1),
+            terminalAt: Date(timeIntervalSince1970: 2)
+        )
+        session.currentRuns = [ready, failed, interrupted]
+        session.batchHistory = [RemixBatchRecord(round: 7, runs: session.currentRuns)]
         try fixture.store.save(session)
         let provider = FakeProvider([
             .success("```glsl\n\(isf)\n```"),
@@ -558,15 +897,11 @@ final class RemixStudioModelTests: XCTestCase {
         )
 
         await m.retryFailed()
-        XCTAssertEqual(m.currentBatch[0], compiled)
-        XCTAssertEqual(m.currentBatch[1].status, .compiled)
-        XCTAssertEqual(m.currentBatch[2].status, .interrupted)
+        XCTAssertEqual(m.currentRuns.map(\.stage), [.ready, .ready, .interrupted])
         XCTAssertEqual(provider.prompts.count, 1)
 
         await m.retryInterruptedBatch()
-        XCTAssertEqual(m.currentBatch[0], compiled)
-        XCTAssertEqual(m.currentBatch[1].status, .compiled)
-        XCTAssertEqual(m.currentBatch[2].status, .compiled)
+        XCTAssertEqual(m.currentRuns.map(\.stage), [.ready, .ready, .ready])
         XCTAssertEqual(provider.prompts.count, 2)
     }
 
@@ -595,7 +930,7 @@ final class RemixStudioModelTests: XCTestCase {
 
         let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
 
-        XCTAssertEqual(restored.currentBatch[0].status, .generating)
+        XCTAssertEqual(restored.currentBatch[0].status, .interrupted)
         XCTAssertEqual(
             restored.batchHistory[0].requestsByNodeID[interrupted.id],
             request
@@ -612,7 +947,10 @@ final class RemixStudioModelTests: XCTestCase {
         m.selectedNodeID = childID
         m.promoteToParent(.a, nodeID: childID)
         await m.generate()                       // round 2, parent = child
-        m.markCompileResult(id: m.currentBatch[0].id, valid: false, error: "bad token")
+        m.markPreviewFailed(
+            artifactID: m.currentBatch[0].id,
+            diagnostic: "renderer unavailable"
+        )
         let lineageBefore = m.lineage
         let batchesBefore = m.batchHistory
         let activityBefore = m.activity
@@ -814,14 +1152,16 @@ final class RemixStudioModelTests: XCTestCase {
         let childID = try XCTUnwrap(restored.currentBatch.first?.id)
         XCTAssertEqual(try loadedSession(fixture.store).currentBatch.first?.id, childID)
 
-        restored.markCompileResult(id: childID, valid: false, error: "bad GLSL")
-        let compileFailure = try loadedSession(fixture.store)
-        let failedRun = try XCTUnwrap(compileFailure.currentRuns.first)
-        XCTAssertNil(compileFailure.lineage.node(childID))
-        XCTAssertEqual(failedRun.stage, .failed)
-        XCTAssertEqual(failedRun.failureBoundary, .compile)
-        XCTAssertEqual(failedRun.failureMessage, "bad GLSL")
-        XCTAssertEqual(failedRun.compileDiagnostic, "bad GLSL")
+        restored.markPreviewFailed(artifactID: childID, diagnostic: "renderer unavailable")
+        let previewFailure = try loadedSession(fixture.store)
+        let readyRun = try XCTUnwrap(previewFailure.currentRuns.first)
+        XCTAssertNotNil(previewFailure.lineage.node(childID))
+        XCTAssertEqual(readyRun.stage, .ready)
+        XCTAssertEqual(previewFailure.previewStates[childID]?.stage, .failed)
+        XCTAssertEqual(
+            previewFailure.previewStates[childID]?.diagnostic,
+            "renderer unavailable"
+        )
 
         restored.cancelGeneration()
         XCTAssertEqual(try loadedSession(fixture.store).activity, .cancelled)
@@ -832,19 +1172,13 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(try loadedSession(fixture.store).parentAID, "seed-0")
     }
 
-    func test_compileFailureRetainsSourceDiagnosticAndExposesSalvageActions() async throws {
+    func test_compileFailureRetainsSourceDiagnosticAndExposesSalvageActions() throws {
         let fixture = try restorationFixture(saveInitialSession: false)
         let model = storedModel(store: fixture.store, defaults: fixture.defaults)
-        model.mode = .mutate
-        model.batchSize = 1
-        model.setParent(.a, isf: "seed")
-        await model.generate()
-        let childID = try XCTUnwrap(model.currentBatch.first?.id)
-        let generatedSource = try XCTUnwrap(model.currentBatch.first?.isfSource)
+        let childID = "r1-0"
+        installCompileFailure(on: model, id: childID, message: "line 8: unknown symbol")
 
-        model.markCompileResult(id: childID, valid: false, error: "line 8: unknown symbol")
-
-        XCTAssertEqual(model.currentBatch.first?.isfSource, generatedSource)
+        XCTAssertEqual(model.currentRuns.first?.candidateSource, isf)
         XCTAssertEqual(model.compileDiagnostic(for: childID), "line 8: unknown symbol")
         XCTAssertEqual(
             model.compileSalvageActions(for: childID),
@@ -857,29 +1191,19 @@ final class RemixStudioModelTests: XCTestCase {
         )
     }
 
-    func test_compileFailurePersistsProvenanceAndUpdatesEveryStoredNodeCopy() async throws {
+    func test_compileFailurePersistsCanonicalRunEvidence() throws {
         let fixture = try restorationFixture(saveInitialSession: false)
         let model = storedModel(store: fixture.store, defaults: fixture.defaults)
-        model.mode = .mutate
-        model.batchSize = 1
-        model.setParent(.a, isf: "seed")
-        await model.generate()
-        let childID = try XCTUnwrap(model.currentBatch.first?.id)
-
-        model.markCompileResult(id: childID, valid: false, error: "line 12: bad uniform")
+        let childID = "r1-0"
+        installCompileFailure(on: model, id: childID, message: "line 12: bad uniform")
+        model.persistSession()
 
         let saved = try loadedSession(fixture.store)
-        XCTAssertEqual(saved.currentBatch.first?.status, .failed("line 12: bad uniform"))
-        XCTAssertEqual(saved.batchHistory.first?.nodes.first?.status, .failed("line 12: bad uniform"))
         XCTAssertNil(saved.lineage.node(childID))
-        XCTAssertEqual(saved.compileDiagnosticsByNodeID?[childID], "line 12: bad uniform")
         XCTAssertEqual(saved.currentRuns.first?.stage, .failed)
         XCTAssertEqual(saved.currentRuns.first?.failureBoundary, .compile)
         XCTAssertEqual(saved.currentRuns.first?.failureMessage, "line 12: bad uniform")
         XCTAssertEqual(saved.currentRuns.first?.compileDiagnostic, "line 12: bad uniform")
-        XCTAssertEqual(saved.batchHistory.first?.runs.first?.stage, .failed)
-        XCTAssertEqual(saved.batchHistory.first?.runs.first?.failureBoundary, .compile)
-        XCTAssertEqual(saved.batchHistory.first?.runs.first?.compileDiagnostic, "line 12: bad uniform")
 
         let restored = storedModel(store: fixture.store, defaults: fixture.defaults)
         XCTAssertEqual(restored.compileDiagnostic(for: childID), "line 12: bad uniform")
@@ -934,35 +1258,31 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(restored.compileSalvageActions(for: "r7-0"), [])
     }
 
-    func test_compileFailureProducesStructuredActivityThatUnrelatedSuccessDoesNotErase() async throws {
+    func test_compileFailureRemainsInAggregateSummaryAfterUnrelatedSuccess() throws {
         let fixture = try restorationFixture(saveInitialSession: false)
         let model = storedModel(store: fixture.store, defaults: fixture.defaults)
-        model.mode = .mutate
-        model.batchSize = 2
-        model.setParent(.a, isf: "seed")
-        await model.generate()
-        let failedID = try XCTUnwrap(model.currentBatch.first?.id)
-        let successfulID = try XCTUnwrap(model.currentBatch.last?.id)
-
-        model.markCompileResult(id: failedID, valid: false, error: "line 3: syntax error")
-
-        XCTAssertEqual(
-            model.activity,
-            .childFailed(id: failedID, message: "Compile failed: line 3: syntax error")
+        installCompileFailure(on: model, id: "r1-0", message: "line 3: syntax error")
+        let request = try XCTUnwrap(model.currentRuns.first?.request)
+        var ready = RemixChildRunRecord(
+            id: "r1-1", round: 1, slot: 1, request: request, stage: .compiling,
+            queuedAt: Date(timeIntervalSince1970: 1), candidateSource: isf
         )
-        XCTAssertEqual(model.activity.summary.compactStatus, "\(failedID) failed")
-        XCTAssertEqual(
-            model.activity.summary.accessibilityAnnouncement,
-            "\(failedID) failed. Compile failed: line 3: syntax error"
-        )
+        XCTAssertTrue(ready.finishReady(artifactID: ready.id, at: Date(timeIntervalSince1970: 2)))
+        model.applyPipelineUpdate(.artifact(
+            RemixNode(
+                artifactID: ready.id, isfSource: isf, parents: request.parentIDs,
+                mode: request.mode, steer: request.steer, directive: request.directive, round: 1
+            ),
+            record: ready
+        ))
 
-        model.markPreviewFailure(id: successfulID, message: "renderer unavailable")
-        model.retryPreview(id: successfulID)
-        model.markCompileResult(id: successfulID, valid: true, error: nil)
-
+        XCTAssertEqual(model.runSummary.stageCounts[.failed], 1)
+        XCTAssertEqual(model.runSummary.stageCounts[.ready], 1)
+        XCTAssertEqual(model.runSummary.terminalCount, 2)
+        XCTAssertEqual(model.compileDiagnostic(for: "r1-0"), "line 3: syntax error")
         XCTAssertEqual(
-            model.activity,
-            .childFailed(id: failedID, message: "Compile failed: line 3: syntax error")
+            model.runSummary.activitySummary(activeProviderCount: 0).compactStatus,
+            "2 of 2 complete · 0 active · 0 queued"
         )
     }
 
@@ -986,14 +1306,10 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertEqual(model.compileSalvageActions(for: childID), [])
     }
 
-    func test_compileSummaryIsVisibleContentNotOnlySelection() async {
+    func test_compileSummaryIsVisibleContentNotOnlySelection() {
         let m = model([.success("```glsl\n\(isf)\n```")])
-        m.mode = .mutate
-        m.setParent(.a, isf: "/*{A}*/")
-        m.batchSize = 1
-        await m.generate()
-        let id = m.currentBatch[0].id
-        m.markCompileResult(id: id, valid: false, error: "line 7: bad token")
+        let id = "r1-0"
+        installCompileFailure(on: m, id: id, message: "line 7: bad token")
 
         XCTAssertEqual(
             m.compileSummary(for: id),
@@ -1010,9 +1326,9 @@ final class RemixStudioModelTests: XCTestCase {
         await model.generate()
         let childID = try XCTUnwrap(model.currentBatch.first?.id)
 
-        model.markPreviewFailure(id: childID, message: "Metal device unavailable")
+        model.markPreviewFailed(artifactID: childID, diagnostic: "Metal device unavailable")
 
-        XCTAssertEqual(model.previewFailuresByNodeID[childID], "Metal device unavailable")
+        XCTAssertEqual(model.previewStates[childID]?.diagnostic, "Metal device unavailable")
         XCTAssertEqual(model.previewFailureActions(for: childID), [.retryPreview, .openInEditor])
         XCTAssertEqual(model.currentBatch.first?.status, .compiled)
     }
@@ -1033,11 +1349,12 @@ final class RemixStudioModelTests: XCTestCase {
         let providerCallCount = provider.prompts.count
         let activityBeforeRetry = model.activity
         let statusBeforeRetry = model.currentBatch.first?.status
-        model.markPreviewFailure(id: childID, message: "renderer stopped")
+        model.markPreviewFailed(artifactID: childID, diagnostic: "renderer stopped")
 
-        model.retryPreview(id: childID)
+        model.retryPreview(artifactID: childID)
 
-        XCTAssertNil(model.previewFailuresByNodeID[childID])
+        XCTAssertEqual(model.previewStates[childID]?.stage, .pending)
+        XCTAssertNil(model.previewStates[childID]?.diagnostic)
         XCTAssertEqual(provider.prompts.count, providerCallCount)
         XCTAssertEqual(model.activity, activityBeforeRetry)
         XCTAssertEqual(model.currentBatch.first?.status, statusBeforeRetry)
@@ -1089,6 +1406,7 @@ final class RemixStudioModelTests: XCTestCase {
         XCTAssertTrue(model.currentBatch.isEmpty)
         XCTAssertTrue(model.batchHistory.isEmpty)
         XCTAssertTrue(model.lineage.allNodes.isEmpty)
+        XCTAssertTrue(model.activeProviderChildIDs.isEmpty)
         XCTAssertEqual(model.activity, .idle)
         XCTAssertNil(model.parentAID)
         XCTAssertEqual(try loadedSession(fixture.store).activity, .idle)

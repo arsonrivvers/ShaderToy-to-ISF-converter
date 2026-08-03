@@ -21,6 +21,13 @@ struct RemixPreviewReservation: Hashable {
     let surface: RemixPreviewSurface
 }
 
+struct RemixChildViewItem: Identifiable, Equatable {
+    let run: RemixChildRunRecord
+    let artifact: RemixNode?
+    let preview: RemixPreviewState?
+    var id: String { run.id }
+}
+
 /// Owns the Remix Studio state and drives the Module 1 generator. Parents are real lineage nodes
 /// (external sources become round-0 "seed" nodes) so children record true parent ids from round 1.
 @MainActor
@@ -33,7 +40,7 @@ final class RemixStudioModel: ObservableObject {
     @Published var steer: String = "" { didSet { scheduleAutosave() } }
     @Published var batchSize: Int = 5 { didSet { scheduleAutosave() } }
     @Published var maxLivePreviews: Int = 4
-    @Published private(set) var currentBatch: [RemixNode] = []
+    @Published private(set) var currentRuns: [RemixChildRunRecord] = []
     @Published private(set) var batchHistory: [RemixBatchRecord] = []
     @Published private(set) var lineage = RemixLineage()
     @Published private(set) var isGenerating = false
@@ -46,8 +53,8 @@ final class RemixStudioModel: ObservableObject {
     @Published private(set) var pendingParentRequest: RemixParentRequestSnapshot?
     @Published private(set) var parentLoadState = RemixParentLoadState.idle
     @Published private(set) var recoveryNotice: URL?
-    @Published private(set) var compileDiagnosticsByNodeID: [String: String] = [:]
-    @Published private(set) var previewFailuresByNodeID: [String: String] = [:]
+    @Published private(set) var previewStates: [String: RemixPreviewState] = [:]
+    @Published private(set) var activeProviderChildIDs: Set<String> = []
     @Published private(set) var frozenPreviewIDs: Set<String> = []
     @Published private(set) var reduceMotionPlaybackEnabled = false
     /// One static frame per node id, captured at compile time — the tree's row swatches.
@@ -66,6 +73,8 @@ final class RemixStudioModel: ObservableObject {
     private let defaults: UserDefaults
     private let autosaveScheduler: AutosaveScheduler
     private var generationTask: Task<Void, Never>?
+    private var localRecoveryTask: Task<Void, Never>?
+    private var activeBatchController: RemixBatchRunController?
     private var round = 0
     private var seedCounter = 0
     private var parentHistory: [(String?, String?)] = []
@@ -73,8 +82,6 @@ final class RemixStudioModel: ObservableObject {
     private var autosaveScheduled = false
     private var autosaveToken = 0
     private var sessionIdentity = UUID()
-    private var activeGenerationID: UUID?
-    private var cancelledGenerationIDs: Set<UUID> = []
     private var activeParentRequestID: UUID?
     private var parentLoadTask: Task<Void, Never>?
 
@@ -106,7 +113,21 @@ final class RemixStudioModel: ObservableObject {
     }
     /// Children of the current batch still awaiting a reply — for the terminal's "N generating" header.
     /// If this stays > 0 while the transcript goes quiet, generation is likely hung.
-    var generatingCount: Int { currentBatch.filter { $0.status == .generating }.count }
+    var currentBatch: [RemixNode] {
+        RemixBatchRecord(round: round, runs: currentRuns).nodes
+    }
+    var generatingCount: Int { currentRuns.filter { !$0.stage.isTerminal }.count }
+    var runSummary: RemixRunSummary { RemixRunSummary(records: currentRuns) }
+    var childViewItems: [RemixChildViewItem] {
+        currentRuns.map { run in
+            let artifact = run.artifactID.flatMap { lineage.node($0) }
+            return RemixChildViewItem(
+                run: run,
+                artifact: artifact,
+                preview: artifact.flatMap { previewStates[$0.id] }
+            )
+        }
+    }
 
     // MARK: parents
 
@@ -211,8 +232,8 @@ final class RemixStudioModel: ObservableObject {
 
     // MARK: generation
 
-    /// Start a round as an owned, cancellable task so the UI can stop it. Cancelling the task
-    /// propagates through the generator's task group to terminate every in-flight provider CLI.
+    /// Start a round as an owned outer task. Stop closes only the controller's provider launch gate;
+    /// the outer task remains alive until every stable slot reaches a terminal record.
     func startGeneration() {
         guard canGenerate, generationTask == nil else { return }
         generationTask = Task { [weak self] in
@@ -221,21 +242,20 @@ final class RemixStudioModel: ObservableObject {
         }
     }
 
-    /// Stop an in-flight batch. Children that were mid-generation resolve as `.failed("cancelled")`.
+    /// Stop provider launches without cancelling the outer scheduler or accepted local work.
     func cancelGeneration() {
-        if let activeGenerationID {
-            cancelledGenerationIDs.insert(activeGenerationID)
+        activeBatchController?.stop()
+        let now = Date()
+        for index in currentRuns.indices where currentRuns[index].stage == .queued {
+            _ = currentRuns[index].transition(to: .cancelled, at: now)
         }
-        generationTask?.cancel()
         activity = .cancelled
         persistSession()
     }
 
     func generate() async {
-        guard canGenerate, !Task.isCancelled else { return }
+        guard canGenerate else { return }
         let generationIdentity = sessionIdentity
-        let generationID = UUID()
-        activeGenerationID = generationID
         parentHistory.append((parentAID, parentBID))
         round += 1
         let r = round
@@ -243,56 +263,41 @@ final class RemixStudioModel: ObservableObject {
         isGenerating = true
         activity = .generating(total: batchSize, completed: 0, lastEventAt: nil)
         transcript = []
-        // Seed the gallery with .generating placeholders up front so cards (⚙) and the "N generating"
-        // header appear immediately — otherwise nothing shows until a child returns (~37s+ each).
         let pool = RemixDirectives.catalog.filter(crossoverSettings.enabledDirectives.contains)
-        currentBatch = Self.makePlaceholders(round: r, size: batchSize, parents: pids, pool: pool,
-                                             mode: mode)
-        let requestSnapshots = Dictionary(
-            uniqueKeysWithValues: currentBatch.map { placeholder in
-                (
-                    placeholder.id,
-                    RemixGenerationRequestSnapshot(
-                        parentIDs: pids,
-                        parentSources: parentSources,
-                        mode: mode,
-                        steer: steer,
-                        directive: placeholder.directive,
-                        settings: crossoverSettings
-                    )
-                )
-            }
-        )
-        batchHistory.append(
-            RemixBatchRecord(
+        let directives = RemixDirectives.pick(batchSize, seed: r, from: pool)
+        let queuedAt = Date()
+        currentRuns = (0..<batchSize).map { slot in
+            RemixChildRunRecord(
+                id: "r\(r)-\(slot)",
                 round: r,
-                nodes: currentBatch,
-                requestsByNodeID: requestSnapshots
+                slot: slot,
+                request: RemixGenerationRequestSnapshot(
+                    parentIDs: pids,
+                    parentSources: parentSources,
+                    mode: mode,
+                    steer: steer,
+                    directive: directives[slot],
+                    settings: crossoverSettings
+                ),
+                queuedAt: queuedAt
             )
-        )
+        }
+        batchHistory.append(RemixBatchRecord(round: r, runs: currentRuns))
+        let controller = RemixBatchRunController()
+        activeBatchController = controller
         persistSession()
         await generator.generate(
-            parents: parentSources, mode: mode, steer: steer, batchSize: batchSize, round: r,
-            settings: crossoverSettings, pool: pool,
-            onChild: { [weak self] node in
+            records: currentRuns,
+            controller: controller,
+            onUpdate: { [weak self] update in
                 guard let self, self.sessionIdentity == generationIdentity else { return }
-                var n = node
-                n.parents = pids             // record true parent ids in the lineage graph
-                if let i = self.currentBatch.firstIndex(where: { $0.id == n.id }) {
-                    self.currentBatch[i] = n // replace the placeholder in place
-                } else {
-                    self.currentBatch.append(n)
-                }
-                self.lineage.insert(n)
-                self.updateBatchRecord(round: r, nodes: self.currentBatch)
-                let completed = self.currentBatch.filter { $0.status != .generating }.count
-                if !self.cancelledGenerationIDs.contains(generationID) {
-                    self.activity = .generating(
-                        total: self.currentBatch.count,
-                        completed: completed,
-                        lastEventAt: Date()
-                    )
-                }
+                self.applyPipelineUpdate(update)
+                self.updateBatchRecord(round: r, runs: self.currentRuns)
+                self.activity = .generating(
+                    total: self.runSummary.totalCount,
+                    completed: self.runSummary.terminalCount,
+                    lastEventAt: self.runSummary.latestProviderActivity
+                )
                 self.persistSession()
             },
             onLog: { [weak self] id, line in
@@ -303,21 +308,18 @@ final class RemixStudioModel: ObservableObject {
             }
         )
         guard sessionIdentity == generationIdentity else { return }
+        activeBatchController = nil
         isGenerating = false
-        activeGenerationID = nil
-        let wasCancelled = cancelledGenerationIDs.remove(generationID) != nil
-        let failed = currentBatch.filter {
-            if case .failed = $0.status { return true }
-            return false
-        }.count
-        if wasCancelled {
+        let failed = currentRuns.filter { $0.stage == .failed }.count
+        let cancelled = currentRuns.filter { $0.stage == .cancelled }.count
+        if cancelled > 0 {
             activity = .cancelled
         } else if failed > 0 {
-            activity = .partialFailure(total: currentBatch.count, failed: failed)
+            activity = .partialFailure(total: currentRuns.count, failed: failed)
         } else {
             activity = .completed(failed: 0)
         }
-        updateBatchRecord(round: r, nodes: currentBatch)
+        updateBatchRecord(round: r, runs: currentRuns)
         persistSession()
     }
 
@@ -329,8 +331,8 @@ final class RemixStudioModel: ObservableObject {
                   $0.requestsByNodeID[id] != nil
               }),
               let storedRequest = batchHistory[batchIndex].requestsByNodeID[id],
-              let currentIndex = currentBatch.firstIndex(where: { $0.id == id }),
-              Self.isRetryable(currentBatch[currentIndex].status)
+              let currentIndex = currentRuns.firstIndex(where: { $0.id == id }),
+              Self.isRetryable(currentRuns[currentIndex].stage)
         else {
             return
         }
@@ -343,20 +345,32 @@ final class RemixStudioModel: ObservableObject {
             settings: storedRequest.settings
         )
 
-        var placeholder = currentBatch[currentIndex]
-        placeholder.status = .generating
-        currentBatch[currentIndex] = placeholder
-        lineage.insert(placeholder)
-        compileDiagnosticsByNodeID.removeValue(forKey: id)
-        previewFailuresByNodeID.removeValue(forKey: id)
+        let prior = currentRuns[currentIndex]
+        currentRuns[currentIndex] = RemixChildRunRecord(
+            id: prior.id,
+            round: prior.round,
+            slot: prior.slot,
+            request: request,
+            queuedAt: Date()
+        )
+        if let artifactID = prior.artifactID {
+            previewStates.removeValue(forKey: artifactID)
+        }
         isGenerating = true
         activity = .generating(total: 1, completed: 0, lastEventAt: nil)
+        let controller = RemixBatchRunController()
+        activeBatchController = controller
         persistSession()
 
         let generationIdentity = sessionIdentity
-        let child = await generator.generateChild(
-            id: id,
-            request: request,
+        await generator.generate(
+            records: [currentRuns[currentIndex]],
+            controller: controller,
+            onUpdate: { [weak self] update in
+                guard let self, self.sessionIdentity == generationIdentity else { return }
+                self.applyPipelineUpdate(update)
+                self.persistSession()
+            },
             onLog: { [weak self] childID, line in
                 Task { @MainActor in
                     guard let self, self.sessionIdentity == generationIdentity else { return }
@@ -365,15 +379,15 @@ final class RemixStudioModel: ObservableObject {
             }
         )
         guard sessionIdentity == generationIdentity else { return }
-        replaceRetriedNode(child, batchIndex: batchIndex)
+        activeBatchController = nil
         isGenerating = false
-        activity = .completed(failed: Self.isFailed(child.status) ? 1 : 0)
+        activity = .completed(failed: currentRuns[currentIndex].stage == .failed ? 1 : 0)
         persistSession()
     }
 
     func retryFailed() async {
-        let ids = currentBatch.compactMap { node -> String? in
-            Self.isFailed(node.status) ? node.id : nil
+        let ids = currentRuns.compactMap { run -> String? in
+            run.stage == .failed ? run.id : nil
         }
         for id in ids {
             await retryChild(id: id)
@@ -381,46 +395,21 @@ final class RemixStudioModel: ObservableObject {
     }
 
     func retryInterruptedBatch() async {
-        let ids = currentBatch.compactMap { node -> String? in
-            node.status == .interrupted ? node.id : nil
+        let ids = currentRuns.compactMap { run -> String? in
+            run.stage == .interrupted ? run.id : nil
         }
         for id in ids {
             await retryChild(id: id)
         }
     }
 
-    private func replaceRetriedNode(_ child: RemixNode, batchIndex: Int) {
-        if let index = currentBatch.firstIndex(where: { $0.id == child.id }) {
-            currentBatch[index] = child
-        }
-        lineage.insert(child)
-        var nodes = batchHistory[batchIndex].nodes
-        if let index = nodes.firstIndex(where: { $0.id == child.id }) {
-            nodes[index] = child
-        }
-        batchHistory[batchIndex] = RemixBatchRecord(
-            round: batchHistory[batchIndex].round,
-            nodes: nodes,
-            requestsByNodeID: batchHistory[batchIndex].requestsByNodeID
-        )
-    }
-
-    private func updateBatchRecord(round: Int, nodes: [RemixNode]) {
+    private func updateBatchRecord(round: Int, runs: [RemixChildRunRecord]) {
         guard let index = batchHistory.lastIndex(where: { $0.round == round }) else { return }
-        batchHistory[index] = RemixBatchRecord(
-            round: round,
-            nodes: nodes,
-            requestsByNodeID: batchHistory[index].requestsByNodeID
-        )
+        batchHistory[index] = RemixBatchRecord(round: round, runs: runs)
     }
 
-    private static func isRetryable(_ status: RemixNode.Status) -> Bool {
-        status == .interrupted || isFailed(status)
-    }
-
-    private static func isFailed(_ status: RemixNode.Status) -> Bool {
-        if case .failed = status { return true }
-        return false
+    private static func isRetryable(_ stage: RemixChildRunRecord.Stage) -> Bool {
+        stage == .interrupted || stage == .failed || stage == .cancelled
     }
 
     /// The .generating placeholder cards for a round, with the same ids (`r{round}-{slot}`) and directives
@@ -447,42 +436,109 @@ final class RemixStudioModel: ObservableObject {
     /// Append one provider output line to the merged terminal, tagged by child id and memory-bounded.
     /// Raw stream-JSON is humanized first (N28) — internals never reach the user surface.
     func appendLog(_ id: String, _ line: String) {
+        if let index = currentRuns.firstIndex(where: { $0.id == id }),
+           !currentRuns[index].stage.isTerminal {
+            currentRuns[index].lastEventAt = Date()
+        }
         guard let display = AssistTranscriptFormatter.display(line) else { return }
         let before = transcript.count
         transcript.appendBounded("[\(id)] \(display)", max: 2000)
         transcriptDropped += before + 1 - transcript.count
     }
 
-    /// Card preview reports the real compile outcome; update status in the batch and the lineage.
-    func markCompileResult(id: String, valid: Bool, error: String?) {
-        guard var node = lineage.node(id) else { return }
-        let diagnostic = error ?? "compile failed"
-        node.status = valid ? .compiled : .failed(diagnostic)
-        if valid {
-            compileDiagnosticsByNodeID.removeValue(forKey: id)
-        } else {
-            compileDiagnosticsByNodeID[id] = diagnostic
-        }
-        previewFailuresByNodeID.removeValue(forKey: id)
-        lineage.insert(node)
-        if let i = currentBatch.firstIndex(where: { $0.id == id }) { currentBatch[i] = node }
-        for batchIndex in batchHistory.indices {
-            if let nodeIndex = batchHistory[batchIndex].nodes.firstIndex(where: { $0.id == id }) {
-                batchHistory[batchIndex].nodes[nodeIndex] = node
+    func applyPipelineUpdate(_ update: RemixPipelineUpdate) {
+        switch update {
+        case .record(let record):
+            if let index = currentRuns.firstIndex(where: { $0.id == record.id }) {
+                guard !currentRuns[index].stage.isTerminal else { return }
+                currentRuns[index] = record
+            } else {
+                guard batchHistory.isEmpty else { return }
+                currentRuns.append(record)
+            }
+            if record.stage.isTerminal {
+                activeProviderChildIDs.remove(record.id)
+            }
+        case .artifact(let artifact, let record):
+            if let index = currentRuns.firstIndex(where: { $0.id == record.id }) {
+                guard !currentRuns[index].stage.isTerminal else { return }
+                currentRuns[index] = record
+            } else {
+                guard batchHistory.isEmpty else { return }
+                currentRuns.append(record)
+            }
+            activeProviderChildIDs.remove(record.id)
+            lineage.insert(artifact)
+            previewStates[artifact.id] = previewStates[artifact.id] ?? RemixPreviewState(
+                stage: .pending,
+                attempt: 0,
+                diagnostic: nil,
+                updatedAt: Date()
+            )
+        case .processLiveness(let childID, let isAlive):
+            guard let run = currentRuns.first(where: { $0.id == childID }),
+                  !run.stage.isTerminal
+            else {
+                activeProviderChildIDs.remove(childID)
+                return
+            }
+            if isAlive {
+                activeProviderChildIDs.insert(childID)
+            } else {
+                activeProviderChildIDs.remove(childID)
             }
         }
-        if !valid {
-            activity = .childFailed(id: id, message: "Compile failed: \(diagnostic)")
-        }
+    }
+
+    func markPreviewAvailable(artifactID: String) {
+        guard lineage.node(artifactID) != nil else { return }
+        var state = previewStates[artifactID] ?? RemixPreviewState(
+            stage: .pending,
+            attempt: 0,
+            diagnostic: nil,
+            updatedAt: Date()
+        )
+        state.stage = .available
+        state.diagnostic = nil
+        state.updatedAt = Date()
+        previewStates[artifactID] = state
+        persistSession()
+    }
+
+    func markPreviewFailed(artifactID: String, diagnostic: String) {
+        guard lineage.node(artifactID) != nil else { return }
+        var state = previewStates[artifactID] ?? RemixPreviewState(
+            stage: .pending,
+            attempt: 0,
+            diagnostic: nil,
+            updatedAt: Date()
+        )
+        state.stage = .failed
+        state.diagnostic = RemixPreviewState.boundedDiagnostic(diagnostic)
+        state.updatedAt = Date()
+        previewStates[artifactID] = state
+        persistSession()
+    }
+
+    func retryPreview(artifactID: String) {
+        guard var state = previewStates[artifactID] else { return }
+        state.stage = .pending
+        state.attempt += 1
+        state.diagnostic = nil
+        state.updatedAt = Date()
+        previewStates[artifactID] = state
         persistSession()
     }
 
     func compileDiagnostic(for id: String) -> String? {
-        let storedNodes = currentBatch + batchHistory.flatMap(\.nodes) + lineage.allNodes
-        guard storedNodes.contains(where: { $0.id == id && Self.isFailed($0.status) }) else {
-            return nil
+        if let current = currentRuns.first(where: { $0.id == id }) {
+            return current.failureBoundary == .compile ? current.compileDiagnostic : nil
         }
-        return compileDiagnosticsByNodeID[id]
+        return batchHistory.reversed()
+            .lazy
+            .flatMap(\.runs)
+            .first(where: { $0.id == id && $0.failureBoundary == .compile })?
+            .compileDiagnostic
     }
 
     func compileSalvageActions(for id: String) -> [RemixCompileSalvageAction] {
@@ -500,20 +556,9 @@ final class RemixStudioModel: ObservableObject {
         return "Compile summary for \(id)\n\(diagnostic)"
     }
 
-    func markPreviewFailure(id: String, message: String) {
-        guard lineage.node(id)?.status == .compiled else { return }
-        previewFailuresByNodeID[id] = message
-    }
-
     func previewFailureActions(for id: String) -> [RemixPreviewFailureAction] {
-        guard previewFailuresByNodeID[id] != nil else { return [] }
+        guard previewStates[id]?.stage == .failed else { return [] }
         return [.retryPreview, .openInEditor]
-    }
-
-    /// Requests a renderer-only retry by clearing its failure latch. The card observes this
-    /// published dictionary and rebuilds its preview without touching provider or generation state.
-    func retryPreview(id: String) {
-        previewFailuresByNodeID.removeValue(forKey: id)
     }
 
     // MARK: live-preview cap (performance)
@@ -530,12 +575,15 @@ final class RemixStudioModel: ObservableObject {
             return []
         }
         var eligible = currentBatch.filter {
-            $0.status == .compiled && !frozenPreviewIDs.contains($0.id)
+            $0.status == .compiled
+                && !frozenPreviewIDs.contains($0.id)
+                && previewStates[$0.id]?.stage != .failed
         }
         if let selectedNodeID,
            !eligible.contains(where: { $0.id == selectedNodeID }),
            let selected = lineage.node(selectedNodeID),
            selected.status == .compiled,
+           previewStates[selectedNodeID]?.stage != .failed,
            !frozenPreviewIDs.contains(selectedNodeID) {
             eligible.append(selected)
         }
@@ -662,14 +710,18 @@ final class RemixStudioModel: ObservableObject {
                 mode = session.mode
                 steer = session.steer
                 batchSize = session.batchSize
-                currentBatch = session.currentBatch
+                currentRuns = session.currentRuns
                 batchHistory = session.batchHistory
-                lineage = session.lineage
+                let artifactIDs = Set(
+                    (currentRuns + batchHistory.flatMap(\.runs))
+                        .filter { $0.stage == .ready }
+                        .compactMap(\.artifactID)
+                )
+                lineage = session.lineage.retainingArtifacts(withIDs: artifactIDs)
                 workspace = session.workspace
                 selectedNodeID = session.selectedLineageNodeID
                 crossoverSettings = session.crossoverSettings
                 activity = Self.restoredActivity(session.activity)
-                compileDiagnosticsByNodeID = session.compileDiagnosticsByNodeID ?? [:]
                 pendingParentRequest = Self.restoredParentRequest(session.pendingParentRequest)
                 if let pendingParentRequest,
                    let request = RemixParentRequest(snapshot: pendingParentRequest) {
@@ -678,11 +730,81 @@ final class RemixStudioModel: ObservableObject {
                     parentLoadState = .idle
                 }
                 transcript = session.transcript
+                previewStates = session.previewStates
+                activeProviderChildIDs = []
+                normalizeRestoredRuns()
+                initializeMissingPreviewStates()
                 isGenerating = false
+                scheduleLocalRecovery()
             }
         } catch {
             // The store already quarantines malformed payloads. Other I/O failures leave the
             // in-memory defaults intact so the studio remains usable.
+        }
+    }
+
+    private func normalizeRestoredRuns() {
+        let now = Date()
+        for index in currentRuns.indices {
+            let stage = currentRuns[index].stage
+            switch stage {
+            case .queued, .starting, .thinking, .receiving, .retrying:
+                currentRuns[index].stage = .interrupted
+                currentRuns[index].lastEventAt = now
+                currentRuns[index].terminalAt = now
+            case .extracting, .compiling:
+                guard let candidate = currentRuns[index].candidateSource,
+                      case .success = RemixResponseParser.extractCandidate(candidate)
+                else {
+                    currentRuns[index].stage = .interrupted
+                    currentRuns[index].lastEventAt = now
+                    currentRuns[index].terminalAt = now
+                    continue
+                }
+                currentRuns[index].terminalAt = nil
+            case .ready, .failed, .cancelled, .interrupted:
+                break
+            }
+        }
+    }
+
+    private func initializeMissingPreviewStates() {
+        let restoredRuns = currentRuns + batchHistory.flatMap(\.runs)
+        for run in restoredRuns where run.stage == .ready {
+            guard let artifactID = run.artifactID,
+                  lineage.node(artifactID) != nil,
+                  previewStates[artifactID] == nil
+            else {
+                continue
+            }
+            previewStates[artifactID] = RemixPreviewState(
+                stage: .pending,
+                attempt: 0,
+                diagnostic: nil,
+                updatedAt: Date()
+            )
+        }
+    }
+
+    private func scheduleLocalRecovery() {
+        let recoverable = currentRuns.filter {
+            ($0.stage == .extracting || $0.stage == .compiling) && $0.candidateSource != nil
+        }
+        guard !recoverable.isEmpty else { return }
+        let recoveryIdentity = sessionIdentity
+        localRecoveryTask = Task { [weak self] in
+            guard let self else { return }
+            for record in recoverable {
+                guard self.sessionIdentity == recoveryIdentity else { return }
+                await self.generator.resumeLocal(record: record) { [weak self] update in
+                    guard let self, self.sessionIdentity == recoveryIdentity else { return }
+                    self.applyPipelineUpdate(update)
+                }
+            }
+            guard self.sessionIdentity == recoveryIdentity else { return }
+            self.updateBatchRecord(round: self.round, runs: self.currentRuns)
+            self.localRecoveryTask = nil
+            self.persistSession()
         }
     }
 
@@ -701,28 +823,30 @@ final class RemixStudioModel: ObservableObject {
             mode: mode,
             steer: steer,
             batchSize: batchSize,
-            currentBatch: currentBatch,
+            currentRuns: currentRuns,
             batchHistory: batchHistory,
             lineage: lineage,
             workspace: workspace,
             selectedLineageNodeID: selectedNodeID,
             crossoverSettings: crossoverSettings,
             activity: activity,
-            compileDiagnosticsByNodeID: compileDiagnosticsByNodeID,
             pendingParentRequest: pendingParentRequest,
-            transcript: transcript
+            transcript: transcript,
+            previewStates: previewStates
         )
         try? sessionStore.save(session)
     }
 
     func startNewSession() {
         generationTask?.cancel()
+        activeBatchController?.stop()
+        activeBatchController = nil
+        localRecoveryTask?.cancel()
+        localRecoveryTask = nil
         activeParentRequestID = nil
         parentLoadTask?.cancel()
         parentLoadTask = nil
         sessionIdentity = UUID()
-        activeGenerationID = nil
-        cancelledGenerationIDs = []
         autosaveScheduled = false
         isRestoring = true
         parentAID = nil
@@ -730,7 +854,7 @@ final class RemixStudioModel: ObservableObject {
         mode = .crossover
         steer = ""
         batchSize = 5
-        currentBatch = []
+        currentRuns = []
         batchHistory = []
         lineage = RemixLineage()
         isGenerating = false
@@ -741,8 +865,8 @@ final class RemixStudioModel: ObservableObject {
         pendingParentRequest = nil
         parentLoadState = .idle
         recoveryNotice = nil
-        compileDiagnosticsByNodeID = [:]
-        previewFailuresByNodeID = [:]
+        previewStates = [:]
+        activeProviderChildIDs = []
         snapshots = [:]
         round = 0
         seedCounter = 0

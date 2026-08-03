@@ -130,6 +130,7 @@ targets:
       - TrueISFEditor/Remix/RemixSession.swift
       - TrueISFEditor/Remix/RemixSessionStore.swift
       - TrueISFEditor/Remix/RemixActivity.swift
+      - TrueISFEditor/Remix/RemixPreviewState.swift
       - TrueISFEditor/Remix/RemixParentLoadState.swift
       - TrueISFEditor/Remix/RemixBreedingBayPresentation.swift
       - TrueISFEditor/Remix/RemixComparisonCoordinator.swift

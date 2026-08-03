@@ -30,10 +30,15 @@ struct RemixActivityDrawerView: View {
     }
 
     private var failures: [RemixActivityFailurePresentation] {
-        RemixLineagePresentation.failureRows(
-            nodes: model.currentBatch,
-            compileDiagnosticsByNodeID: model.compileDiagnosticsByNodeID
-        )
+        RemixLineagePresentation.failureRows(records: model.currentRuns)
+    }
+
+    private var aggregateSummary: RemixActivitySummary {
+        model.currentRuns.isEmpty
+            ? model.activity.summary
+            : model.runSummary.activitySummary(
+                activeProviderCount: model.activeProviderChildIDs.count
+            )
     }
 
     var body: some View {
@@ -48,10 +53,10 @@ struct RemixActivityDrawerView: View {
                     headerFocused = true
                 }
                 .accessibilityFocused($headerFocused)
-                Text(RemixLineagePresentation.compactActivityStatus(for: model.activity))
+                Text(aggregateSummary.compactStatus)
                     .font(RemixAccessibleTextLayout.bodyFont)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel(model.activity.summary.accessibilityAnnouncement)
+                    .accessibilityLabel(aggregateSummary.accessibilityAnnouncement)
                 Spacer()
                 activityButtons
             }
@@ -60,6 +65,14 @@ struct RemixActivityDrawerView: View {
 
             if !collapsed {
                 Divider()
+                if model.runSummary.totalCount > 0 {
+                    ProgressView(value: model.runSummary.terminalProgress)
+                        .padding(.horizontal, 12)
+                        .accessibilityLabel("Terminal children")
+                        .accessibilityValue(
+                            "\(model.runSummary.terminalCount) of \(model.runSummary.totalCount)"
+                        )
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if !failures.isEmpty {
@@ -141,7 +154,7 @@ struct RemixActivityDrawerView: View {
         }
         Button("Copy Activity") {
             copy(
-                ([model.activity.summary.accessibilityAnnouncement] + model.transcript)
+                ([aggregateSummary.accessibilityAnnouncement] + model.transcript)
                     .joined(separator: "\n")
             )
         }
@@ -167,9 +180,10 @@ struct RemixActivityDrawerView: View {
                     }
                 }
                 if failure.actions.contains("Open Source in Editor to Fix"),
-                   let node = model.lineage.node(failure.id) {
+                   let source = model.currentRuns.first(where: { $0.id == failure.id })?
+                    .candidateSource {
                     Button("Open Source in Editor to Fix") {
-                        openInEditor(node.isfSource)
+                        openInEditor(source)
                     }
                 }
                 Button("Retry This Child") {
