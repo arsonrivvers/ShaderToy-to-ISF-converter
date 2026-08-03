@@ -10,6 +10,7 @@ source_repos:
   - ~/Desktop/AV_Projects/max-mcp/interstream-td   (our TouchDesigner datamosh component)
   - github.com/ericsouther-source/mosh-top          (Eric Souther / Philosophical Tools, MIT wrapper)
   - github.com/ramiropolla/ffglitch-core            (FFmpeg fork, branch ffedit-0.10)
+research_basis: docs/research/2026-08-03-datamosh-node-research.md
 ---
 
 # Datamosh Node — a native out-of-process FX node for ARShader
@@ -55,7 +56,41 @@ keyframe-free engine, the empirically verified per-codec keyframe-free option ta
 burst envelope, and Pixel Persist. It does **not** contribute its modulation matrix, presets, or
 audio reactivity — see section 8.
 
-### 2.1 The mechanism distinction
+### 2.0 Two codec surfaces, and the distinction that matters
+
+FFglitch is a fork of FFmpeg, so **the full libavcodec encoder palette remains available** — that
+is how mosh-top offers nine intermediate codecs (MPEG-1, MPEG-2, MPEG-4 pt2, WMV1, WMV2, FLV1,
+MS-MPEG-4 v3, Snow, MJPEG). Packet-level moshing works on all of them.
+
+The **ffedit syntax-editing** layer is far narrower. Only four decoders declare
+`.p.ffedit_features`: MJPEG, MPEG-1/2, MPEG-4 part 2, and PNG/APNG. Everything in section 2's
+bitstream list — Motion Paint, Edit Mask, Macroblock Shuffle, the Texture Lab — is therefore
+confined to the MPEG family plus MJPEG, which is exactly what mosh-top's own capability matrix
+reports. **MPEG-1/2 is the only codec with both full motion-vector access and full DCT/DC/quantizer
+access**, and is therefore the node's default codec.
+
+**FFglitch has no H.264 syntax access at all**, and the shipped ffglitch binaries are built without
+`--enable-libx264`. This does *not* force two separate instruments: `configure` retains stock
+FFmpeg's entire external-library machinery, and the ffedit changes are purely additive (new
+`ffedit_*.c` files, a new struct field, new capability bits — nothing touching the encoder
+wrappers). **Building ffglitch from source with `--enable-libx264` yields one patched libavcodec
+carrying both our H.264 engine and the ffedit bitstream features**, so one child process serves
+both. This resolves what would otherwise be a fork in the design.
+
+### 2.1 The strongest technical argument for adopting ffglitch
+
+Two encoder flags exist only in ffglitch, verified absent from stock FFmpeg n7.1 by exhaustive
+grep of `libavcodec/mpegvideoenc.h` (six `mpv_flags` defined, zero occurrences of either):
+
+- **`+forcemv`** — *"always write mvs for p frames (even if <0,0>)"*
+- **`+nopimb`** — *"do not use intra mbs for predictive frames"*
+
+These are the direct fixes for the two most common complaints about our current component: *only
+part of the image moves*, and *little chunks keep snapping back to unglitched*. Our
+`datamosher.py` sets only `sc_threshold` for the MPEG family and **structurally cannot produce
+either flag**, because PyAV links stock FFmpeg. This alone justifies the dependency.
+
+### 2.2 The mechanism distinction
 
 Our component manipulates **packets**: duplicate a P-frame packet and let the decoder re-apply its
 motion vectors against a compounding buffer. `core/datamosher.py` documents the finding that makes
@@ -99,9 +134,34 @@ nil stage result.
 | Distribution | Personal use only; no public release planned | Removes all LGPL/GPL distribution obligation. libx264 and the GPL-configured builds are available. A `THIRD_PARTY` ledger records what is vendored under what terms so a future release decision is a document to read, not an archaeology project. |
 | Code provenance | **Vendor and adapt** mosh-top's `src/` under its MIT notice | Upstream tracking fights us: the port must edit `StreamWorker.cpp` and gut `Parameters.cpp`, so every pull would conflict in the files we changed most. A clean-room rewrite would discard a passing 14-test suite and the empirical per-codec capability knowledge, which is the expensive part to re-derive. |
 | Process model | **Out-of-process, XPC + shared IOSurface** | A codec fed deliberately corrupted bitstreams will eventually segfault. Out-of-process means it takes down the node, not the show. Also the correct foundation for the future node workspace, where third-party nodes are untrusted by definition. |
-| Clock | **Free-running; pass through on miss** | Matches what the engine already expects and what `FXChain.encode` already does. No new machinery. Datamosh is temporal smear, so a few frames of lag is stylistically camouflaged. |
+| Clock | **Free-running; hold last moshed output on miss** | Free-running is mandatory regardless of process topology — one 720p encode→decode round trip measures ~16 ms on this machine, three orders of magnitude above the IPC cost. The *fallback* was originally specified as pass-through and was **changed on research evidence** — see 4.1. |
 | Scope | **Full capability set**, ordered by phase | Operator's decision. Section 12 orders the work so the transport is proven before the feature mass lands, and so the node is playable at phase 2. |
 | Parameter count | **Keep all ~76** | Operator wants the depth. The problem is disclosure, not count — solved by pages/sections and capability gating, not by cutting. |
+
+### 4.1 Why the starvation fallback changed
+
+The clock decision was originally taken as *free-running, pass the stage's input through when no
+decoded frame is ready* — attractive because `FXChain.encode` already behaves that way on a nil
+result, so it costs nothing. Research overturned the fallback, though not the free-running model.
+
+Datamosh is a **path-dependent, accumulating** effect: the bloom compounds inside the decoder's
+reference buffer over many frames. A clean input frame appearing in the output is therefore not a
+neutral gap-filler — it is visually indistinguishable from a **reset**, which is the loudest single
+gesture the effect has. Our own `datamosher.py` defines `reset()` as exactly that: force a
+keyframe, decoder refreshes, "snap back" to clean.
+
+At ~16 ms per 720p round trip against a 60 fps render tick, starvation is not an edge case — it
+fires several times a second. Pass-through would therefore fire the effect's loudest gesture,
+continuously, at an unpredictable cadence, with no operator input.
+
+Signal Culture's stated product increment for Interstream is *"perpetual moshing without the need
+to reset your blooms."* The pass-through fallback would automate precisely the thing that feature
+exists to avoid.
+
+**Resolution:** the starvation fallback is *hold last moshed output*. We already have this concept
+implemented and named — `pixel_persist`, "hold the last good frame when input is lost." Pass-through
+remains available, but as an explicit user-facing **Bypass**, which is a deliberate gesture rather
+than a consequence of the encoder being busy. Cost is one retained texture per stage.
 
 ## 5. Architecture
 
@@ -110,9 +170,15 @@ Three pieces, two new.
 **`FXNodeKit`** — new Swift package, sibling to `ISFRuntimeKit`. The node abstraction plus the host
 side of the XPC connection. Knows nothing about datamosh.
 
-**`MoshNode.xpc`** — new XPC service embedded in `ARShader.app`. Contains the vendored engine, the
-libx264 engine, and the ffglitch static libraries. It is the only component linking LGPL/GPL code
-and the only component that can crash.
+**`MoshNode.xpc`** — new XPC service embedded in `ARShader.app`. Contains the vendored engine and
+links **patched libavcodec** built from ffglitch source with `--enable-libx264`. It is the only
+component linking LGPL/GPL code and the only component that can crash.
+
+> Wording matters here: FFglitch ships **no library**. Its `PROGRAM_LIST` is four CLI binaries
+> (`ffplay ffprobe ffmpeg ffedit`) and there is no `libffedit`, no C API, no daemon mode. The
+> capability lives in libavcodec as an `int ffedit_features` field on the codec struct plus
+> `AV_CODEC_CAP_FFEDIT_BITSTREAM` capability bits, which is what mosh-top actually queries. The
+> child links the patched library; it does not run ffglitch.
 
 **`FXStage` generalization** — an edit to existing code. `FXStage` currently owns a `ShaderUnit`,
 and `FXChain.encode` calls `stage.core.renderOffscreen(...)`. That becomes:
@@ -125,8 +191,14 @@ protocol FXStageBacking: Sendable {
 
 `ISFStageBacking` implements it by calling the existing `renderOffscreen` — behavior-identical, and
 the existing 227 app + 302 kit tests are the evidence. `NativeNodeBacking` implements it against
-the surface ring in section 6. `FXChain.encode`'s body changes by one line, and its existing
-`guard let produced = ... else { continue }` becomes pass-through-on-miss at no cost.
+the surface ring in section 6. `FXChain.encode`'s body changes by one line.
+
+Note that `FXChain.encode`'s existing `guard let produced = ... else { continue }` is the
+*pass-through* behavior, which section 4.1 rules out as the starvation response.
+**`NativeNodeBacking` therefore absorbs starvation itself** and returns its retained previous
+output rather than `nil`. It returns `nil` in exactly three cases: before the first decoded frame
+has ever arrived, while the node is explicitly bypassed, and while it is disabled after a crash
+loop. In those cases `continue` is correct and the chain passes through as it always has.
 
 ## 6. Data flow, one render tick
 
@@ -153,6 +225,14 @@ transfer.
 **Ring discipline.** Input and output rings are fixed-size with drop-on-contention: if the host
 publishes faster than the service consumes, the oldest unconsumed slot is overwritten. This
 matches the engine's existing `SourceInbox` philosophy and bounds memory by construction.
+
+**Sequence contract — the host publishes, and never replays.** Motion vectors and residuals are
+meaningful only relative to the specific previous frame the encoder saw, so the child must own the
+frame sequence. The host may publish irregularly — free-running guarantees it will — and coherence
+survives that, because the child simply sees a self-consistent stream of whatever arrived. It does
+**not** survive the host replaying a frame, reordering frames, or assuming output frame N
+corresponds to input frame N. No part of the host may make that assumption; there is no
+frame-accurate correspondence across this boundary, by design.
 
 ## 7. Inside the node process
 
@@ -193,22 +273,30 @@ Persist.
 
 The node is the first component in ARShader that can genuinely crash. Four classes:
 
-**Service crash.** XPC's invalidation handler fires; the stage marks itself faulted and passes its
-input through. Relaunch is automatic with backoff (250 ms → 5 s cap), restoring the last parameter
-snapshot and forcing a keyframe so the new decoder starts clean. Restart count is visible in the
-UI. **If restarts exceed a threshold within a window, the node disables itself and reports why** —
-a crash loop must never degrade into an invisible strobe diagnosed under stage lighting.
+**Service crash.** XPC's invalidation handler fires; the stage marks itself faulted and **holds its
+last good output texture** while the child is rebuilt silently behind it. Relaunch is automatic
+with backoff (250 ms → 5 s cap), restoring the last parameter snapshot. Restart count is visible
+in the UI. **If restarts exceed a threshold within a window, the node disables itself and reports
+why** — a crash loop must never degrade into an invisible strobe diagnosed under stage lighting.
 
-**Capability gap.** Pass through with a visible warning and a greyed parameter. Never a simulated
-substitute.
+Crash recovery carries a **visual** cost that process isolation alone does not address: the child's
+decoder reference state dies with it, so a restarted child necessarily begins from a fresh IDR.
+Successful crash isolation therefore renders as a hard snap to clean — the same unwanted reset
+section 4.1 is about. Holding the last good texture covers the relaunch window, but the first frame
+after recovery is genuinely clean and nothing can prevent that. This is exposed as a switch —
+*crash = intentional reset* — so the operator decides whether recovery reads as a glitch-out or as
+a held freeze that gradually re-blooms. It is a display policy, not only a process policy.
+
+**Capability gap.** When the selected codec cannot support a requested edit, **that edit is skipped**
+— the node keeps moshing, the parameter greys out, and a visible warning says why. The node itself
+does not bypass, and a simulated pixel-domain substitute is never offered in place of the real
+edit.
 
 **Damaged packet rejected by the decoder.** Adaptive backoff, or forward the original compressed
 packet. Already implemented in the vendored engine.
 
-**Encoder behind.** Not an error — the free-running latency model. Resolves to pass-through, or to
-re-emitting the stage's previous output when the per-node *Hold Last Output* toggle is on. That
-toggle costs one retained texture and is the difference between a clean strobe and a continuous
-smear at high encode resolutions. Default is pass-through.
+**Encoder behind.** Not an error — the free-running latency model. Resolves to holding the last
+moshed output (section 4.1). Pass-through is reachable only through the explicit *Bypass* control.
 
 **Blackout is unaffected.** It is a final gate that clears the master after the entire chain, so no
 faulted, wedged, or berserk node can defeat panic. This node is the first real test of that
@@ -237,9 +325,20 @@ distribution, not use. libx264 may be vendored and the GPL-configured builds use
 
 A `THIRD_PARTY.md` ledger records each vendored component, its license, and its pinned commit:
 mosh-top's wrapper (MIT), ffglitch-core at `4b71d60c6640ad3f9ce483eac14391dc73f8c950` on branch
-`ffedit-0.10` (LGPL-2.1-or-later as configured for macOS), and libx264 (GPL-2.0-or-later) if
-added. The ledger exists so that a future decision to release is a document to read rather than an
-investigation to run.
+`ffedit-0.10`, and libx264 (GPL-2.0-or-later). The ledger exists so that a future decision to
+release is a document to read rather than an investigation to run.
+
+**Pin discipline.** That commit is the current HEAD of `ffedit-0.10` and reads
+`ffglitch-0.10.3-dev` — it is roughly 14 commits *ahead* of the `0.10.2` release tag, not behind
+it. Do not "upgrade" it to the 0.10.2 tarball.
+
+Two facts worth recording even though nothing turns on them today. FFglitch's own ffedit sources
+carry an LGPL-2.1-or-later header, and stock FFmpeg is LGPL-2.1+ by default — GPLv2+ applies only
+when `--enable-gpl` is passed, which the official ffglitch builds do and our from-source build need
+not. And vendoring libx264 makes the child GPL regardless. Since the child is a separate binary,
+the LGPL/GPL code is already confined to one process, which is the cleanest possible starting point
+should release ever be reconsidered. **None of this is legal advice, and a release decision needs a
+real review rather than this paragraph.**
 
 Should release ever be reconsidered, the out-of-process design already helps: the LGPL/GPL code is
 confined to a separate binary, which is the cleanest starting point for any relicensing or
@@ -251,10 +350,11 @@ Full scope, ordered so the transport is proven before the feature mass lands on 
 
 | Phase | Delivers | Rationale |
 |---|---|---|
-| **0** | Vendor `src/`, strip the TD shim, headless CLI harness that moshes a file. 14 tests green outside TouchDesigner. | Proves the engine detached from its host at zero risk to ARShader. |
+| **0a** | **Architecture spike, ~1 hour, blocks everything.** Prove a sandboxed XPC service can (i) obtain the GPU access it needs and (ii) receive and map a shared IOSurface from the host. | Undocumented, and it gates the entire out-of-process decision. Mitigating factor to test first: the engine is pure CPU (swscale + codec), so the child may need only IOSurface mapping and **no `MTLDevice` at all** — if true, the risk evaporates. If both fail, fall back to the in-process dynamic bundle and re-plan. |
+| **0b** | Build patched libavcodec from ffglitch source at the pinned commit with `--enable-libx264`. Vendor mosh-top's `src/`, strip the TD shim, headless CLI harness that moshes a file. 14 tests green outside TouchDesigner. | Proves the engine detached from its host at zero risk to ARShader, and proves both codec surfaces coexist in one library before anything depends on that. |
 | **1** | `FXNodeKit`, the `FXStageBacking` protocol, and a `MoshNode.xpc` that only inverts. ISF suites still green. | Isolates the riskiest new thing — surface handoff, ordering, crash recovery — so a failure has one possible cause. |
 | **2** | Engine into the service. MPEG family, four mosh modes, Bloom. | **First playable.** |
-| **3** | All nine codecs, the libx264 H.264 engine, Fluid Mosh, Pixel Persist. | Where interstream's contribution merges. |
+| **3** | All nine encode codecs, the libx264 H.264 engine, `+forcemv` / `+nopimb`, Fluid Mosh, Pixel Persist. | Where interstream's contribution merges. `+forcemv` / `+nopimb` land here because they are encoder flags, and they are the fix for our component's two worst artifacts. |
 | **4** | Bitstream labs: Motion Lab, Texture Lab, Macroblock Shuffle, Motion Paint and Edit Mask wired through `SourceRouter`. | The ffglitch capability with no equivalent in our tool. |
 | **5** | Dual-input splice, Pixel Sort, Snow lab, Live Bloom Scrub. | Depends on phase 3's codec set and phase 4's mask plumbing. |
 | **6** | Parameter-manifest completeness, capability gating, presets via ARShader's existing layer. | Polish over a complete feature set. |
@@ -277,9 +377,26 @@ need), and porting interstream's modulation, preset, or audio subsystems (sectio
    playable.
 2. Ring depth for the input and output surface rings. Start at 3 and measure; the correct value
    depends on the actual XPC round-trip latency, which is unmeasured on this hardware.
-3. Whether the libx264 engine (phase 3) shares `StreamWorker` or runs as a parallel pipeline. Our
-   H.264 path and the ffglitch codecs have different capability surfaces; resolve when phase 3
-   begins and the coupling is visible.
+3. Whether the libx264 engine (phase 3) shares `StreamWorker` or runs as a parallel pipeline. Both
+   now live in one patched libavcodec (section 2.0), so this is an internal structuring question
+   rather than a build question. Resolve when phase 3 begins and the coupling is visible.
 4. Whether multiple simultaneous node instances (deck 1 + deck 2 + master) share one XPC service
    or get one process each. One process each is simpler and preserves isolation per instance, but
-   triples resident memory for the static libraries. Measure at phase 2.
+   triples resident memory for the static libraries. Measure at phase 2. Note that three
+   simultaneous instances at ~16 ms per 720p round trip may not be viable at full resolution
+   regardless of topology — encode resolution is the lever, as it is in our TouchDesigner
+   component.
+5. **Can a sandboxed XPC service obtain GPU access and map a host-shared IOSurface?** Undocumented;
+   gates the architecture. Phase 0a spike. See the note there on why the child may not need Metal
+   at all.
+6. Whether an unnotarized app can launch its own bundled XPC service under current Gatekeeper.
+   Unverified, and it affects local development directly.
+7. Whether VideoToolbox is worth a fallback path at all. Apple reserves the right to insert
+   keyframes and exposes no intra-refresh or scene-cut property across all 82 compression keys, but
+   OBS reported that on Apple Silicon the HEVC encoder produced no keyframes past the first — filed
+   as a bug, which for us would be the desired behavior. It is M1/HEVC/CRF/2023 and must be measured
+   on this hardware before anything depends on it. Not required for any phase; opportunistic only.
+8. What Interstream's `dropkeyframes` control actually does — encode-time suppression, or
+   decode-time packet dropping? The name conflicts with our own validated finding that decode-time
+   keyframe dropping produces stutter rather than smear. Worth resolving because it may indicate a
+   third mechanism neither reference implements.
