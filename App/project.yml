@@ -116,6 +116,7 @@ targets:
       - TrueISFEditor/Remix/RemixPrompt.swift
       - TrueISFEditor/Remix/RemixResponseParser.swift
       - TrueISFEditor/Remix/RemixLegacyRecovery.swift
+      - TrueISFEditor/Remix/RemixCompiler.swift
       - TrueISFEditor/Remix/RemixGenerator.swift
       - TrueISFEditor/Remix/RemixLineage.swift
       - TrueISFEditor/Remix/RemixStudioModel.swift
@@ -248,6 +249,9 @@ schemes:
         TrueISFEditorTests: [test]
     test:
       targets: [TrueISFEditorTests]
+      environmentVariables:
+        - variable: RUN_NATIVE_REMIX_COMPILER
+          value: "${RUN_NATIVE_REMIX_COMPILER}"
   ARShader:
     build:
       targets:
