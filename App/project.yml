@@ -222,6 +222,17 @@ targets:
     dependencies:
       - target: ARShader
       - package: ShadertoyISFKit
+      # This target recompiles the ARShader sources rather than only linking the host, so it needs
+      # the same Spyglass products the app target does — otherwise InstrumentControlFacade.swift
+      # fails to compile here while building fine in the app.
+      - package: Spyglass
+        product: SpyglassHost
+      - package: Spyglass
+        product: SpyglassCore
+      - package: Spyglass
+        product: SpyglassCapture
+      - package: Spyglass
+        product: SpyglassProtocol
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
         embed: true
         codeSign: true
