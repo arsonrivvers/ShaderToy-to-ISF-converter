@@ -11,14 +11,30 @@ final class RemixLineagePresentationTests: XCTestCase {
     }
 
     func test_focusedCanvasActions_explainWhyUnavailableWithoutFocus() {
-        let unavailable = RemixCanvasFocusedActionAvailability(focusedChildID: nil)
+        let unavailable = RemixCanvasFocusedActionAvailability(
+            focusedChildID: nil,
+            retainedReadyArtifactID: nil
+        )
         XCTAssertFalse(unavailable.isEnabled)
         XCTAssertEqual(
             unavailable.reason,
             "Focus a child card to use focused child actions."
         )
 
-        let available = RemixCanvasFocusedActionAvailability(focusedChildID: "child-1")
+        let nonReady = RemixCanvasFocusedActionAvailability(
+            focusedChildID: "child-1",
+            retainedReadyArtifactID: nil
+        )
+        XCTAssertFalse(nonReady.isEnabled)
+        XCTAssertEqual(
+            nonReady.reason,
+            "Wait for the focused child to become Ready before using focused child actions."
+        )
+
+        let available = RemixCanvasFocusedActionAvailability(
+            focusedChildID: "child-1",
+            retainedReadyArtifactID: "artifact-1"
+        )
         XCTAssertTrue(available.isEnabled)
         XCTAssertNil(available.reason)
     }

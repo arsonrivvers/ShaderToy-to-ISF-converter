@@ -211,6 +211,7 @@ final class RemixGenerator {
         onLog: @escaping @Sendable (String, String) -> Void = { _, _ in }
     ) async {
         guard !records.isEmpty else { return }
+        controller.registerLaunchableChildren(records.map(\.id))
         await withTaskGroup(of: Void.self) { group in
             var nextIndex = 0
 
@@ -218,6 +219,7 @@ final class RemixGenerator {
                 while nextIndex < records.count {
                     var record = records[nextIndex]
                     nextIndex += 1
+                    controller.providerWillNotLaunch(childID: record.id)
                     if record.transition(to: .cancelled, at: Date()) {
                         onUpdate(.processLiveness(childID: record.id, isAlive: false))
                         onUpdate(.record(record))
@@ -379,10 +381,14 @@ final class RemixGenerator {
             onUpdate: onUpdate
         )
         guard controller.canLaunch, !Task.isCancelled else {
+            controller.providerWillNotLaunch(childID: record.id)
             state.cancel()
             return
         }
-        guard state.start() else { return }
+        guard state.start() else {
+            controller.providerWillNotLaunch(childID: record.id)
+            return
+        }
 
         let request = record.request
         let labeled = request.parentSources.enumerated().map {

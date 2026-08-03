@@ -47,10 +47,17 @@ enum RemixCanvasEmptyStatePolicy {
 
 struct RemixCanvasFocusedActionAvailability: Equatable {
     let focusedChildID: String?
+    let retainedReadyArtifactID: String?
 
-    var isEnabled: Bool { focusedChildID != nil }
+    var isEnabled: Bool {
+        focusedChildID != nil && retainedReadyArtifactID != nil
+    }
     var reason: String? {
-        isEnabled ? nil : "Focus a child card to use focused child actions."
+        if isEnabled { return nil }
+        if focusedChildID == nil {
+            return "Focus a child card to use focused child actions."
+        }
+        return "Wait for the focused child to become Ready before using focused child actions."
     }
 }
 
@@ -196,7 +203,8 @@ struct RemixChildrenCanvasView: View {
     @ViewBuilder
     private var focusedCommands: some View {
         let availability = RemixCanvasFocusedActionAvailability(
-            focusedChildID: model.workspace.focusedChildID
+            focusedChildID: model.workspace.focusedChildID,
+            retainedReadyArtifactID: model.focusedReadyArtifactID
         )
         Button("Compare Focused") {
             model.routeCanvasCommand(.toggleComparison, columns: gridColumnCount)

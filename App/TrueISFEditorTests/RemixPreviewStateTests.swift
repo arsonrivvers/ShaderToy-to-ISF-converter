@@ -72,6 +72,38 @@ final class RemixPreviewStateTests: XCTestCase {
         XCTAssertLessThanOrEqual(diagnostic.utf8.count, RemixPreviewState.maximumDiagnosticBytes)
     }
 
+    func test_literalOversizedJSONBoundsPreviewDiagnosticOnDecodeAndRoundTrip() throws {
+        let oversized = String(
+            repeating: "🫧",
+            count: RemixPreviewState.maximumDiagnosticBytes
+        )
+        let literalJSON = """
+        {"stage":"failed","attempt":3,"diagnostic":"\(oversized)","updatedAt":0}
+        """
+
+        let decoded = try JSONDecoder().decode(
+            RemixPreviewState.self,
+            from: Data(literalJSON.utf8)
+        )
+        let decodedDiagnostic = try XCTUnwrap(decoded.diagnostic)
+        XCTAssertLessThanOrEqual(
+            decodedDiagnostic.utf8.count,
+            RemixPreviewState.maximumDiagnosticBytes
+        )
+        XCTAssertNotNil(String(data: Data(decodedDiagnostic.utf8), encoding: .utf8))
+
+        let restored = try JSONDecoder().decode(
+            RemixPreviewState.self,
+            from: JSONEncoder().encode(decoded)
+        )
+        let restoredDiagnostic = try XCTUnwrap(restored.diagnostic)
+        XCTAssertLessThanOrEqual(
+            restoredDiagnostic.utf8.count,
+            RemixPreviewState.maximumDiagnosticBytes
+        )
+        XCTAssertNotNil(String(data: Data(restoredDiagnostic.utf8), encoding: .utf8))
+    }
+
     func test_earlierSchemaV2WithoutPreviewStateDefaultsToEmptyMap() throws {
         let fixture = try XCTUnwrap(
             Bundle(for: Self.self).url(

@@ -155,6 +155,22 @@ private final class FirstCompileSuspendsCompiler: RemixCompiling {
 }
 
 @MainActor
+private final class StudioSuspendedExtractor {
+    private var continuation: CheckedContinuation<Result<String, RemixResponseError>, Never>?
+    private(set) var didStart = false
+
+    func extract(_ response: String) async -> Result<String, RemixResponseError> {
+        didStart = true
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func finish(with source: String) {
+        continuation?.resume(returning: .success(source))
+        continuation = nil
+    }
+}
+
+@MainActor
 final class RemixStudioModelTests: XCTestCase {
     private let isf = "/*{ \"ISFVSN\":\"2.0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }"
     private func model(_ scripts: [Result<String, Error>]) -> RemixStudioModel {
@@ -266,6 +282,7 @@ final class RemixStudioModelTests: XCTestCase {
             $0.emit(.textDelta(messageID: "m", blockIndex: 0, text: "chunk"))
         }
         try await waitUntil { m.runSummary.stageCounts[.receiving] == 2 }
+        XCTAssertTrue(m.canStopGeneration)
         XCTAssertEqual(m.currentRuns.map(\.id), ["r1-0", "r1-1", "r1-2", "r1-3", "r1-4"])
         XCTAssertEqual(m.runSummary.stageCounts[.queued], 3)
         XCTAssertEqual(
@@ -283,6 +300,42 @@ final class RemixStudioModelTests: XCTestCase {
         m.cancelGeneration()
         try await waitUntil { !m.isGenerating }
         XCTAssertTrue(m.currentRuns.allSatisfy(\.stage.isTerminal))
+    }
+
+    func test_canStopGenerationBecomesFalseAfterOnlyProviderResultEntersLocalExtraction() async throws {
+        let harness = StudioProviderHarness()
+        let extractor = StudioSuspendedExtractor()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remix-truthful-stop-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let model = RemixStudioModel(
+            generator: RemixGenerator(
+                makeProvider: harness.makeProvider,
+                model: nil,
+                maxConcurrent: 1,
+                compiler: StudioCompiler(),
+                extractCandidate: extractor.extract
+            ),
+            sessionStore: RemixSessionStore(
+                fileURL: directory.appendingPathComponent("session.json")
+            )
+        )
+        model.mode = .mutate
+        model.setParent(.a, isf: isf)
+        model.batchSize = 1
+        model.startGeneration()
+
+        try await waitUntil { harness.providers.first?.isReady == true }
+        XCTAssertTrue(model.canStopGeneration)
+        harness.providers[0].succeed("```glsl\n\(isf)\n```")
+        try await waitUntil { extractor.didStart }
+
+        XCTAssertTrue(model.isGenerating)
+        XCTAssertEqual(model.currentRuns.map(\.stage), [.extracting])
+        XCTAssertFalse(model.canStopGeneration)
+
+        extractor.finish(with: isf)
+        try await waitUntil { !model.isGenerating }
     }
 
     func test_restoreV1EmptyResultRecoversThreeArtifactsInStableSlotOrderWithoutProvider() async throws {

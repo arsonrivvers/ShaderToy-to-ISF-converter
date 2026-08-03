@@ -14,8 +14,21 @@ final class RemixBatchRunController {
     private(set) var launchGateClosed = false
     private(set) var activeProviderChildIDs: Set<String> = []
     private var providerTasks: [String: Task<AssistRunResult, Error>] = [:]
+    private var pendingProviderChildIDs: Set<String>
+
+    init(launchableChildIDs: [String] = []) {
+        pendingProviderChildIDs = Set(launchableChildIDs)
+    }
 
     var canLaunch: Bool { !launchGateClosed }
+    var hasStoppableWork: Bool {
+        !launchGateClosed && !pendingProviderChildIDs.isEmpty
+    }
+
+    func registerLaunchableChildren(_ childIDs: [String]) {
+        guard !launchGateClosed else { return }
+        pendingProviderChildIDs.formUnion(childIDs)
+    }
 
     @discardableResult
     func registerProviderTask(
@@ -26,6 +39,7 @@ final class RemixBatchRunController {
             task.cancel()
             return false
         }
+        pendingProviderChildIDs.insert(childID)
         providerTasks[childID] = task
         return true
     }
@@ -36,8 +50,13 @@ final class RemixBatchRunController {
     @discardableResult
     func providerFinished(childID: String) -> Bool {
         let wasRegistered = providerTasks.removeValue(forKey: childID) != nil
+        pendingProviderChildIDs.remove(childID)
         activeProviderChildIDs.remove(childID)
         return wasRegistered
+    }
+
+    func providerWillNotLaunch(childID: String) {
+        pendingProviderChildIDs.remove(childID)
     }
 
     @discardableResult
@@ -60,6 +79,7 @@ final class RemixBatchRunController {
         launchGateClosed = true
         let tasks = Array(providerTasks.values)
         providerTasks.removeAll()
+        pendingProviderChildIDs.removeAll()
         activeProviderChildIDs.removeAll()
         tasks.forEach { $0.cancel() }
     }

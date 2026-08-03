@@ -119,7 +119,7 @@ final class RemixStudioModel: ObservableObject {
     var generatingCount: Int { currentRuns.filter { !$0.stage.isTerminal }.count }
     var runSummary: RemixRunSummary { RemixRunSummary(records: currentRuns) }
     var canStopGeneration: Bool {
-        isGenerating && activeBatchController?.canLaunch == true
+        isGenerating && activeBatchController?.hasStoppableWork == true
     }
     var childViewItems: [RemixChildViewItem] {
         currentRuns.map { run in
@@ -286,7 +286,7 @@ final class RemixStudioModel: ObservableObject {
             )
         }
         batchHistory.append(RemixBatchRecord(round: r, runs: currentRuns))
-        let controller = RemixBatchRunController()
+        let controller = RemixBatchRunController(launchableChildIDs: currentRuns.map(\.id))
         activeBatchController = controller
         persistSession()
         await generator.generate(
@@ -361,7 +361,7 @@ final class RemixStudioModel: ObservableObject {
         }
         isGenerating = true
         activity = .generating(total: 1, completed: 0, lastEventAt: nil)
-        let controller = RemixBatchRunController()
+        let controller = RemixBatchRunController(launchableChildIDs: [currentRuns[currentIndex].id])
         activeBatchController = controller
         persistSession()
 
@@ -667,7 +667,7 @@ final class RemixStudioModel: ObservableObject {
         }
     }
 
-    private var focusedReadyArtifactID: String? {
+    var focusedReadyArtifactID: String? {
         guard let focusedID = workspace.focusedChildID,
               let run = currentRuns.first(where: { $0.id == focusedID }),
               run.stage == .ready,

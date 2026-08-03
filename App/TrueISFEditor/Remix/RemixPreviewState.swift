@@ -30,3 +30,18 @@ struct RemixPreviewState: Codable, Equatable {
         return bounded
     }
 }
+
+extension RemixPreviewState {
+    private enum CodingKeys: String, CodingKey {
+        case stage, attempt, diagnostic, updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        stage = try container.decode(Stage.self, forKey: .stage)
+        attempt = try container.decode(Int.self, forKey: .attempt)
+        diagnostic = try container.decodeIfPresent(String.self, forKey: .diagnostic)
+            .map(Self.boundedDiagnostic)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+}
