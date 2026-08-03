@@ -24,7 +24,10 @@ smoke gate in full.
   repeated substrings, so a nested type like `SlotBank.UndoableSlotChange` appears as
   `SlotBankC08UndoableE6Change`, and an exact-substring symbol probe for it returns nothing even
   though the type is present. Long string literals are the more reliable freshness check.
-- **Branch:** `m2-slot-bank` @ `41ca066`, 66 commits ahead of merge-base `02fbcd4`
+- **Branch:** `m2-slot-bank` @ `57aaea5`, 71 commits ahead of merge-base `02fbcd4`. (The suite
+  numbers below were run at `41ca066`/66 commits; the five commits since are Task 8's report, the
+  plan revisions, Task 9's badge fix and this doc — Task 9 added 6 tests, taking ARShader to
+  **333**.)
 - **Automated suites, all run 2026-08-02 in the foreground:**
   - **ARShader: 327 tests, 326 passed, 1 failed, 0 skipped.** The one failure is
     `testSteadyStateAllocatesNoNewTextures`, a known **pre-existing** intermittent hang (~2 of 7
@@ -135,7 +138,7 @@ Destructive paths, the new gesture layer, and everything a fix wave touched.
 | 16 | Collapse remembers the rows | Three rows, collapse, expand: three rows come back | UNRUN |
 | 20 | Slots show pictures | Every filled slot draws a still frame of its shader, not a name-only cell. A slot captured this session gets one within a second or two, not on next launch | UNRUN |
 | 21 | The still is not black | Sample time is 2.0s specifically because many shaders are black at t=0. Fill eight slots with visually different shaders: eight distinguishable, non-black stills | UNRUN |
-| 22 | Live reads as live at a glance | With a slot's shader loaded on deck A, that cell has a coloured border and an **A** badge. Load the same shader on B: the badge follows. This must be readable without leaning in | UNRUN |
+| 22 | Live reads as live at a glance — **and lights immediately** | **Assertion tightened by Task 9.** Click a slot to recall it: the coloured border and the **A** badge appear **at once, without touching RECALL TO and without waiting**. Load the same shader on B: the badge follows. This must be readable without leaning in. A badge that only appears after you toggle RECALL TO is the exact defect Task 9 fixed — report it as a regression | UNRUN |
 | 25 | Thumbnails survive relaunch | Quit and relaunch: stills appear immediately from cache, not regenerated | UNRUN |
 | 26 | A broken shader does not stutter | Point a slot at a shader that will not compile. Hover and re-hover its library row repeatedly: no repeated hitch. It compiles once and the failure is remembered | UNRUN |
 | 27 | Fixing a shader on disk retries it | Fix that shader in an editor and save. Its thumbnail regenerates rather than staying a permanent placeholder | UNRUN |
