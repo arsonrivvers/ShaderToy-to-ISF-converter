@@ -84,6 +84,23 @@ enum RemixLineagePresentation {
         }
     }
 
+    static func activityActions(for summary: RemixRunSummary, canStop: Bool) -> [String] {
+        if canStop, summary.terminalCount < summary.totalCount {
+            return ["Stop"]
+        }
+        guard summary.totalCount > 0, summary.terminalCount == summary.totalCount else {
+            return []
+        }
+        var actions: [String] = []
+        if summary.stageCounts[.failed, default: 0] > 0 {
+            actions.append("Retry All Failed")
+        }
+        if summary.stageCounts[.interrupted, default: 0] > 0 {
+            actions.append("Retry Interrupted Batch")
+        }
+        return actions
+    }
+
     static func compactActivityStatus(for state: RemixActivityState) -> String {
         state.summary.compactStatus
     }
@@ -109,6 +126,25 @@ enum RemixLineagePresentation {
         default:
             return current.summary.accessibilityAnnouncement
         }
+    }
+
+    static func announcement(
+        from previous: RemixRunSummary,
+        to current: RemixRunSummary
+    ) -> String? {
+        guard current.totalCount > 0,
+              current.terminalCount == current.totalCount,
+              previous.terminalCount < previous.totalCount
+        else {
+            return nil
+        }
+        let readyCount = current.stageCounts[.ready, default: 0]
+        if readyCount == current.totalCount {
+            return readyCount == 1
+                ? "Generation complete. 1 child is ready."
+                : "Generation complete. \(readyCount) children are ready."
+        }
+        return current.activitySummary(activeProviderCount: 0).accessibilityAnnouncement
     }
 
     static func failureRows(

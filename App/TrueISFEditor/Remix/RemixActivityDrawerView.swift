@@ -24,6 +24,7 @@ struct RemixActivityDrawerView: View {
     @AccessibilityFocusState private var headerFocused: Bool
     @State private var compileSummary: String?
     @State private var announcedActivity = RemixActivityState.idle
+    @State private var announcedRunSummary = RemixRunSummary(records: [])
 
     private var collapsed: Bool {
         model.workspace.collapsedZones.contains(.activity)
@@ -38,6 +39,15 @@ struct RemixActivityDrawerView: View {
             ? model.activity.summary
             : model.runSummary.activitySummary(
                 activeProviderCount: model.activeProviderChildIDs.count
+            )
+    }
+
+    private var aggregateActions: [String] {
+        model.currentRuns.isEmpty
+            ? RemixLineagePresentation.activityActions(for: model.activity)
+            : RemixLineagePresentation.activityActions(
+                for: model.runSummary,
+                canStop: model.canStopGeneration
             )
     }
 
@@ -108,8 +118,13 @@ struct RemixActivityDrawerView: View {
         .accessibilityLabel("Activity")
         .onAppear {
             announcedActivity = model.activity
+            announcedRunSummary = model.runSummary
         }
         .onChange(of: model.activity) { activity in
+            guard model.currentRuns.isEmpty else {
+                announcedActivity = activity
+                return
+            }
             if let message = RemixLineagePresentation.announcement(
                 from: announcedActivity,
                 to: activity
@@ -117,6 +132,19 @@ struct RemixActivityDrawerView: View {
                 RemixAccessibilityAnnouncement.post(message, application: NSApp)
             }
             announcedActivity = activity
+        }
+        .onChange(of: model.runSummary) { summary in
+            guard !model.currentRuns.isEmpty else {
+                announcedRunSummary = summary
+                return
+            }
+            if let message = RemixLineagePresentation.announcement(
+                from: announcedRunSummary,
+                to: summary
+            ) {
+                RemixAccessibilityAnnouncement.post(message, application: NSApp)
+            }
+            announcedRunSummary = summary
         }
         .sheet(isPresented: Binding(
             get: { compileSummary != nil },
@@ -138,16 +166,15 @@ struct RemixActivityDrawerView: View {
 
     @ViewBuilder
     private var activityButtons: some View {
-        let actions = RemixLineagePresentation.activityActions(for: model.activity)
-        if actions.contains("Stop") {
+        if aggregateActions.contains("Stop") {
             Button("Stop") { model.cancelGeneration() }
         }
-        if actions.contains("Retry All Failed") {
+        if aggregateActions.contains("Retry All Failed") {
             Button("Retry All Failed") {
                 Task { await model.retryFailed() }
             }
         }
-        if actions.contains("Retry Interrupted Batch") {
+        if aggregateActions.contains("Retry Interrupted Batch") {
             Button("Retry Interrupted Batch") {
                 Task { await model.retryInterruptedBatch() }
             }

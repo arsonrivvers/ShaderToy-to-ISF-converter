@@ -107,7 +107,7 @@ final class RemixStudioModel: ObservableObject {
     var parentIDs: [String] { [parentAID, parentBID].compactMap { $0 } }
     var parentSources: [String] { parentIDs.compactMap { lineage.node($0)?.isfSource } }
     var canGenerate: Bool {
-        guard !isGenerating else { return false }
+        guard !isGenerating, localRecoveryTask == nil else { return false }
         let needed = (mode == .crossover) ? 2 : 1
         return parentSources.count >= needed
     }
@@ -118,6 +118,9 @@ final class RemixStudioModel: ObservableObject {
     }
     var generatingCount: Int { currentRuns.filter { !$0.stage.isTerminal }.count }
     var runSummary: RemixRunSummary { RemixRunSummary(records: currentRuns) }
+    var canStopGeneration: Bool {
+        isGenerating && activeBatchController?.canLaunch == true
+    }
     var childViewItems: [RemixChildViewItem] {
         currentRuns.map { run in
             let artifact = run.artifactID.flatMap { lineage.node($0) }
@@ -381,6 +384,8 @@ final class RemixStudioModel: ObservableObject {
         guard sessionIdentity == generationIdentity else { return }
         activeBatchController = nil
         isGenerating = false
+        let durableRetry = currentRuns[currentIndex]
+        batchHistory.append(RemixBatchRecord(round: durableRetry.round, runs: [durableRetry]))
         activity = .completed(failed: currentRuns[currentIndex].stage == .failed ? 1 : 0)
         persistSession()
     }
@@ -648,18 +653,30 @@ final class RemixStudioModel: ObservableObject {
         case .moveLeft, .moveRight, .moveUp, .moveDown:
             workspace.moveFocus(command, columns: columns, childIDs: childIDs)
         case .toggleComparison:
-            if let id = workspace.focusedChildID { workspace.toggleComparison(id) }
+            if let id = focusedReadyArtifactID { workspace.toggleComparison(id) }
         case .favorite:
-            if let id = workspace.focusedChildID { toggleFavorite(id) }
+            if let id = focusedReadyArtifactID { toggleFavorite(id) }
         case .hero:
-            if let id = workspace.focusedChildID { workspace.showHero(id) }
+            if let id = focusedReadyArtifactID { workspace.showHero(id) }
         case .promoteA:
-            if let id = workspace.focusedChildID { promoteToParent(.a, nodeID: id) }
+            if let id = focusedReadyArtifactID { promoteToParent(.a, nodeID: id) }
         case .promoteB:
-            if let id = workspace.focusedChildID { promoteToParent(.b, nodeID: id) }
+            if let id = focusedReadyArtifactID { promoteToParent(.b, nodeID: id) }
         case .exitCanvasMode:
             workspace.showGrid()
         }
+    }
+
+    private var focusedReadyArtifactID: String? {
+        guard let focusedID = workspace.focusedChildID,
+              let run = currentRuns.first(where: { $0.id == focusedID }),
+              run.stage == .ready,
+              let artifactID = run.artifactID,
+              lineage.node(artifactID) != nil
+        else {
+            return nil
+        }
+        return artifactID
     }
 
     func toggleFavorite(_ id: String) {

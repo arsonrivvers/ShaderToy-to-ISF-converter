@@ -23,4 +23,10 @@ struct RemixPreviewState: Codable, Equatable {
         }
         return ""
     }
+
+    func boundedForPersistence() -> RemixPreviewState {
+        var bounded = self
+        bounded.diagnostic = diagnostic.map(Self.boundedDiagnostic)
+        return bounded
+    }
 }

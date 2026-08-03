@@ -34,6 +34,31 @@ final class RemixSessionTests: XCTestCase {
         XCTAssertEqual(restored.workspace, workspace)
     }
 
+    func test_persistenceBoundsDirectlyConstructedPreviewDiagnosticsByUTF8Bytes() throws {
+        var value = session()
+        value.previewStates = [
+            "artifact-r4-0": RemixPreviewState(
+                stage: .failed,
+                attempt: 3,
+                diagnostic: String(
+                    repeating: "🫧",
+                    count: RemixPreviewState.maximumDiagnosticBytes
+                ),
+                updatedAt: Date(timeIntervalSince1970: 4)
+            ),
+        ]
+
+        let restored = try roundTrip(value)
+        let preview = try XCTUnwrap(restored.previewStates["artifact-r4-0"])
+
+        XCTAssertEqual(preview.stage, .failed)
+        XCTAssertEqual(preview.attempt, 3)
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(preview.diagnostic).utf8.count,
+            RemixPreviewState.maximumDiagnosticBytes
+        )
+    }
+
     func test_generationRequestSnapshotPreservesOriginalSettingsAfterControlsChange() throws {
         var controls = settings(balance: 0.2)
         let snapshot = RemixGenerationRequestSnapshot(

@@ -47,6 +47,34 @@ final class RemixActivityTests: XCTestCase {
         XCTAssertEqual(RemixRunSummary(records: records).terminalProgress, 0.5)
     }
 
+    func test_runSummaryActionsDoNotOfferLegacyRetryOrFakeStopDuringLocalRecovery() {
+        let recovering = RemixRunSummary(records: [record(stage: .compiling)])
+        let recovered = RemixRunSummary(records: [record(stage: .ready)])
+
+        XCTAssertEqual(
+            RemixLineagePresentation.activityActions(for: recovering, canStop: false),
+            []
+        )
+        XCTAssertEqual(
+            RemixLineagePresentation.activityActions(for: recovering, canStop: true),
+            ["Stop"]
+        )
+        XCTAssertEqual(
+            RemixLineagePresentation.activityActions(for: recovered, canStop: false),
+            []
+        )
+    }
+
+    func test_runSummaryEmitsCompletionAnnouncementWhenRecoveryBecomesEntirelyReady() {
+        let recovering = RemixRunSummary(records: [record(stage: .compiling)])
+        let recovered = RemixRunSummary(records: [record(stage: .ready)])
+
+        XCTAssertEqual(
+            RemixLineagePresentation.announcement(from: recovering, to: recovered),
+            "Generation complete. 1 child is ready."
+        )
+    }
+
     private let requestID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
     private let eventDate = Date(timeIntervalSince1970: 1_721_844_000)
 
@@ -143,6 +171,19 @@ final class RemixActivityTests: XCTestCase {
             steer: "",
             directive: "test",
             settings: RemixCrossoverSettings()
+        )
+    }
+
+    private func record(stage: RemixChildRunRecord.Stage) -> RemixChildRunRecord {
+        RemixChildRunRecord(
+            id: "r1-0",
+            round: 1,
+            slot: 0,
+            request: request(),
+            stage: stage,
+            queuedAt: Date(timeIntervalSince1970: 1),
+            terminalAt: stage.isTerminal ? Date(timeIntervalSince1970: 2) : nil,
+            artifactID: stage == .ready ? "r1-0" : nil
         )
     }
 }

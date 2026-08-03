@@ -346,6 +346,7 @@ struct RemixSession: Codable, Equatable {
                 runs: record.runs.map { $0.boundedForPersistence() }
             )
         }
+        bounded.previewStates = previewStates.mapValues { $0.boundedForPersistence() }
         return bounded
     }
 
