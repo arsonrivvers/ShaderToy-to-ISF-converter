@@ -1907,3 +1907,125 @@ desync from its own pitch."
 | # | Leg | Hypothesis |
 |---|---|---|
 | 45 | The strip scales sensibly, both ways | Resize the window from its minimum to full screen. The cells grow, then **stop** — the strip never dominates the surface as it did before, and never leaves a large display mostly dead space. If the ceiling feels wrong, `maxCellWidth` is the one number to move |
+
+---
+
+# REVISIONS — 2026-08-02 (post-merge-gate review, device session begun)
+
+Everything above this line is the plan as authored. This section records what changed after the
+final whole-branch review, the two fix waves, and the operator's first pass on device. **Read this
+section before acting on any task above it — several task descriptions above are now superseded.**
+
+Branch state at revision time: `m2-slot-bank`, HEAD `1839027`, 66 commits ahead of `02fbcd4`.
+Suites: ARShader 327 (326 + one known pre-existing hang), TrueISFEditor SUCCEEDED, ShadertoyISFKit
+312/0. Build installed to `~/Applications` 2026-08-02 and verified byte-identical.
+
+## Order changed
+
+**The final whole-branch review ran BEFORE Task 8, reversing the order above.** Task 8 installs the
+app and hands over the smoke legs; a fix wave landing afterwards means the build the operator signed
+is not the build that merges. Review → fix wave → re-review → fix round 2 → Task 8. Done.
+
+## Task 8 — REVISED, and now COMPLETE except the legs
+
+- **The leg count is 44, not 45 and not "40 + 34b + 35b".** The handoff's arithmetic double-counted:
+  34b is *inside* the 40, and 35b is struck.
+- **Phase 3b's legs are NOT additive.** This plan's leg list already reuses 3b's numbers and titles
+  verbatim for 1–16, 18 and 19 (verified title-for-title against
+  `docs/reports/live-smoke-instrument-m2-phase3b.md`), skipping 17 because it was signed on device
+  2026-07-31. So 3c **subsumes** 3b by construction — "fold in 3b's remaining 18 legs" would have
+  DUPLICATED eighteen legs. Task 8's own text above ("carries phase 3b's unrun legs as well") is
+  satisfied by the numbering, not by appending.
+- **Legs 6 and 7 were already re-scoped in place** above; no further work needed.
+- **44 = 40 surviving + 4 new.** New legs added by the merge-gate review and the device session:
+  46 (undo a slot clear), 47 (opening the projector shows exactly ONE black frame, never a corner
+  image), 48 (the hover well never lies — the indicator must stay up continuously), 49 (can you tell
+  which pad is which without reading names — the slot number is no longer drawn on the cell).
+- **The report is written in TWO TIERS.** Tier 1 (~16 legs: the new, the destructive, and everything
+  a fix wave touched) is enough to sign the merge; Tier 2 is the regression sweep and can be a
+  separate sitting. `docs/reports/live-smoke-instrument-m2-phase3c.md`. **All 44 legs UNRUN.**
+
+## Task 9 (NEW) — the live badge does not update on load
+
+**Found by the operator on device, 2026-08-02, first pass.** Click a slot to recall it: the A/B badge
+and coloured border do not appear. They appear only when the operator toggles `RECALL TO` A/B.
+
+Cause is established. `SlotBankStripView.swift:314-317` reads `instrument.deck($0).unit.sourceURL`
+but **never observes `ShaderUnit`**, so a load gives SwiftUI no dependency to invalidate. It refreshes
+only when something unrelated redraws the strip — the A/B toggle (published state) or
+`RenderStatsModel`'s ~2x/sec republish. This was predicted as a deferred minor in task 3's review
+("correct today only because RenderStatsModel republishes ~2x/sec and incidentally re-evaluates the
+strip"); the operator has now shown that incidental republish is not reliable.
+
+Same root cause, second symptom: `MonitorTile` reads `unit.sourceURL` in `dragPayload` without
+observing it, so a freshly loaded deck becomes draggable up to ~500ms late.
+
+Fix direction: publish deck loads (there is already a `loadGeneration` counter on `ShaderUnit`) so the
+views observe a real dependency. Constraints: must update immediately on load; must NOT depend on
+`RenderStatsModel` or any timer (swapping one incidental trigger for another is not a fix); must NOT
+publish per-frame — this is a live-performance render path.
+
+**Status: implementer dispatched 2026-08-02, in flight at handoff time.** Gates smoke leg 22.
+
+## Task 10 (NEW) — filter shaders need a reference frame
+
+**Operator-requested on device, 2026-08-02.** A filter has no input in the thumbnail service, so filter
+slots and hover previews render dead. Shadertoy shows a camera icon meaning "this needs an input";
+the operator wants the thumbnail to show what the filter **does**.
+
+**OPERATOR DECISION: a purpose-built synthetic test frame**, generated procedurally. Explicitly
+rejected: one of the library's own generators (makes a single shader file load-bearing) and the other
+deck's live output (non-deterministic, therefore uncacheable, which re-introduces exactly the
+per-sight GPU load smoke leg 28 exists to police). Design it for legibility — a colour ramp (colour
+ops), hard geometric edges (warps), a fine-detail region (blur), recognisable structure
+(displacement).
+
+Detection is already free: `ISFSceneSource.swift:57` classifies filters via
+`attrib.isFilterInputImage || attrib.shouldHaveImageBuffer || attrib.type == .image`. See also
+`SourceRoutingView.swift:54`.
+
+**Easy to miss:** thumbnails are disk-cached, so the cache key MUST include a reference-frame version
+— otherwise changing the reference leaves every previously-rendered filter thumbnail stale forever
+with no way to invalidate.
+
+**Scope: NOT a merge blocker.** New feature, own brainstorm/spec slice, after the merge.
+
+## The test-suite freeze — mitigated, root cause OPEN
+
+The ARShader suite is a **25-second suite**. Every multi-minute "the tests are frozen" run was ONE
+test — `testSteadyStateAllocatesNoNewTextures`, the only test that renders in a LOOP (31×
+`renderFrame`) — hanging and dying with SIGTERM. Pre-existing since `67048d9` (Milestone 1), NOT from
+this branch.
+
+**The trap that hid it:** after a host restart, xcodebuild's CONSOLE prints a per-launch summary
+(`Executed 175 tests, with 0 failures`) for a run that FAILED with a real total of 327. **Never judge
+an xcodebuild run from the console tail** — use
+`xcrun xcresulttool get test-results summary --path <bundle>.xcresult`.
+
+Mitigated (proven): the loop now runs on a background queue behind a 30s `XCTestExpectation` wait, so
+a hang is a fast named failure inside an accurate 327/326/1 run instead of a silent 195–518s stall.
+The `first === last` pooled-texture assertion is preserved byte-for-byte — a real GPU-leak guard on
+the live render path, never to be deleted to make the suite green.
+
+Root cause open, filed as `arshader-steadystate-test-intermittent-hang-20260802` with eight avenues
+ruled out (including the operator's own compelling window-activation theory, tested directly by
+suppressing the harness's entire UI — the hang reproduced anyway, so it was refuted and the
+entry-point change reverted). Untested successor lead: all three observed hangs followed a REBUILD.
+
+## Before the merge
+
+1. Task 9 lands, operator re-checks the badge on device (~30 seconds).
+2. The 44 legs — Tier 1 signs the merge.
+3. **Preserve the merge-gate evidence.** The whole-branch review, both fix-wave reports, the
+   re-review and this plan's ledger all live under `.superpowers/`, which is **gitignored**
+   (`.gitignore:18`). `git worktree prune` after the merge deletes them. Copy the ones worth keeping
+   into `docs/reports/` first.
+4. Merge — **timing question**, a concurrent Claude session is working the ARShader modulation slice
+   (`ModSource.swift`, `/tmp/arshader-ddata-mod`) in another checkout.
+5. `superpowers:finishing-a-development-branch`.
+
+## Note for whoever builds here next
+
+`scripts/run-instrument.sh` hardcodes `DDATA="/tmp/arshader-ddata"`, the forbidden path while other
+sessions are live in the main checkout. Do NOT run it from the worktree; build and `ditto` by hand
+against `/tmp/arshader-ddata-bank`.
