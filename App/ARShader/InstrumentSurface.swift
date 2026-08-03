@@ -57,6 +57,29 @@ enum SurfaceMetrics {
     /// the scale fields. Still well above a `.controlSize(.small)` 16pt, still not stage-sized.
     static let secondaryTarget: CGFloat = 32
 
+    // MARK: - Type size: the 14pt floor is WAIVED here, deliberately
+    //
+    // The operator's standing UI preference sets a 14pt minimum. ARShader does not meet it and is
+    // not going to: 59 of its 60 type sites run 9–12pt, below even the macOS 13pt body default.
+    // Decided 2026-08-03 (operator delegated the call) after the Client Success review raised it.
+    //
+    // Why waived rather than enforced. The floor protects a reader who did not choose the layout,
+    // on hardware nobody picked. Neither holds here — one operator, their own instrument, known
+    // machines. What that operator cannot get back is monitor area, and raising every site to 14
+    // means re-deriving `minWindowWidth`/`minWindowHeight` (both computed against current sizes)
+    // and spending the difference out of the three tiles they actually watch. That is a worse
+    // instrument in service of a number.
+    //
+    // Why not waived wholesale either. The floor exists to protect text you READ; most of what is
+    // small here is chrome you read once — `SLOT BANK`, `RECALL TO`, `GEN`, a chevron glyph. The
+    // two 9pt sites that were neither got raised to 11pt in the same commit: the slot cell's own
+    // name (how a look is identified mid-set) and the `N hidden` badge (a fact you act on). The
+    // rule this settles on is therefore NOT a number — it is: **anything read under time pressure
+    // gets 11pt or more; static labels may go smaller.** A new 9pt site naming a thing, rather
+    // than labelling a region, is a bug under this waiver.
+    //
+    // Re-open this only if the instrument gets a second operator or leaves known hardware.
+
     /// The deck strips' own minimum. Below this they clip rather than shrink.
     ///
     /// **A hand-chosen usability floor, NOT a measured one — and this has been tried and reverted

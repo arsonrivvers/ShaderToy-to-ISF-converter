@@ -363,8 +363,10 @@ struct SlotBankStripView: View {
                 .foregroundStyle(.secondary)
 
             if hiddenFilledCount > 0 {
+                // Also 11pt: it is telling you captured looks are out of view, which is a fact you
+                // act on, not a section label you read once.
                 Text("\(hiddenFilledCount) hidden")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.orange)
                     .accessibilityIdentifier("slotBank.hiddenCount")
                     .help("\(hiddenFilledCount) captured slot(s) sit in rows the strip is not "
@@ -728,10 +730,13 @@ private struct SlotCell: View {
 
                 VStack {
                     Spacer()
-                    Text(preset?.name ?? "empty")
-                        .font(.system(size: 9, design: .monospaced))
+                    // 11pt, not 9: this is the one label in the bank that gets read under
+                    // pressure — it is how a look is identified mid-set. `shortLabel` strips the
+                    // shared `AR_`/`.fs` so the larger type costs no characters.
+                    Text(preset?.shortLabel ?? "empty")
+                        .font(.system(size: 11, design: .monospaced))
                         .lineLimit(1)
-                        .truncationMode(.middle)   // long AR_Genuary names differ at the END
+                        .truncationMode(.middle)
                         .foregroundStyle(preset == nil ? .tertiary : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 3)
