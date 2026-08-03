@@ -6,6 +6,12 @@ options:
 packages:
   ShadertoyISFKit:
     path: ../ShadertoyISFKit
+  # Spyglass lives outside this repo, so this path is relative to App/ and assumes the repo sits at
+  # ~/Desktop/AV_Projects/. Fragile by construction — a path dependency across two checkouts breaks
+  # if either moves. Deliberate for now: the package is pre-v1 and still changing daily, and
+  # vendoring it would fork it mid-build. Revisit once it stabilises.
+  Spyglass:
+    path: ../../../../Documents/_Projects/spyglass
 targets:
   TrueISFEditor:
     type: application
@@ -154,6 +160,16 @@ targets:
       - path: ARShader
     dependencies:
       - package: ShadertoyISFKit
+      # DEBUG-only in effect: every Spyglass call site in ARShader sits behind `#if DEBUG`, and
+      # Task 15 Step 1 proves a Release build opens no socket and writes no handshake.
+      - package: Spyglass
+        product: SpyglassHost
+      - package: Spyglass
+        product: SpyglassCore
+      - package: Spyglass
+        product: SpyglassCapture
+      - package: Spyglass
+        product: SpyglassProtocol
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
         embed: true
         codeSign: true
