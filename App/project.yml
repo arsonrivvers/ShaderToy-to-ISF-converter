@@ -117,6 +117,7 @@ targets:
       - TrueISFEditor/Remix/RemixResponseParser.swift
       - TrueISFEditor/Remix/RemixLegacyRecovery.swift
       - TrueISFEditor/Remix/RemixCompiler.swift
+      - TrueISFEditor/Remix/RemixBatchRunController.swift
       - TrueISFEditor/Remix/RemixGenerator.swift
       - TrueISFEditor/Remix/RemixLineage.swift
       - TrueISFEditor/Remix/RemixStudioModel.swift
