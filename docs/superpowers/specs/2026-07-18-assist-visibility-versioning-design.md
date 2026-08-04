@@ -53,4 +53,4 @@ Non-goals: branching history (linear timeline chosen), file-per-version on disk 
 
 - PM spec review required (5+ tasks) — single-stage review, deviations only.
 - Mechanic at build-done = manual CoS review (native-app exception). CS live UX review post-device-confirm, bundled with `cs-trueisf-phase-ab-params-20260717` + `cs-trueisf-phase-d-authoring-20260717`.
-- Standing: no `git push` until the null_signal colleague heads-up; announce any restage before running it.
+- Standing: no `git push` until the null_signal colleague heads-up; announce any restage before running it. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**

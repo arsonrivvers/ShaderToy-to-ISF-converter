@@ -17,7 +17,7 @@
 - **Nothing in this plan touches the test-sources list.** `PreviewEngine.swift` / `PreviewCoordinator.swift` (already listed) gain only methods, no new types. All new types (`LineDiff`, `SnapshotStore`, `TemplateCatalog`, …) are tested via `@testable import` only.
 - **ISF/GLSL rules for the templates (Metal backend):** no ternary on vector types (rewrite as `if/else`); no `#version` directives; `gl_FragColor` + `IMG_NORM_PIXEL`/`isf_FragNormCoord`, never `texture2D`/`texture`; loop bounds must be `const int`; first-frame init uses `FRAMEINDEX < 2 || resetEvent`, never `FRAMEINDEX == 0`; a PERSISTENT buffer read inside the pass that writes it returns LAST frame's contents.
 - **Scope fence (Conner, final):** no VJ features in this editor. null_signal's audio-reactive uniforms (`bass`/`mid`/`high`) are dropped from every port (terms removed or fixed to 0.0). Interactive-performance learnings go to ROADMAP Part 3 only.
-- **MIT attribution (required to ship the ports):** every derived `.fs` carries `"CREDIT": "Adapted from null_signal by VJ CYBERPATROLUNIT (MIT)"` in its ISF header; `THIRD_PARTY_LICENSES/null_signal.LICENSE.txt` + an `ACKNOWLEDGEMENTS.md` section carry the full license text. **Do not push template commits to the public remote until Conner has given the colleague a courtesy heads-up (null_signal's repo is private).**
+- **MIT attribution (required to ship the ports):** every derived `.fs` carries `"CREDIT": "Adapted from null_signal by VJ CYBERPATROLUNIT (MIT)"` in its ISF header; `THIRD_PARTY_LICENSES/null_signal.LICENSE.txt` + an `ACKNOWLEDGEMENTS.md` section carry the full license text. **Do not push template commits to the public remote until Conner has given the colleague a courtesy heads-up (null_signal's repo is private).** **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 - **Commits:** conventional style matching repo history (`feat(app): …`, `fix(engine): …`), no attribution trailers.
 - **Native-Metal feature status is two-state:** everything here is **STAGED** until Conner confirms on-device. Final task stages via `scripts/run-latest.sh` and verifies binary freshness by grepping a >15-char source string in the app's `.debug.dylib` (Xcode 26 serves a stub main binary — grep the dylib, not the stub).
 
@@ -2168,7 +2168,7 @@ Report to Conner with status **STAGED (not CONFIRMED)** and this on-device check
   5. Run a ShaderAssist rewrite → apply preview now shows a colored folded diff.
   6. File ▸ New from Template → six NS templates open as untitled docs and render against the camera/test-pattern inputs. Specifically: NS Feedback Echo shows visible motion trails that decay (the machine gate only proves the persistent-buffer path executes non-black — trail behavior is this eyeball check).
 
-**Do not push to the public remote until Conner has pinged the null_signal colleague (license courtesy — see Global Constraints).**
+**Do not push to the public remote until Conner has pinged the null_signal colleague (license courtesy — see Global Constraints).** **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 

@@ -1,0 +1,67 @@
+# Optional overlay — the Spyglass agent-capture surface.
+#
+# Spyglass lives OUTSIDE this repository, so wiring it into `project.yml` unconditionally made the
+# public repo ungeneratable: `xcodegen` exits 1 on a local package path that exists on no clone and
+# no CI runner. This overlay is applied only when SPYGLASS_LOCAL is set, so the default path — the
+# one a clean clone and CI take — needs nothing outside the repo.
+#
+#   SPYGLASS_LOCAL=true xcodegen generate     # operator checkout, with Spyglass
+#   xcodegen generate                         # clean clone / CI, without it
+#
+# The two consumer files (`InstrumentControlFacade.swift` and its tests) are fenced
+# `#if DEBUG && SPYGLASS`, and this overlay is the ONLY thing that defines `SPYGLASS`. So they
+# compile to nothing when the overlay is off, and stay out of Release even when it is on.
+#
+# NOT `canImport(SpyglassHost)`, which was tried and is wrong here: `canImport` answers "is this
+# module findable", not "is it linked". A DerivedData directory left over from an earlier
+# SPYGLASS_LOCAL=true build still contains the Spyglass modules, so `canImport` returned true for a
+# target that did not link them — the file compiled and then failed at link with ~40 undefined
+# symbols. A compilation condition set by this file cannot drift from this file.
+#
+# The path is relative to App/ and assumes the repo sits at ~/Desktop/AV_Projects/. Fragile by
+# construction: a path dependency across two checkouts breaks if either moves. Deliberate for now —
+# the package is pre-v1 and still changing daily, and vendoring it would fork it mid-build.
+# Revisit once it stabilises.
+packages:
+  Spyglass:
+    path: ../../../../Documents/_Projects/spyglass
+targets:
+  ARShader:
+    settings:
+      configs:
+        # Debug ONLY. On `base` this would also define SPYGLASS in Release, where the
+        # `#if DEBUG && SPYGLASS` fence already excludes the code — but a condition that can
+        # never be true in Release is a stronger statement than one that merely is not used.
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SPYGLASS
+    dependencies:
+      # DEBUG-only in effect: every Spyglass call site in ARShader sits behind `#if DEBUG`, and
+      # Task 15 Step 1 proves a Release build opens no socket and writes no handshake.
+      - package: Spyglass
+        product: SpyglassHost
+      - package: Spyglass
+        product: SpyglassCore
+      - package: Spyglass
+        product: SpyglassCapture
+      - package: Spyglass
+        product: SpyglassProtocol
+  ARShaderTests:
+    settings:
+      configs:
+        # Debug ONLY. On `base` this would also define SPYGLASS in Release, where the
+        # `#if DEBUG && SPYGLASS` fence already excludes the code — but a condition that can
+        # never be true in Release is a stronger statement than one that merely is not used.
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SPYGLASS
+    dependencies:
+      # This target recompiles the ARShader sources rather than only linking the host, so it needs
+      # the same Spyglass products the app target does — otherwise InstrumentControlFacade.swift
+      # fails to compile here while building fine in the app.
+      - package: Spyglass
+        product: SpyglassHost
+      - package: Spyglass
+        product: SpyglassCore
+      - package: Spyglass
+        product: SpyglassCapture
+      - package: Spyglass
+        product: SpyglassProtocol

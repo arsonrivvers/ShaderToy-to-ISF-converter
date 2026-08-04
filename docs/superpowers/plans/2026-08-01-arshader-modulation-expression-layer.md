@@ -40,9 +40,8 @@ ISFMSLKit (read only — this slice adds no shader code).
   no window.
 - **Execution happens in the worktree `.worktrees/m2-modulation` on branch `m2-modulation`.** A
   concurrent session is live in `.worktrees/m2-slot-bank` (phase 3b/3c). **Never touch that
-  worktree.** Never `git add -A` in this repo — explicit paths only. A modified
-  the prior-art dossier under `docs/arshader/` in the main checkout belongs to that
-  session.
+  worktree.** Never `git add -A` in this repo — explicit paths only. A modified prior-art
+  dossier under `docs/arshader/` in the main checkout belongs to that session.
 - **Known merge-conflict surface with `m2-slot-bank`** (measured 2026-08-01 against the merge
   base): `FXChain.swift`, `ShaderUnit.swift`, `SurfaceLayout.swift`, `InstrumentView.swift`,
   `Instrument.swift`. All five are additive on that branch, so conflicts will be textual rather
@@ -66,8 +65,8 @@ ISFMSLKit (read only — this slice adds no shader code).
   worse than no test. Task 13 collects the evidence; each task performs its own mutation run at
   the point the gate is written.
 - **Deliberate vocabulary boundary.** The expression language is exactly spec §2's list. The prior-art system's
-  own shipped expressions used a conditional, as prior-art research recorded
-  — and this language has no conditional and no comparison operators. Gating is done by
+  own shipped expressions used a conditional, and this language has no conditional and no
+  comparison operators. Gating is done by
   multiplication against `valid(...)` or a `step`-shaped arithmetic idiom. Adding `if`/comparisons
   is a tuning-surface-slice decision, not this one's.
 
@@ -1999,8 +1998,7 @@ import Foundation
 
 /// The easing equations the expression vocabulary exposes.
 ///
-/// Only the NAMES came from prior-art research, which listed `spring`, `spring_v`, `stagger`,
-/// `anticipate`, `loop_noise` and no semantics. These formulas are ours, which is exactly why
+/// Only the NAMES came from prior-art research, which listed them and no semantics. These formulas are ours, which is exactly why
 /// they are pinned by tests: nothing external defines them, so a change to the damping convention
 /// would silently retune every patch an operator had already dialled in.
 enum MotionFunctions {
@@ -5047,7 +5045,7 @@ git commit -m "docs(mod): on-device gate — five legs, operator-signed"
   **STAGED**, and the memory note says so.
 - File the deferred reviews that this plan does not run: PM spec review
   (`arshader-mod-layer-pm-spec-review-20260801`) gates execution and should have run BEFORE Task 1;
-  CSO (`arshader-public-push-cso-gate-20260801`) gates pushing this public repo.
+  CSO (the public-push gate action item) gates pushing this public repo.
 
 ---
 

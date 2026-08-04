@@ -21,3 +21,7 @@ App/ddata-release/
 # ARShader UI visual references: third-party screenshots, no established
 # provenance, and this repo is public. Local design use only.
 docs/arshader/ui-reference/
+
+# SwiftPM build artefacts. `ShadertoyISFKit/.build/` was committed once (d51cf99, 3,253 paths
+# including a 67 MB LMDB index); it is public history now and stays, but never again.
+.build/

@@ -257,7 +257,7 @@ After comparing two Ready children, Conner opens the winner. It arrives in the e
 | Native workflow is staged | Client Success | App-window-scoped live review only | Before calling the redesign ready |
 | Accessible Remix workflow is staged | Conner | Ordinary pointer, keyboard, VoiceOver, and Reduce Motion on-device gate | Before status becomes confirmed |
 | Two winners open into the editor | Conner | Existing two-child identity and version-history checklist | Before confirming editor handoff integrity |
-| Any local TrueISFEditor commit would be pushed | Conner and null_signal colleague | Existing courtesy heads-up | Before any push; nothing pushes without confirmation |
+| Any local TrueISFEditor commit would be pushed | Conner and null_signal colleague | Existing courtesy heads-up | **CLOSED 2026-08-03 — heads-up given, go-ahead confirmed** |
 
 ## 13. External assets
 
@@ -291,4 +291,4 @@ After comparing two Ready children, Conner opens the winner. It arrives in the e
 - Do not exceed the global Metal preview budget or make every favorite and parent animate indefinitely.
 - Do not automate Cloudflare verification, auto-generate on restore, or broaden this into a Shadertoy/importer cleanup.
 - Do not rewrite unrelated editor, capture, cache, ARShader, or corpus systems as part of this upgrade.
-- Do not push local TrueISFEditor commits until the standing null_signal colleague heads-up is explicitly confirmed.
+- Do not push local TrueISFEditor commits until the standing null_signal colleague heads-up is explicitly confirmed. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**

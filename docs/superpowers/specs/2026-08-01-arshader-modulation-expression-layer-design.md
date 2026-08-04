@@ -36,8 +36,8 @@ button.
 
 ## 2. The model
 
-An expression-per-destination model, taken from a prior-art system's expression design (see
-prior-art research), with two additions.
+An expression-per-destination model, taken from a prior-art system's expression design,
+with two additions.
 
 Every writable destination may carry **one** compiled expression. Expressions read:
 

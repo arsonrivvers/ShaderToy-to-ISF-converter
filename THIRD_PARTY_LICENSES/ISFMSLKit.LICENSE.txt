@@ -9,6 +9,7 @@ ISFMSLKit also has several dependencies, whose licenses are summarized below, an
 - glslang- MIT, BSD, Apache
 - SPIRV-Cross- Apache
 - PINCache- Apache
+- PINOperation- Apache
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
@@ -26,7 +27,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
-PINCache- Apache
+PINCache and PINOperation- Apache
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 

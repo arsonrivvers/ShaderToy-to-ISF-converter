@@ -23,7 +23,7 @@
 - Keep every focused-child action available by pointer, keyboard, context menu, and VoiceOver custom action.
 - Do not show a percentage or ETA for unequal stages. Determinate progress counts terminal slots only.
 - Quiet means no provider event past the threshold while the provider process is confirmed alive. Silence alone is not a stall.
-- Do not push until the standing null_signal colleague heads-up is confirmed.
+- Do not push until the standing null_signal colleague heads-up is confirmed. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 

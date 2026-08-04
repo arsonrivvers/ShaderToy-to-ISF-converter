@@ -49,11 +49,14 @@ byte-identical, so there are 45 unique images across 46 files.
 
 ### Prior-art dossier — **not in this repo**
 
-Architecture and adoption research on a third-party commercial instrument, framed as "what to learn, what to port, and what to
-rebuild natively on Apple Silicon" for **ARShader 2.0**. Not superseded; it postdates the native
-pivot and its executive call is explicitly against adopting it as a dependency. Its two
-highest-leverage recommendations (an MCP surface around `EngineFacade`; generated controls and
-identity-safe presets from the ISF metadata `SlotCompiler` already parses) are unbuilt.
+Architecture and adoption research on a third-party commercial instrument, framed as "what to
+learn, what to port, and what to rebuild natively on Apple Silicon" for **ARShader 2.0**. It was
+**removed from this repository on 2026-08-03 at that developer's request** and is kept privately
+outside git; it is named here only so the gap in the inventory is explained rather than silent.
+
+Two of its recommendations are live and are ARShader's own to build, independent of the research:
+an MCP surface around `EngineFacade`, and generated controls plus identity-safe presets from the
+ISF metadata `SlotCompiler` already parses. Both are unbuilt.
 
 ### Moved into the normal pipeline, not into this folder
 

@@ -23,7 +23,7 @@
 - Do not claim that REMNANCE capabilities exist. This plan reserves the name but builds no temporal-memory engine.
 - Do not design or introduce a logo or app icon in this slice. The typographic wordmark is the only visual identity artifact in scope.
 - The `.worktrees/m2-slot-bank` branch must be merged or explicitly retired before execution because it modifies the same app and test directories this plan renames.
-- Preserve the operator's unrelated modification to the prior-art dossier under `docs/arshader/`.
+- Preserve the operator's unrelated modification to the imported prior-art dossier under `docs/arshader/`.
 
 ## File Structure
 
@@ -637,8 +637,8 @@ Any other hit must be corrected or explicitly justified in the completion summar
 
 - [ ] **Step 5: Commit Task 4 with explicit paths**
 
-Stage only documents intentionally updated in this task. Do not stage
-the prior-art dossier under `docs/arshader/`.
+Stage only documents intentionally updated in this task. Do not stage the operator-owned prior-art
+dossier under `docs/arshader/`.
 
 ```bash
 git add docs/superpowers/specs/2026-08-01-arshader-modulation-expression-layer-design.md \

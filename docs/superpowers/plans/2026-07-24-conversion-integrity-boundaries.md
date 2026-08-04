@@ -20,7 +20,7 @@
 - Use TDD: capture RED before implementation, then GREEN.
 - Full corpus compile verdicts must remain identical by ID to `docs/corpus-analysis-2026-07-09-pixel-baseline.txt`; pixel result must remain at least 64/78 OK-or-STATIC.
 - Stop and diagnose any corpus regression. Do not stack another conversion change on a broken render state.
-- Do not push. The standing `null_signal` courtesy-heads-up gate still applies to all local TrueISFEditor commits.
+- Do not push. The standing `null_signal` courtesy-heads-up gate still applies to all local TrueISFEditor commits. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 
@@ -446,4 +446,4 @@ After both tasks:
 7. Confirm ROADMAP items 1 and 2 alone are marked landed.
 8. Run the `gate` skill before declaring completion.
 9. No UI changed, so Mechanic and Client Success reviews are not triggered.
-10. Do not push until Conner confirms the `null_signal` courtesy heads-up.
+10. Do not push until Conner confirms the `null_signal` courtesy heads-up. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**

@@ -1,4 +1,8 @@
-#if DEBUG
+// Spyglass is a local-path package that exists only in the operator checkout (see
+// App/spyglass-local.yml), which is also the only place the SPYGLASS compilation condition is
+// defined. That keeps a clean clone compiling without the package; `DEBUG` keeps
+// the whole surface out of Release regardless.
+#if DEBUG && SPYGLASS
 import XCTest
 import ImageIO
 import Metal

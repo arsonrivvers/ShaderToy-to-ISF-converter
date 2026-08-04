@@ -6,7 +6,11 @@ Report suspected vulnerabilities via [GitHub Security Advisories](https://github
 (preferred) or by opening an issue asking for a private contact — please don't post exploit details
 in a public issue.
 
-## What the app does with your data
+## What the apps do with your data
+
+This repo ships **two** applications. Unless a bullet names ARShader, it describes TrueISFEditor.
+
+### TrueISFEditor
 
 - **Camera:** filter shaders auto-load the webcam as their image source. Frames are processed
   locally on the GPU and are never transmitted anywhere. The capture session stops itself when
@@ -20,3 +24,22 @@ in a public issue.
   (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), never on disk or in the repo.
 - The app makes no network requests of its own except fetching a Shadertoy page/API when you ask
   it to import a shader.
+
+### ARShader
+
+ARShader is the live performance instrument (`App/ARShader/`). It is a local renderer: it loads
+ISF shaders from disk, composites them, and draws to your screen.
+
+- **Camera:** same as above — filter shaders may open the webcam, frames stay on the GPU, and the
+  capture session stops when nothing samples it.
+- **Network: none.** ARShader makes no network requests at all. It has no importer, no AI provider,
+  and no telemetry.
+- **Agent capture surface (`InstrumentControlFacade`): DEBUG-only, and it serves nothing.** Debug
+  builds can expose a read-only capture of the instrument's own program and deck output to a local
+  agent tool. Three things bound it: the entire file is fenced `#if DEBUG && SPYGLASS`, so it is
+  absent from Release; the `SPYGLASS` condition is defined only by `App/spyglass-local.yml`, an
+  optional overlay that a clean clone does not apply, so a clone built from this repo does not
+  compile it at all; and nothing in the app opens a socket, starts a listener, or instantiates a
+  transport — the shipped binary links no networking stack. The surface is a capture *provider*,
+  not a server.
+- **Presets and shaders** are read from and written to your own disk only.

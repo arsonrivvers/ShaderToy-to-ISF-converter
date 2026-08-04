@@ -234,7 +234,7 @@ null_signal by VJ CYBERPATROLUNIT (MIT)"). **Caveat:** `src/modes/` sketches kee
 UPSTREAM licenses (~13 adapted from third parties per CREDITS.txt) — do not port mode code
 without checking the upstream. Everything listed above (composite.js, post.js, presets,
 interpreter, Electron layer) is original to the repo and cleanly MIT. Repo is currently
-private — courtesy heads-up to the colleague before shipping ported math.
+private — courtesy heads-up to the colleague before shipping ported math. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 

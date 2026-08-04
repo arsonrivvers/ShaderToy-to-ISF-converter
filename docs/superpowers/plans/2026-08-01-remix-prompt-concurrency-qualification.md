@@ -25,7 +25,7 @@
 - Before the 15-session viability screen, disclose roughly 1.1 million to 1.4 million shared-pool tokens and obtain separate approval.
 - Before the 45-session decision benchmark, disclose roughly 3.3 million to 4.2 million shared-pool tokens and obtain fresh approval.
 - Never frame subscription usage as a dollar cost and never fall back to a metered API.
-- Do not push until the standing null_signal colleague heads-up is confirmed.
+- Do not push until the standing null_signal colleague heads-up is confirmed. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 

@@ -9,7 +9,7 @@ final class LaunchPackTests: XCTestCase {
         let text = Acknowledgements.text
         // The attribution set required for binary distribution (BSD/Apache reproduce clauses).
         for component in ["ISFMSLKit", "VVMetalKit", "ISFGLSLGenerator", "exprtk", "nlohmann",
-                          "glslang", "SPIRV-Cross", "PINCache", "CodeMirror",
+                          "glslang", "SPIRV-Cross", "PINCache", "PINOperation", "CodeMirror",
                           "interactive-shader-format", "null_signal"] {
             XCTAssertTrue(text.contains(component), "acknowledgements missing \(component)")
         }

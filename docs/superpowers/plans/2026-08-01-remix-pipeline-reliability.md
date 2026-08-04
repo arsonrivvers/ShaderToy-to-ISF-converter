@@ -22,7 +22,7 @@
 - No live provider call is part of an automated test.
 - Every new Swift file used by the app tests must be added to `App/project.yml`, followed by `cd App && xcodegen generate`.
 - Do not touch the unrelated ARShader dossier or other concurrent work.
-- Do not push any TrueISFEditor commit until the standing null_signal colleague heads-up is confirmed.
+- Do not push any TrueISFEditor commit until the standing null_signal colleague heads-up is confirmed. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 
 ---
 

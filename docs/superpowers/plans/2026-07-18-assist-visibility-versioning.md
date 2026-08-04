@@ -13,7 +13,7 @@
 - Test/build command (Defender-safe path, exclusion covers `App/ddata`): `cd App && xcodebuild test -project TrueISFEditor.xcodeproj -scheme TrueISFEditor -derivedDataPath ./ddata ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`
 - **Every NEW file requires `cd App && xcodegen generate` before xcodebuild sees it** — a test run without it "succeeds" with zero cases.
 - TDD: write the failing test, see it fail, implement, see it pass, commit.
-- **NO `git push`** — standing hard stop until the null_signal colleague heads-up.
+- **NO `git push`** — standing hard stop until the null_signal colleague heads-up. **CLOSED 2026-08-03 — the heads-up was given and the colleague confirmed go-ahead (operator, this session).**
 - **No restage/relaunch of the app without announcing to Conner first** (memory rule `no-unannounced-ui-disruption`).
 - No absolute operator/file paths in code; match surrounding comment density and style.
 - Snapshot JSON stays backward-compatible: files without `kind` decode as `.legacy` — never a migration, never a crash.

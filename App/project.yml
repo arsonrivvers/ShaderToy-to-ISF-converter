@@ -1,4 +1,10 @@
 name: TrueISFEditor
+# The Spyglass agent-capture surface lives outside this repo and is therefore OPTIONAL: applied
+# only when SPYGLASS_LOCAL is set, so a clean clone and CI generate without it. See
+# App/spyglass-local.yml for the rationale and the two commands.
+include:
+  - path: spyglass-local.yml
+    enable: ${SPYGLASS_LOCAL}
 options:
   bundleIdPrefix: com.arsonrivvers
   deploymentTarget:
@@ -6,12 +12,6 @@ options:
 packages:
   ShadertoyISFKit:
     path: ../ShadertoyISFKit
-  # Spyglass lives outside this repo, so this path is relative to App/ and assumes the repo sits at
-  # ~/Desktop/AV_Projects/. Fragile by construction — a path dependency across two checkouts breaks
-  # if either moves. Deliberate for now: the package is pre-v1 and still changing daily, and
-  # vendoring it would fork it mid-build. Revisit once it stabilises.
-  Spyglass:
-    path: ../../../../Documents/_Projects/spyglass
 targets:
   TrueISFEditor:
     type: application
@@ -160,16 +160,7 @@ targets:
       - path: ARShader
     dependencies:
       - package: ShadertoyISFKit
-      # DEBUG-only in effect: every Spyglass call site in ARShader sits behind `#if DEBUG`, and
-      # Task 15 Step 1 proves a Release build opens no socket and writes no handshake.
-      - package: Spyglass
-        product: SpyglassHost
-      - package: Spyglass
-        product: SpyglassCore
-      - package: Spyglass
-        product: SpyglassCapture
-      - package: Spyglass
-        product: SpyglassProtocol
+      # Spyglass products are added by the optional spyglass-local.yml overlay.
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
         embed: true
         codeSign: true
@@ -222,17 +213,7 @@ targets:
     dependencies:
       - target: ARShader
       - package: ShadertoyISFKit
-      # This target recompiles the ARShader sources rather than only linking the host, so it needs
-      # the same Spyglass products the app target does — otherwise InstrumentControlFacade.swift
-      # fails to compile here while building fine in the app.
-      - package: Spyglass
-        product: SpyglassHost
-      - package: Spyglass
-        product: SpyglassCore
-      - package: Spyglass
-        product: SpyglassCapture
-      - package: Spyglass
-        product: SpyglassProtocol
+      # Spyglass products are added by the optional spyglass-local.yml overlay.
       - framework: ../vendor/prebuilt/ISFMSLKit.framework
         embed: true
         codeSign: true

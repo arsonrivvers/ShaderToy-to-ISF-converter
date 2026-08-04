@@ -8,6 +8,15 @@ on:
 # Corpus conformance (scripts/corpus-run.sh) stays a local tool: it fetches live Shadertoy content
 # (ToS + Cloudflare) and its fixtures are deliberately not checked in. CI covers the deterministic
 # surface: the conversion kit's unit suite and the full app test suite.
+#
+# EVERY step that pipes xcodebuild MUST `set -o pipefail` first. GitHub runs `run:` under `bash -e`,
+# which does NOT set pipefail, so `xcodebuild … | tail` reports *tail's* exit status — 0, always.
+# This job reported three green checkmarks over a log reading `** BUILD FAILED **` until 2026-08-03.
+# A green CI that cannot go red is worse than no CI.
+#
+# Signing is overridden here because the project pins CODE_SIGN_STYLE=Automatic and a
+# DEVELOPMENT_TEAM no runner (and no third-party clone) can satisfy. Ad-hoc keeps the test host
+# launchable; Debug already disables the hardened runtime, so library validation does not fight it.
 jobs:
   kit-tests:
     name: ShadertoyISFKit tests
@@ -35,11 +44,47 @@ jobs:
         # GitHub's Apple-silicon runners have a real Metal device; tests that still can't get one
         # guard with XCTSkip. CI=1 lets environment-sensitive tests detect the runner.
         run: |
+          set -o pipefail
           xcodebuild -project TrueISFEditor.xcodeproj -scheme TrueISFEditor \
             -destination 'platform=macOS,arch=arm64' \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES test | tail -200
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            test | tail -200
         env:
           CI: "1"
+
+  arshader-clean-clone:
+    name: ARShader builds from a clean clone
+    runs-on: macos-15
+    # This job is the enforcement behind SECURITY.md's claim that a clone built from this repo does
+    # not compile the Spyglass capture surface at all. Without it, nothing checked the ARShader
+    # target: the other jobs build only the TrueISFEditor scheme, so a regression inside ARShader
+    # would ship green. SPYGLASS_LOCAL is deliberately UNSET here — that is the whole point.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project without the Spyglass overlay
+        working-directory: App
+        run: xcodegen generate
+      - name: Assert the capture surface is absent from the generated project
+        working-directory: App
+        run: |
+          set -o pipefail
+          if grep -q -i spyglass TrueISFEditor.xcodeproj/project.pbxproj; then
+            echo "FAIL: a clean clone wired in Spyglass; the overlay is no longer optional."
+            exit 1
+          fi
+          echo "ok: 0 Spyglass references in a clean-clone project"
+      - name: Build ARShader
+        working-directory: App
+        run: |
+          set -o pipefail
+          xcodebuild -project TrueISFEditor.xcodeproj -scheme ARShader \
+            -destination 'platform=macOS,arch=arm64' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            build | tail -200
 
   release-build:
     name: Release configuration builds
@@ -54,6 +99,9 @@ jobs:
       - name: Build Release
         working-directory: App
         run: |
+          set -o pipefail
           xcodebuild -project TrueISFEditor.xcodeproj -scheme TrueISFEditor \
             -configuration Release -destination 'generic/platform=macOS' \
-            ARCHS=arm64 build | tail -50
+            ARCHS=arm64 \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            build | tail -50
