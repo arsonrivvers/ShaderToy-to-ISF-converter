@@ -45,7 +45,11 @@ final class LaunchPackTests: XCTestCase {
         // is compile-time. This pins the debug half + the flag's existence so the release branch
         // can't silently disappear in a refactor.
         XCTAssertTrue(AssistProviderFactory.codexAvailable)
-        XCTAssertTrue(AssistProviderFactory.make(kind: .codex) is CodexRunner)
-        XCTAssertTrue(AssistProviderFactory.make(kind: .claude) is ClaudeCodeRunner)
+        let codex = AssistProviderFactory.make(kind: .codex)
+        let claude = AssistProviderFactory.make(kind: .claude)
+        XCTAssertTrue(codex is CodexRunner)
+        XCTAssertTrue(claude is ClaudeCodeRunner)
+        XCTAssertTrue(codex is AssistDetailedProvider)
+        XCTAssertTrue(claude is AssistDetailedProvider)
     }
 }

@@ -24,8 +24,76 @@ private final class FakeProvider: AssistProvider {
 }
 
 @MainActor
+private final class BlockingProvider: AssistProvider {
+    private var continuations: [Int: CheckedContinuation<String, Error>] = [:]
+    private var nextID = 0
+    private(set) var callCount = 0
+    private(set) var cancellationCount = 0
+
+    func run(prompt: String, system: String, model: String?, timeout: TimeInterval,
+             onEvent: @escaping @Sendable (String) -> Void) async throws -> String {
+        let callID = nextID
+        nextID += 1
+        callCount += 1
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                continuations[callID] = continuation
+                if Task.isCancelled {
+                    cancel(callID: callID)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancel(callID: callID)
+            }
+        }
+    }
+
+    private func cancel(callID: Int) {
+        guard let continuation = continuations.removeValue(forKey: callID) else { return }
+        cancellationCount += 1
+        continuation.resume(throwing: CancellationError())
+    }
+}
+
+@MainActor
 final class RemixGeneratorTests: XCTestCase {
     private let isf = "/*{ \"ISFVSN\":\"2.0\" }*/\nvoid main(){ gl_FragColor=vec4(1.0); }"
+
+    func test_cancelWithTwoActiveAndThreeQueued_terminalizesEverySlotWithoutBackfill() async {
+        let provider = BlockingProvider()
+        let gen = RemixGenerator(
+            makeProvider: { provider },
+            model: nil,
+            maxConcurrent: 2,
+            systemProvider: { "" }
+        )
+        var children: [RemixNode] = []
+        let generation = Task { @MainActor in
+            await gen.generate(
+                parents: ["/*{A}*/"],
+                mode: .mutate,
+                steer: "",
+                batchSize: 5,
+                round: 1,
+                onChild: { children.append($0) }
+            )
+        }
+
+        while provider.callCount < 2 {
+            await Task.yield()
+        }
+        generation.cancel()
+        await generation.value
+
+        XCTAssertEqual(provider.callCount, 2)
+        XCTAssertEqual(provider.cancellationCount, 2)
+        XCTAssertEqual(children.count, 5)
+        XCTAssertTrue(children.allSatisfy {
+            if case .failed("cancelled") = $0.status { return true }
+            return false
+        })
+    }
 
     func test_generate_emitsOneChildPerBatchSlot() async {
         let provider = FakeProvider([.success("```glsl\n\(isf)\n```")])

@@ -3,7 +3,8 @@ import AppKit
 
 struct RemixChildCardView: View {
     @ObservedObject var model: RemixStudioModel
-    let node: RemixNode
+    let run: RemixChildRunRecord
+    let artifact: RemixNode?
     let position: Int
     let total: Int
     let openInEditor: (String) -> Void
@@ -19,9 +20,9 @@ struct RemixChildCardView: View {
             preview
                 .frame(minHeight: 180)
 
-            Text(node.label ?? node.id)
+            Text(artifact?.label ?? run.id)
                 .font(.headline)
-            Text(node.directive)
+            Text(run.request.directive)
                 .font(RemixAccessibleTextLayout.bodyFont)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -37,21 +38,21 @@ struct RemixChildCardView: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(
-                            model.workspace.focusedChildID == node.id
+                            model.workspace.focusedChildID == run.id
                                 ? Color.accentColor : Color.secondary.opacity(0.25),
-                            lineWidth: model.workspace.focusedChildID == node.id ? 3 : 1
+                            lineWidth: model.workspace.focusedChildID == run.id ? 3 : 1
                         )
                 }
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
-        .onTapGesture { model.workspace.focus(node.id) }
+        .onTapGesture { model.workspace.focus(run.id) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(RemixWorkspaceState.accessibilitySummary(
-            name: node.label ?? node.id,
+            name: artifact?.label ?? run.id,
             status: statusName,
             position: position,
             total: total,
-            directive: node.directive,
+            directive: run.request.directive,
             actions: ["Favorite", "Compare", "Hero", "Promote A", "Promote B", "Open"]
         ))
     }
@@ -60,21 +61,26 @@ struct RemixChildCardView: View {
     private var preview: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.12))
-            switch node.status {
-            case .generating:
-                ProgressView("Generating")
+            switch run.stage {
+            case .queued, .starting, .thinking, .receiving, .retrying, .extracting, .compiling:
+                ProgressView(run.stage.rawValue.capitalized)
             case .interrupted:
                 salvagePanel("Generation interrupted", actions: generationActions)
-            case .failed(let message):
-                salvagePanel("Compile failed: \(message)", actions: compileActions)
-            case .compiled:
-                if let failure = model.previewFailuresByNodeID[node.id] {
-                    salvagePanel("Preview unavailable: \(failure)", actions: previewActions)
-                } else {
+            case .cancelled:
+                salvagePanel("Generation cancelled", actions: generationActions)
+            case .failed:
+                salvagePanel(
+                    run.failureMessage ?? "Generation failed",
+                    actions: run.failureBoundary == .compile ? compileActions : generationActions
+                )
+            case .ready:
+                if let diagnostic = run.artifactID.flatMap({ model.previewStates[$0]?.diagnostic }) {
+                    salvagePanel("Preview unavailable: \(diagnostic)", actions: previewActions)
+                } else if let artifact {
                     RemixThumbnailView(
-                        isf: node.isfSource,
+                        isf: artifact.isfSource,
                         animating: model.shouldAnimate(
-                            node.id,
+                            run.id,
                             on: .canvas,
                             reduceMotion: reduceMotion
                         ),
@@ -83,19 +89,24 @@ struct RemixChildCardView: View {
                         inputValues: comparisonPreviewID.map {
                             comparisonCoordinator?.valuesForRenderer($0) ?? [:]
                         } ?? [:],
-                        onSnapshot: { model.storeSnapshot(id: node.id, image: $0) },
+                        reloadAttempt: model.previewStates[artifact.id]?.attempt ?? 0,
+                        onSnapshot: { model.storeSnapshot(id: run.id, image: $0) },
                         onPreviewFailure: {
-                            model.markPreviewFailure(id: node.id, message: $0)
+                            model.markPreviewFailed(artifactID: artifact.id, diagnostic: $0)
                         }
                     ) { valid, error in
-                        model.markCompileResult(id: node.id, valid: valid, error: error)
+                        if valid {
+                            model.markPreviewAvailable(artifactID: artifact.id)
+                        } else if let error {
+                            model.markPreviewFailed(artifactID: artifact.id, diagnostic: error)
+                        }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
         .confirmationDialog(
-            "Promote \(node.label ?? node.id) to Parent \(pendingPromotion == .a ? "A" : "B")?",
+            "Promote \(artifact?.label ?? run.id) to Parent \(pendingPromotion == .a ? "A" : "B")?",
             isPresented: Binding(
                 get: { pendingPromotion != nil },
                 set: { if !$0 { pendingPromotion = nil } }
@@ -103,7 +114,7 @@ struct RemixChildCardView: View {
         ) {
             if let pendingPromotion {
                 Button("Confirm Promote to Parent \(pendingPromotion == .a ? "A" : "B")") {
-                    model.promoteToParent(pendingPromotion, nodeID: node.id)
+                    model.promoteToParent(pendingPromotion, nodeID: run.id)
                     self.pendingPromotion = nil
                 }
             }
@@ -115,27 +126,36 @@ struct RemixChildCardView: View {
 
     @ViewBuilder
     private var cardActions: some View {
-        Button(model.lineage.isFavorite(node.id) ? "Unfavorite" : "Favorite") {
-            model.toggleFavorite(node.id)
+        Button(model.lineage.isFavorite(run.id) ? "Unfavorite" : "Favorite") {
+            model.toggleFavorite(run.id)
         }
-        Button(model.workspace.comparedChildIDs.contains(node.id) ? "Remove Compare" : "Compare") {
-            model.workspace.toggleComparison(node.id)
+        .disabled(artifact == nil)
+        Button(model.workspace.comparedChildIDs.contains(run.id) ? "Remove Compare" : "Compare") {
+            model.workspace.toggleComparison(run.id)
         }
-        Button(model.frozenPreviewIDs.contains(node.id) ? "Play Child" : "Freeze Child") {
-            model.setPreviewFrozen(!model.frozenPreviewIDs.contains(node.id), for: node.id)
+        .disabled(artifact == nil)
+        Button(model.frozenPreviewIDs.contains(run.id) ? "Play Child" : "Freeze Child") {
+            model.setPreviewFrozen(!model.frozenPreviewIDs.contains(run.id), for: run.id)
         }
-        Button("Hero") { model.workspace.showHero(node.id) }
+        .disabled(artifact == nil)
+        Button("Hero") { model.workspace.showHero(run.id) }
+            .disabled(artifact == nil)
         Button("Promote A") { pendingPromotion = .a }
+            .disabled(artifact == nil)
         Button("Promote B") { pendingPromotion = .b }
-        Button("Open") { openInEditor(node.isfSource) }
+            .disabled(artifact == nil)
+        Button("Open") { if let artifact { openInEditor(artifact.isfSource) } }
+            .disabled(artifact == nil)
     }
 
     private var generationActions: [RemixSalvageButton] {
         [
             RemixSalvageButton(title: "Retry Child") {
-                Task { await model.retryChild(id: node.id) }
+                Task { await model.retryChild(id: run.id) }
             },
-            RemixSalvageButton(title: "Open Source") { openInEditor(node.isfSource) },
+            RemixSalvageButton(title: "Open Source") {
+                if let source = run.candidateSource { openInEditor(source) }
+            },
         ]
     }
 
@@ -148,21 +168,27 @@ struct RemixChildCardView: View {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(
-                    model.compileDiagnostic(for: node.id) ?? "Compile failed",
+                    model.compileDiagnostic(for: run.id) ?? "Compile failed",
                     forType: .string
                 )
             },
-            RemixSalvageButton(title: "Open to Fix") { openInEditor(node.isfSource) },
+            RemixSalvageButton(title: "Open to Fix") {
+                if let source = run.candidateSource { openInEditor(source) }
+            },
             RemixSalvageButton(title: "Retry Child") {
-                Task { await model.retryChild(id: node.id) }
+                Task { await model.retryChild(id: run.id) }
             },
         ]
     }
 
     private var previewActions: [RemixSalvageButton] {
         [
-            RemixSalvageButton(title: "Retry Preview") { model.retryPreview(id: node.id) },
-            RemixSalvageButton(title: "Open in Editor") { openInEditor(node.isfSource) },
+            RemixSalvageButton(title: "Retry Preview") {
+                if let artifact { model.retryPreview(artifactID: artifact.id) }
+            },
+            RemixSalvageButton(title: "Open in Editor") {
+                if let artifact { openInEditor(artifact.isfSource) }
+            },
         ]
     }
 
@@ -179,12 +205,15 @@ struct RemixChildCardView: View {
     }
 
     private var statusName: String {
-        switch node.status {
-        case .generating: return "Generating"
+        switch run.stage {
+        case .queued, .starting, .thinking, .receiving, .retrying, .extracting, .compiling:
+            return run.stage.rawValue.capitalized
         case .interrupted: return "Interrupted"
+        case .cancelled: return "Cancelled"
         case .failed: return "Failed"
-        case .compiled:
-            return model.previewFailuresByNodeID[node.id] == nil ? "Compiled" : "Preview unavailable"
+        case .ready:
+            return artifact.flatMap { model.previewStates[$0.id] }?.stage == .failed
+                ? "Preview unavailable" : "Ready"
         }
     }
 }

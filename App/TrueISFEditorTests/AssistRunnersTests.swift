@@ -25,7 +25,9 @@ final class CodexRunnerTests: XCTestCase {
     // (read-only ≠ no-file-read; only the network-off default stops exfiltration).
     func testCodexSandboxIsPinnedReadOnlyAndNeverEscalated() async throws {
         XCTAssertEqual(CodexRunner.sandboxMode, "read-only")
-        let fake = ClaudeCodeRunnerTests.FakeProcess(stdout: "{}", exitCode: 0, stderr: "")
+        let fake = ClaudeCodeRunnerTests.FakeProcess(
+            stdout: #"{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}"#,
+            exitCode: 0, stderr: "")
         let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })
         _ = try await runner.run(prompt: "P", system: "S", model: nil)
         let args = runner.lastArgsForTest
@@ -46,6 +48,60 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(final, "DONE")
     }
 
+    func testCodexDetailedAgentMessageIsSuccessfulAgentMessageResponse() async throws {
+        let stream = """
+        {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"DONE"}}
+        """
+        let runner = CodexRunner(
+            binary: URL(fileURLWithPath: "/x/codex"),
+            process: { ClaudeCodeRunnerTests.FakeProcess(stdout: stream, exitCode: 0, stderr: "") }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Codex runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        let result = try await detailed.runDetailed(
+            prompt: "P", system: "S", model: nil, timeout: 1,
+            onEvent: { events.append($0) }, onRawLine: { _ in }
+        )
+        XCTAssertEqual(result.response, "DONE")
+        XCTAssertEqual(result.source, .agentMessage)
+        XCTAssertTrue(result.observedSuccessfulResult)
+        XCTAssertEqual(events.events, [
+            .assistantMessage(
+                messageID: "item_0", stopReason: "end_turn",
+                blocks: [AssistTextBlock(index: 0, text: "DONE")]
+            ),
+            .successfulResult(""),
+            .processExited(0),
+        ])
+    }
+
+    func testCodexDetailedErrorOverridesEarlierAgentMessage() async {
+        let stream = """
+        {"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"DONE"}}
+        {"type":"turn.failed","error":{"message":"quota exhausted"}}
+        """
+        let runner = CodexRunner(
+            binary: URL(fileURLWithPath: "/x/codex"),
+            process: { ClaudeCodeRunnerTests.FakeProcess(stdout: stream, exitCode: 0, stderr: "") }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Codex runner must expose the typed detailed contract")
+        }
+        do {
+            _ = try await detailed.runDetailed(
+                prompt: "P", system: "S", model: nil, timeout: 1,
+                onEvent: { _ in }, onRawLine: { _ in }
+            )
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "quota exhausted")
+        } catch {
+            XCTFail("wrong error: \(error)")
+        }
+    }
+
     func testCodexTimeoutWithoutAgentMessageStillThrows() async {
         let partial = "{\"type\":\"item.started\",\"item\":{\"type\":\"agent_message\"}}"
         let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
@@ -55,8 +111,38 @@ final class CodexRunnerTests: XCTestCase {
         catch { XCTFail("wrong error \(error)") }
     }
 
+    func testCodexTimeoutWithErrorEventSurfacesProviderFailure() async {
+        let partial = #"{"type":"error","message":"usage limit reached"}"#
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: nil)
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "usage limit reached")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
+    func testCodexTimeoutWithTurnFailedEventSurfacesProviderFailure() async {
+        let partial = #"{"type":"turn.failed","error":{"message":"quota exhausted"}}"#
+        let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"),
+                                 process: { ClaudeCodeRunnerTests.TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: nil)
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "quota exhausted")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
     func testCodexDefaultModelOmitsDashM() async throws {
-        let fake = ClaudeCodeRunnerTests.FakeProcess(stdout: "{}", exitCode: 0, stderr: "")
+        let fake = ClaudeCodeRunnerTests.FakeProcess(
+            stdout: #"{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}"#,
+            exitCode: 0, stderr: "")
         let runner = CodexRunner(binary: URL(fileURLWithPath: "/x/codex"), process: { fake })
         _ = try await runner.run(prompt: "P", system: "", model: nil)
         XCTAssertFalse(runner.lastArgsForTest.contains("-m"))

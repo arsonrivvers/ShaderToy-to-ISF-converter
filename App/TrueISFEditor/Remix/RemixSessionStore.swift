@@ -29,7 +29,7 @@ struct RemixSessionStore {
         do {
             let data = try Data(contentsOf: fileURL)
             let session = try JSONDecoder().decode(RemixSession.self, from: data)
-            return .session(session.normalizedAfterRestore())
+            return .session(session)
         } catch {
             let quarantinedURL = availableQuarantineURL()
             try fileManager.moveItem(at: fileURL, to: quarantinedURL)
@@ -43,7 +43,7 @@ struct RemixSessionStore {
             withIntermediateDirectories: true
         )
 
-        var bounded = session
+        var bounded = session.boundedForPersistence()
         bounded.batchHistory = Array(bounded.batchHistory.suffix(20))
         bounded.transcript = Array(bounded.transcript.suffix(2_000))
 

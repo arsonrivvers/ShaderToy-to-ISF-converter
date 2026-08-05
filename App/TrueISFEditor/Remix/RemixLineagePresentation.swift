@@ -84,6 +84,23 @@ enum RemixLineagePresentation {
         }
     }
 
+    static func activityActions(for summary: RemixRunSummary, canStop: Bool) -> [String] {
+        if canStop, summary.terminalCount < summary.totalCount {
+            return ["Stop"]
+        }
+        guard summary.totalCount > 0, summary.terminalCount == summary.totalCount else {
+            return []
+        }
+        var actions: [String] = []
+        if summary.stageCounts[.failed, default: 0] > 0 {
+            actions.append("Retry All Failed")
+        }
+        if summary.stageCounts[.interrupted, default: 0] > 0 {
+            actions.append("Retry Interrupted Batch")
+        }
+        return actions
+    }
+
     static func compactActivityStatus(for state: RemixActivityState) -> String {
         state.summary.compactStatus
     }
@@ -111,6 +128,25 @@ enum RemixLineagePresentation {
         }
     }
 
+    static func announcement(
+        from previous: RemixRunSummary,
+        to current: RemixRunSummary
+    ) -> String? {
+        guard current.totalCount > 0,
+              current.terminalCount == current.totalCount,
+              previous.terminalCount < previous.totalCount
+        else {
+            return nil
+        }
+        let readyCount = current.stageCounts[.ready, default: 0]
+        if readyCount == current.totalCount {
+            return readyCount == 1
+                ? "Generation complete. 1 child is ready."
+                : "Generation complete. \(readyCount) children are ready."
+        }
+        return current.activitySummary(activeProviderCount: 0).accessibilityAnnouncement
+    }
+
     static func failureRows(
         nodes: [RemixNode],
         compileDiagnosticsByNodeID: [String: String]
@@ -122,6 +158,30 @@ enum RemixLineagePresentation {
                 id: node.id,
                 title: displayName(for: node),
                 message: compileDiagnostic ?? message,
+                actions: compileDiagnostic == nil
+                    ? ["Retry This Child"]
+                    : [
+                        "View Compile Summary",
+                        "Copy Diagnostic",
+                        "Open Source in Editor to Fix",
+                        "Retry This Child",
+                    ]
+            )
+        }
+    }
+
+    static func failureRows(records: [RemixChildRunRecord])
+        -> [RemixActivityFailurePresentation]
+    {
+        records.compactMap { record in
+            guard record.stage == .failed else { return nil }
+            let compileDiagnostic = record.failureBoundary == .compile
+                ? record.compileDiagnostic
+                : nil
+            return RemixActivityFailurePresentation(
+                id: record.id,
+                title: record.id,
+                message: compileDiagnostic ?? record.failureMessage ?? "Failed",
                 actions: compileDiagnostic == nil
                     ? ["Retry This Child"]
                     : [

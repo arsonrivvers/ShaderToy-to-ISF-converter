@@ -98,6 +98,9 @@ targets:
       - TrueISFEditor/DiagnosticsModel.swift
       - TrueISFEditor/CodeEditorView.swift
       - TrueISFEditor/ShaderAssist/AssistProvider.swift
+      - TrueISFEditor/ShaderAssist/AssistRunEvent.swift
+      - TrueISFEditor/ShaderAssist/AssistResponseAssembler.swift
+      - TrueISFEditor/ShaderAssist/AssistProviderCompatibilityAdapter.swift
       - TrueISFEditor/ShaderAssist/AssistProviderFactory.swift
       - TrueISFEditor/ShaderAssist/ClaudeCodeRunner.swift
       - TrueISFEditor/ShaderAssist/CodexRunner.swift
@@ -106,10 +109,21 @@ targets:
       - TrueISFEditor/Acknowledgements.swift
       - TrueISFEditor/ShaderAssist/ShaderAssistViewModel.swift
       - TrueISFEditor/Views/AssistProgressStrip.swift
+      - path: TrueISFEditorTests/Fixtures/claude-empty-result-complete-assistant.jsonl
+        buildPhase: resources
+      - path: TrueISFEditorTests/Fixtures/remix-2026-08-01-empty-result-session-v1.json
+        buildPhase: resources
+      - path: TrueISFEditorTests/Fixtures/remix-schema-v2-mid-batch.json
+        buildPhase: resources
       - TrueISFEditor/Remix/RemixNode.swift
+      - TrueISFEditor/Remix/RemixChildRunRecord.swift
+      - TrueISFEditor/Remix/LegacyRemixSessionV1.swift
       - TrueISFEditor/Remix/RemixDirectives.swift
       - TrueISFEditor/Remix/RemixPrompt.swift
       - TrueISFEditor/Remix/RemixResponseParser.swift
+      - TrueISFEditor/Remix/RemixLegacyRecovery.swift
+      - TrueISFEditor/Remix/RemixCompiler.swift
+      - TrueISFEditor/Remix/RemixBatchRunController.swift
       - TrueISFEditor/Remix/RemixGenerator.swift
       - TrueISFEditor/Remix/RemixLineage.swift
       - TrueISFEditor/Remix/RemixStudioModel.swift
@@ -122,6 +136,7 @@ targets:
       - TrueISFEditor/Remix/RemixSession.swift
       - TrueISFEditor/Remix/RemixSessionStore.swift
       - TrueISFEditor/Remix/RemixActivity.swift
+      - TrueISFEditor/Remix/RemixPreviewState.swift
       - TrueISFEditor/Remix/RemixParentLoadState.swift
       - TrueISFEditor/Remix/RemixBreedingBayPresentation.swift
       - TrueISFEditor/Remix/RemixComparisonCoordinator.swift
@@ -244,6 +259,9 @@ schemes:
         TrueISFEditorTests: [test]
     test:
       targets: [TrueISFEditorTests]
+      environmentVariables:
+        - variable: RUN_NATIVE_REMIX_COMPILER
+          value: "${RUN_NATIVE_REMIX_COMPILER}"
   ARShader:
     build:
       targets:

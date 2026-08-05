@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "round": 3,
+  "seedCounter": 1,
+  "parentAID": "seed-0",
+  "parentBID": null,
+  "parentHistory": [],
+  "mode": "crossover",
+  "steer": "mid-batch",
+  "batchSize": 7,
+  "currentRuns": [
+    {
+      "id": "r3-0", "round": 3, "slot": 0,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"queued","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "queued", "queuedAt": 100, "startedAt": null, "lastEventAt": null,
+      "providerCompletedAt": null, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+      "workerLabel": null, "queuePosition": 0, "receivedBytes": 0, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": null, "diagnosticResponse": null,
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-1", "round": 3, "slot": 1,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"starting","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "starting", "queuedAt": 100, "startedAt": 101, "lastEventAt": 101,
+      "providerCompletedAt": null, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+      "workerLabel": "Worker 1", "queuePosition": 1, "receivedBytes": 0, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": null, "diagnosticResponse": null,
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-2", "round": 3, "slot": 2,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"thinking","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "thinking", "queuedAt": 100, "startedAt": 101, "lastEventAt": 102,
+      "providerCompletedAt": null, "terminalAt": null, "provider": "claude", "model": "sonnet-test",
+      "workerLabel": "Worker 2", "queuePosition": 2, "receivedBytes": 0, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": null, "diagnosticResponse": "thinking evidence",
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-3", "round": 3, "slot": 3,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"receiving","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "receiving", "queuedAt": 100, "startedAt": 101, "lastEventAt": 103,
+      "providerCompletedAt": null, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+      "workerLabel": "Worker 1", "queuePosition": 3, "receivedBytes": 73, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": null, "diagnosticResponse": "partial response evidence",
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-4", "round": 3, "slot": 4,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"retrying","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "retrying", "queuedAt": 100, "startedAt": 101, "lastEventAt": 104,
+      "providerCompletedAt": null, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+      "workerLabel": "Worker 1", "queuePosition": 4, "receivedBytes": 91, "apiRetryCount": 2,
+      "lastProviderNotice": "rate limited; retrying", "candidateSource": null, "diagnosticResponse": "partial retry response",
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-5", "round": 3, "slot": 5,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"extracting","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "extracting", "queuedAt": 100, "startedAt": 101, "lastEventAt": 105,
+      "providerCompletedAt": 105, "terminalAt": null, "provider": "claude", "model": "sonnet-test",
+      "workerLabel": "Worker 2", "queuePosition": 5, "receivedBytes": 120, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": "extracting-candidate", "diagnosticResponse": "authoritative response",
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    },
+    {
+      "id": "r3-6", "round": 3, "slot": 6,
+      "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"compiling","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+      "stage": "compiling", "queuedAt": 100, "startedAt": 101, "lastEventAt": 106,
+      "providerCompletedAt": 105, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+      "workerLabel": "Worker 1", "queuePosition": 6, "receivedBytes": 131, "apiRetryCount": 0,
+      "lastProviderNotice": null, "candidateSource": "compiling-candidate", "diagnosticResponse": "complete response",
+      "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+    }
+  ],
+  "batchHistory": [
+    {
+      "round": 3,
+      "runs": [
+        {
+          "id": "r3-6", "round": 3, "slot": 6,
+          "request": {"parentIDs":["seed-0"],"parentSources":["seed-source"],"mode":"crossover","steer":"mid-batch","directive":"compiling","settings":{"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]}},
+          "stage": "compiling", "queuedAt": 100, "startedAt": 101, "lastEventAt": 106,
+          "providerCompletedAt": 105, "terminalAt": null, "provider": "codex", "model": "gpt-test",
+          "workerLabel": "Worker 1", "queuePosition": 6, "receivedBytes": 131, "apiRetryCount": 0,
+          "lastProviderNotice": null, "candidateSource": "compiling-candidate", "diagnosticResponse": "complete response",
+          "failureBoundary": null, "failureMessage": null, "compileDiagnostic": null, "artifactID": null
+        }
+      ]
+    }
+  ],
+  "lineage": {
+    "nodes": {
+      "seed-0": {"id":"seed-0","isfSource":"seed-source","parents":[],"mode":"crossover","steer":"","directive":"seed","round":0,"status":{"compiled":{}},"label":"Seed"}
+    },
+    "order": ["seed-0"],
+    "favorites": []
+  },
+  "workspace": {
+    "canvasMode": "grid", "focusedChildID": "r3-5", "comparedChildIDs": [], "heroChildID": null,
+    "collapsedZones": [], "zoneWidths": ["breedingBay",280,"lineage",300,"activity",180],
+    "previewsPaused": false, "preFocusCollapsed": null, "preFocusWidths": null
+  },
+  "selectedLineageNodeID": null,
+  "crossoverSettings": {"balance":0.5,"variation":0.4,"traitSources":{},"enabledDirectives":[]},
+  "activity": {"idle": {}},
+  "pendingParentRequest": null,
+  "transcript": ["[r3-4] rate limited; retrying", "[r3-5] authoritative response received"]
+}

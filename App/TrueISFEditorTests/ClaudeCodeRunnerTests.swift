@@ -21,6 +21,7 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         XCTAssertEqual(args.first, "-p")
         XCTAssertTrue(args.contains("--output-format")); XCTAssertTrue(args.contains("stream-json"))
         XCTAssertTrue(args.contains("--verbose"))
+        XCTAssertTrue(args.contains("--include-partial-messages"))
         XCTAssertTrue(args.contains("--model")); XCTAssertTrue(args.contains("sonnet"))
         XCTAssertTrue(args.contains("--append-system-prompt")); XCTAssertTrue(args.contains("S"))
         XCTAssertTrue(args.contains("P"))
@@ -49,14 +50,73 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         XCTAssertFalse(args.contains("--permission-mode"))
     }
 
-    func testForwardsStreamLinesAsEvents() async throws {
-        let json = "{\"type\":\"system\"}\n{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n{\"type\":\"result\",\"result\":\"DONE\"}"
+    func testPartialStreamEventsDoNotInflateLegacyCallbackCount() async throws {
+        let json = """
+        {"type":"system","subtype":"init"}
+        {"type":"stream_event","event":{"type":"content_block_start","index":0}}
+        {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}},"message_id":"m1"}
+        {"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}
+        {"type":"result","is_error":false,"result":"DONE"}
+        """
         let fake = FakeProcess(stdout: json, exitCode: 0, stderr: "")
         let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"), process: { fake })
         let box = EventBox()
         let final = try await runner.run(prompt: "P", system: "S", model: "m") { line in box.append(line) }
         XCTAssertEqual(final, "DONE")                       // result event preferred
-        XCTAssertEqual(box.lines.count, 3)                  // every line streamed to the terminal
+        XCTAssertEqual(box.lines.count, 3)                  // same system/assistant/result legacy contract
+        XCTAssertFalse(box.lines.contains { $0.contains("stream_event") })
+    }
+
+    func testDetailedRunDecodesPartialDeltaAndKeepsAllRawLines() async throws {
+        let json = """
+        {"type":"system","subtype":"init","session_id":"s1"}
+        {"type":"system","subtype":"api_retry","attempt":2,"message":"Rate limit reached"}
+        {"type":"stream_event","message_id":"m1","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"hi"}}}
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"hi"}]}}
+        {"type":"result","is_error":false,"result":""}
+        """
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { FakeProcess(stdout: json, exitCode: 0, stderr: "") }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Claude runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        let raw = EventBox()
+        let result = try await detailed.runDetailed(
+            prompt: "P", system: "S", model: "m", timeout: 1,
+            onEvent: { events.append($0) }, onRawLine: { raw.append($0) }
+        )
+        XCTAssertEqual(result.response, "hi")
+        XCTAssertEqual(result.source, .assistantMessage)
+        XCTAssertTrue(events.events.contains(.sessionStarted(id: "s1")))
+        XCTAssertTrue(events.events.contains(.apiRetry(attempt: 2, message: "Rate limit reached")))
+        XCTAssertTrue(events.events.contains(.textDelta(messageID: "m1", blockIndex: 2, text: "hi")))
+        XCTAssertEqual(raw.lines.count, 5)
+    }
+
+    func testEmptyResultReturnsCompleteAssistantText() async throws {
+        let assistant = "/*{\"ISFVSN\":\"2.0\"}*/\nvoid main(){}"
+        let assistantObject: [String: Any] = [
+            "type": "assistant",
+            "message": [
+                "id": "m1", "stop_reason": "end_turn",
+                "content": [["type": "text", "text": assistant]]
+            ]
+        ]
+        let assistantLine = String(
+            data: try JSONSerialization.data(withJSONObject: assistantObject), encoding: .utf8
+        )!
+        let json = assistantLine + "\n{\"type\":\"result\",\"is_error\":false,\"result\":\"\"}"
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { FakeProcess(stdout: json, exitCode: 0, stderr: "") }
+        )
+        let response = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(response, assistant)
+        XCTAssertTrue(runner.lastArgsForTest.contains("--include-partial-messages"))
     }
 
     func testClaudeFinalFallsBackToAssistantTextWhenNoResult() {
@@ -151,6 +211,34 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         catch { XCTFail("wrong error \(error)") }
     }
 
+    func testTimeoutWithErrorResultSurfacesProviderFailure() async {
+        let partial = #"{"type":"result","is_error":true,"result":"provider rejected it"}"#
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: "m")
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "provider rejected it")
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
+    func testTimeoutWithEmptySuccessfulResultButNoAssistantStillThrows() async {
+        let partial = #"{"type":"result","is_error":false,"result":""}"#
+        let runner = ClaudeCodeRunner(binary: URL(fileURLWithPath: "/x/claude"),
+                                      process: { TimingOutProcess(partial: partial) })
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: "m")
+            XCTFail("expected timeout")
+        } catch AssistRunError.timedOut {
+            // Successful completion evidence alone cannot manufacture a response.
+        } catch {
+            XCTFail("wrong error \(error)")
+        }
+    }
+
     func testResultEventExtractorIgnoresAssistantText() {
         XCTAssertNil(ClaudeCodeRunner.resultEvent(fromStreamJSON:
             "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"AB\"}]}}"))
@@ -173,6 +261,39 @@ final class ClaudeCodeRunnerTests: XCTestCase {
                                  stderr: "", exitCode: 15)
         }
         func cancel() { cancelCalled = true; sema.signal() }
+    }
+
+    final class EmptyResultLingeringProcess: ProcessRunning, @unchecked Sendable {
+        private let sema = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var _cancelCalled = false
+        var cancelCalled: Bool { lock.lock(); defer { lock.unlock() }; return _cancelCalled }
+        private let stdout = """
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}
+        {"type":"result","is_error":false,"result":""}
+        """
+
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            stdout.split(separator: "\n").forEach { onLine(String($0)) }
+            sema.wait()
+            return ProcessOutput(stdout: stdout, stderr: "", exitCode: 15)
+        }
+
+        func cancel() {
+            lock.lock(); _cancelCalled = true; lock.unlock()
+            sema.signal()
+        }
+    }
+
+    func testEmptyResultStillArmsTeardownGrace() async throws {
+        let process = EmptyResultLingeringProcess()
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"), process: { process }, teardownGrace: 0.01
+        )
+        let response = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(response, "ok")
+        XCTAssertTrue(process.cancelCalled)
     }
 
     /// The hang Conner hit: goals JSON streamed ("done in 160.4s" in the Activity pane) but the
@@ -201,6 +322,52 @@ final class ClaudeCodeRunnerTests: XCTestCase {
         XCTAssertEqual(final, "ok")
     }
 
+    func testNonZeroExitAfterEmptySuccessfulResultSalvagesCompleteAssistant() async throws {
+        let json = """
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}
+        {"type":"result","is_error":false,"result":""}
+        """
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { FakeProcess(stdout: json, exitCode: 15, stderr: "terminated") }
+        )
+        let response = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(response, "ok")
+    }
+
+    func testTimeoutAfterEmptySuccessfulResultSalvagesCompleteAssistant() async throws {
+        let partial = """
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}
+        {"type":"result","is_error":false,"result":""}
+        """
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { TimingOutProcess(partial: partial) }
+        )
+        let response = try await runner.run(prompt: "P", system: "S", model: "m")
+        XCTAssertEqual(response, "ok")
+    }
+
+    func testErrorResultOverridesEarlierSuccessfulResponse() async {
+        let json = """
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"looks valid"}]}}
+        {"type":"result","is_error":false,"result":"looks valid"}
+        {"type":"result","is_error":true,"result":"provider rejected it"}
+        """
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"),
+            process: { FakeProcess(stdout: json, exitCode: 0, stderr: "") }
+        )
+        do {
+            _ = try await runner.run(prompt: "P", system: "S", model: "m")
+            XCTFail("expected provider failure")
+        } catch let AssistRunError.processFailed(message) {
+            XCTAssertEqual(message, "provider rejected it")
+        } catch {
+            XCTFail("wrong error: \(error)")
+        }
+    }
+
     /// An is_error result is a FAILED run — it must never be treated as a completed answer
     /// (neither by the timeout salvage nor by the non-zero-exit rescue).
     func testErrorResultEventIsNeverTreatedAsCompletion() {
@@ -222,6 +389,44 @@ final class ClaudeCodeRunnerTests: XCTestCase {
                           "post-exit pipe drain must be bounded, not wait out the orphan")
     }
 
+    /// Production regression (2026-08-03): Claude emitted its complete terminal result object
+    /// without a trailing newline, then kept the pipe open. Newline-only delivery hid completion
+    /// from the runner until the 420-second timeout forced EOF. A complete JSON frame must stream
+    /// immediately so the runner can arm its short teardown grace.
+    func testRealProcessStreamsCompleteJSONWithoutTrailingNewlineWhilePipeStaysOpen() throws {
+        let process = RealProcess()
+        let lines = EventBox()
+        let start = Date()
+        let out = try process.run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            args: ["-c", #"printf '{\"type\":\"result\",\"result\":\"ok\"}'; sleep 30"#],
+            timeout: 2,
+            onLine: { line in
+                lines.append(line)
+                process.cancel()
+            }
+        )
+
+        XCTAssertEqual(lines.lines, [#"{"type":"result","result":"ok"}"#])
+        XCTAssertNotEqual(out.exitCode, 0)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "complete JSON must stream before the timeout; RealProcess may then use its bounded 3s pipe drain")
+    }
+
+    /// If the CLI later finishes its delimiter as CRLF in separate writes, the eagerly emitted
+    /// terminal frame must not be followed by a synthetic raw `"\r"` event.
+    func testRealProcessConsumesSplitCRLFAfterUnterminatedTerminalFrame() throws {
+        let lines = EventBox()
+        _ = try RealProcess().run(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            args: ["-c", #"printf '{\"type\":\"result\",\"result\":\"ok\"}'; sleep 0.1; printf '\r'; sleep 0.1; printf '\n'"#],
+            timeout: 2,
+            onLine: { lines.append($0) }
+        )
+
+        XCTAssertEqual(lines.lines, [#"{"type":"result","result":"ok"}"#])
+    }
+
     /// Blocks in run() until cancel() fires — stands in for a long-running CLI that the user stops.
     /// `hasStarted` is a thread-safe flag (not a semaphore) so the test can await it without blocking
     /// the main actor that the @MainActor runner body needs to execute.
@@ -239,6 +444,151 @@ final class ClaudeCodeRunnerTests: XCTestCase {
             return ProcessOutput(stdout: "", stderr: "", exitCode: 15)   // SIGTERM-style nonzero exit
         }
         func cancel() { lock.lock(); _cancelCalled = true; lock.unlock(); release.signal() }
+    }
+
+    final class LifecycleTimingOutProcess: ProcessLifecycleReporting, @unchecked Sendable {
+        private let lock = NSLock()
+        private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
+        private let partial = """
+        {"type":"assistant","message":{"id":"m1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}
+        {"type":"result","is_error":false,"result":""}
+        """
+
+        func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
+            lock.lock(); lifecycleHandler = handler; lock.unlock()
+        }
+
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            lock.lock(); let handler = lifecycleHandler; lock.unlock()
+            handler?(.started(pid: 42))
+            partial.split(separator: "\n").forEach { onLine(String($0)) }
+            handler?(.exited(status: 15))
+            throw AssistRunError.timedOut(partialStdout: partial)
+        }
+    }
+
+    final class LifecycleBlockingProcess: ProcessLifecycleReporting, @unchecked Sendable {
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
+        private var _started = false
+        var hasStarted: Bool { lock.lock(); defer { lock.unlock() }; return _started }
+
+        func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
+            lock.lock(); lifecycleHandler = handler; lock.unlock()
+        }
+
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            lock.lock(); _started = true; let handler = lifecycleHandler; lock.unlock()
+            handler?(.started(pid: 43))
+            release.wait()
+            handler?(.exited(status: 15))
+            return ProcessOutput(stdout: "", stderr: "", exitCode: 15)
+        }
+
+        func cancel() { release.signal() }
+    }
+
+    final class LateExitTimingOutProcess: ProcessLifecycleReporting, @unchecked Sendable {
+        private let lock = NSLock()
+        private let releaseExit = DispatchSemaphore(value: 0)
+        private var lifecycleHandler: (@Sendable (ProcessLifecycleEvent) -> Void)?
+
+        func setLifecycleHandler(_ handler: @escaping @Sendable (ProcessLifecycleEvent) -> Void) {
+            lock.lock(); lifecycleHandler = handler; lock.unlock()
+        }
+
+        func run(executable: URL, args: [String], timeout: TimeInterval,
+                 onLine: @escaping @Sendable (String) -> Void) throws -> ProcessOutput {
+            lock.lock(); let handler = lifecycleHandler; lock.unlock()
+            handler?(.started(pid: 44))
+            DispatchQueue.global().async { [releaseExit] in
+                releaseExit.wait()
+                handler?(.exited(status: 15))
+            }
+            throw AssistRunError.timedOut(partialStdout: "")
+        }
+
+        func allowLateExit() { releaseExit.signal() }
+    }
+
+    func testDetailedTimeoutPrecedesObservedProcessExit() async throws {
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"), process: { LifecycleTimingOutProcess() }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Claude runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        let result = try await detailed.runDetailed(
+            prompt: "P", system: "S", model: nil, timeout: 1,
+            onEvent: { events.append($0) }, onRawLine: { _ in }
+        )
+        XCTAssertEqual(result.response, "ok")
+        let timedOut = try XCTUnwrap(events.events.firstIndex(of: .timedOut))
+        let exited = try XCTUnwrap(events.events.firstIndex(of: .processExited(15)))
+        XCTAssertLessThan(timedOut, exited)
+    }
+
+    func testDetailedCancellationPrecedesObservedProcessExit() async throws {
+        let process = LifecycleBlockingProcess()
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"), process: { process }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Claude runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        let task = Task {
+            try await detailed.runDetailed(
+                prompt: "P", system: "S", model: nil, timeout: 1,
+                onEvent: { events.append($0) }, onRawLine: { _ in }
+            )
+        }
+        for _ in 0..<300 where !process.hasStarted {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(process.hasStarted)
+        task.cancel()
+        do { _ = try await task.value; XCTFail("expected cancellation") }
+        catch is CancellationError { /* expected */ }
+        catch { XCTFail("wrong error: \(error)") }
+        let cancelled = try XCTUnwrap(events.events.firstIndex(of: .cancelled))
+        let exited = try XCTUnwrap(events.events.firstIndex(of: .processExited(15)))
+        XCTAssertLessThan(cancelled, exited)
+    }
+
+    func testDetailedTimeoutDeliversExitThatArrivesAfterEarlyFlushExactlyOnce() async throws {
+        let process = LateExitTimingOutProcess()
+        let runner = ClaudeCodeRunner(
+            binary: URL(fileURLWithPath: "/x/claude"), process: { process }
+        )
+        guard let detailed = runner as? AssistDetailedProvider else {
+            return XCTFail("Claude runner must expose the typed detailed contract")
+        }
+        let events = AssistEventBox()
+        do {
+            _ = try await detailed.runDetailed(
+                prompt: "P", system: "S", model: nil, timeout: 1,
+                onEvent: { events.append($0) }, onRawLine: { _ in }
+            )
+            XCTFail("expected timeout")
+        } catch AssistRunError.timedOut {
+            // Release the lifecycle exit only after the timeout catch has requested an early flush.
+        } catch {
+            return XCTFail("wrong error \(error)")
+        }
+
+        process.allowLateExit()
+        for _ in 0..<300 where !events.events.contains(.processExited(15)) {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let timedOut = try XCTUnwrap(events.events.firstIndex(of: .timedOut))
+        let exited = try XCTUnwrap(events.events.firstIndex(of: .processExited(15)))
+        XCTAssertLessThan(timedOut, exited)
+        XCTAssertEqual(events.events.filter { $0 == .processExited(15) }.count, 1)
     }
 
     /// M6: cancelling the surrounding Task must terminate the CLI (proc.cancel()) and surface as a
@@ -266,4 +616,11 @@ final class EventBox: @unchecked Sendable {
     private var _lines: [String] = []
     func append(_ s: String) { lock.lock(); _lines.append(s); lock.unlock() }
     var lines: [String] { lock.lock(); defer { lock.unlock() }; return _lines }
+}
+
+final class AssistEventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [AssistRunEvent] = []
+    func append(_ event: AssistRunEvent) { lock.lock(); _events.append(event); lock.unlock() }
+    var events: [AssistRunEvent] { lock.lock(); defer { lock.unlock() }; return _events }
 }

@@ -28,6 +28,7 @@ struct RemixThumbnailView: NSViewRepresentable {
     var sharedClock: RenderClock? = nil
     var renderSize: RemixRenderSize? = nil
     var inputValues: [String: RemixParameterValue] = [:]
+    var reloadAttempt: Int = 0
     /// Optional: receives one downscaled CGImage frame at first successful compile (tree swatches).
     var onSnapshot: ((CGImage) -> Void)? = nil
     var onPreviewFailure: ((String) -> Void)? = nil
@@ -50,6 +51,7 @@ struct RemixThumbnailView: NSViewRepresentable {
         }
         context.coordinator.applyInputValues(inputValues, to: controller)
         context.coordinator.loadedISF = isf
+        context.coordinator.loadedAttempt = reloadAttempt
         controller.load(isf: isf)
         context.coordinator.observe(controller)
         return controller.nsView
@@ -58,8 +60,14 @@ struct RemixThumbnailView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         let controller = context.coordinator.controller
         context.coordinator.applyInputValues(inputValues, to: controller)
-        if context.coordinator.loadedISF != isf {
+        let sourceChanged = context.coordinator.loadedISF != isf
+        if Self.shouldReloadPreview(
+            previousAttempt: context.coordinator.loadedAttempt,
+            newAttempt: reloadAttempt,
+            sourceChanged: sourceChanged
+        ) {
             context.coordinator.loadedISF = isf
+            context.coordinator.loadedAttempt = reloadAttempt
             context.coordinator.sourceChanged()   // re-arm the compile report for the new source
             controller.load(isf: isf)
         }
@@ -84,6 +92,14 @@ struct RemixThumbnailView: NSViewRepresentable {
         wasAnimating && !animating
     }
 
+    static func shouldReloadPreview(
+        previousAttempt: Int,
+        newAttempt: Int,
+        sourceChanged: Bool
+    ) -> Bool {
+        sourceChanged || previousAttempt != newAttempt
+    }
+
     static func pausePolicy(hasSharedClock: Bool) -> PausePolicy {
         hasSharedClock ? .renderLoopOnly : .renderLoopAndClock
     }
@@ -101,6 +117,7 @@ struct RemixThumbnailView: NSViewRepresentable {
         let onSnapshot: ((CGImage) -> Void)?
         let onPreviewFailure: ((String) -> Void)?
         var loadedISF: String?
+        var loadedAttempt = 0
         var animating = true
         private var bag = Set<AnyCancellable>()
         private(set) var reported = false
