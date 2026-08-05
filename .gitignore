@@ -15,6 +15,7 @@ vendor/_isfmslkit-build/
 vendor/_build.log
 App/ddata-build/
 App/ddata-review/
+App/ddata-*/
 .superpowers/
 .worktrees/
 App/ddata-release/
